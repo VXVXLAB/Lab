@@ -65,3 +65,7 @@ cd fps && python3 -m http.server 8000   # then open http://localhost:8000
 ## cuoi/: Nói Dối Như Cuội, game ức chế nhỏ
 
 Game đi cảnh 2D chạy trên trình duyệt, mở `cuoi/index.html` là chơi. Xem [cuoi/README.md](cuoi/README.md).
+
+## doi/: Cổng Chỉ Vừa Một Đứa, game ức chế hai người
+
+Hai người chung một bàn phím: phải giúp nhau qua màn, nhưng cổng chỉ nhận một đứa. Mở `doi/index.html` là chơi. Xem [doi/README.md](doi/README.md).
