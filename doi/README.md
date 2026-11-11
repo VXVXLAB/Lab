@@ -4,6 +4,9 @@ Game ức chế cho hai người chơi chung một bàn phím, cùng thế giớ
 Bé Sao và Bé Trăng phải giúp nhau mới tới được cổng hội: làm ghế cho nhau trèo, đạp phiến đá giữ cửa, giữ cầu.
 Nhưng Cuội bảo cổng chỉ vừa một đứa, nên thắp xong chiếc đèn đôi là thành cuộc đua. Năm màn, màn cuối có một cú lật.
 
+Game kể một sự tích trọn vẹn qua các trang truyện giữa các màn: vì sao cây đa lên trời, vì sao Cuội phải nói dối,
+Bé Sao và Bé Trăng mỗi đứa cần gì ở cánh cổng, và chuyện kết thúc ra sao. Kịch bản đầy đủ ở [KICH-BAN.md](KICH-BAN.md).
+
 Cuội còn nhớ thói quen của từng người: ô nào một đứa hay đáp chân sẽ mọc một cái bẫy chỉ bật lên với riêng đứa đó
 (vết nứt cùng màu với nhân vật), còn đứa kia đi qua bình thường.
 
