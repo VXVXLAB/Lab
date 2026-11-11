@@ -11,6 +11,9 @@ const MODEL_IDS = [
   'utility_box_01', 'cardboard_box_01', 'trashbag',
 ];
 const SKY_URL = 'assets/sky/kloofendal_48d_partly_cloudy_puresky_2k.hdr';
+// Some hosts only serve web file types. Setting window.BRICKYARD_ASSETS = 'web' before the game loads makes it
+// read the same assets repacked as JSON glTF + WebP and a base64-wrapped HDRI from assets/web/.
+const WEB_PACK = globalThis.BRICKYARD_ASSETS === 'web';
 
 // Radiance above this is treated as "the sun" and moved out of the environment map into a
 // real directional light, so that it can cast shadows instead of lighting shadowed areas.
@@ -28,7 +31,7 @@ export async function loadAll(renderer, onProgress) {
 
   const models = {};
   const modelJobs = MODEL_IDS.map((id) =>
-    gltf.loadAsync(`assets/models/${id}.glb`).then((g) => {
+    gltf.loadAsync(WEB_PACK ? `assets/web/${id}/model.json` : `assets/models/${id}.glb`).then((g) => {
       g.scene.traverse((o) => {
         if (!o.isMesh) return;
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
@@ -52,7 +55,14 @@ export async function loadAll(renderer, onProgress) {
       tick();
     }));
 
-  const skyJob = new HDRLoader().setDataType(THREE.FloatType).loadAsync(SKY_URL).then((t) => tick(t));
+  const hdrLoader = new HDRLoader().setDataType(THREE.FloatType);
+  const skyJob = (WEB_PACK
+    ? fetch('assets/web/sky.json').then((r) => r.json()).then((j) => {
+      const bytes = Uint8Array.from(atob(j.hdr), (c) => c.charCodeAt(0));
+      const d = hdrLoader.parse(bytes.buffer);
+      return { image: { width: d.width, height: d.height, data: d.data }, dispose() {} };
+    })
+    : hdrLoader.loadAsync(SKY_URL)).then((t) => tick(t));
 
   const [hdr] = await Promise.all([skyJob, ...modelJobs, ...texJobs]);
   const sky = processSky(renderer, hdr);
