@@ -61,3 +61,7 @@ A tiny first-person shooter (three.js, photoscanned CC0 assets, no build step). 
 ```bash
 cd fps && python3 -m http.server 8000   # then open http://localhost:8000
 ```
+
+## cuoi/: Nói Dối Như Cuội, game ức chế nhỏ
+
+Game đi cảnh 2D chạy trên trình duyệt, mở `cuoi/index.html` là chơi. Xem [cuoi/README.md](cuoi/README.md).
