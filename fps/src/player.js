@@ -106,6 +106,7 @@ export class Player {
     }
     const len = Math.hypot(ix, iz) || 1;
     ix /= len; iz /= len;
+    if (this.invert) { ix = -ix; iz = -iz; }
     this.sprinting = !this.dead && k.has('ShiftLeft') && iz < 0 && !this.ads && this.crouch < 0.3;
     const speed = this.crouch > 0.5 ? CROUCH : this.ads ? ADS : this.sprinting ? SPRINT : WALK;
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);

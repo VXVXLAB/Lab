@@ -25,6 +25,12 @@ Opening `index.html` straight from disk does not work, because browsers block ES
   recommended cover is a propane tank, the extraction door keeps moving. Dying costs two seconds. The last order is
   the true one, and by then you will not want to follow it. The mode lives in `src/rage.js`.
 
+- `cuoi.html` is NÓI DỐI NHƯ CUỘI 3D, the first-person version of the 2D game in `../cuoi/`. Same yard on a
+  mid-autumn night: moonlit sky, strings of glowing paper lanterns reflected in the wet ground, and a star lantern in
+  your hand instead of a pistol. Cuội gives directions in Vietnamese and lies: a firecracker tripwire on the "straight"
+  path, a gift that explodes, lanterns that fall where you are about to be, reversed movement under a red moon. The
+  last instruction (stand still in the moonlight) is true. The mode lives in `src/cuoi.js`.
+
 ## Controls
 
 | Input | Action |
@@ -74,6 +80,7 @@ src/player.js     first-person controller and collision
 src/weapon.js     pistol view-model, firing, recoil, reload
 src/enemies.js    drones and their projectiles
 src/rage.js       QUALIFICATION DAY: the lying-radio rage mode
+src/cuoi.js       NÓI DỐI NHƯ CUỘI 3D: the mid-autumn night mode
 src/fx.js         pooled particles, decals, tracers, debris
 src/audio.js      synthesised sound
 vendor/three      three.js r187 (module build and the add-ons used)
@@ -86,7 +93,7 @@ assets/           models (GLB, meshopt + WebP), ground textures, HDRI
   `service_pistol`, `modular_factory_facade`, `modular_chainlink_fence`, `concrete_road_barrier`, `covered_car`,
   `Barrel_01`, `barrel_03`, `propane_tank`, `wooden_military_crate`, `old_tyre`, `portable_generator`, `ammo_box`,
   `metal_trash_can`, `utility_box_01`, `cardboard_box_01`, `trashbag`, `street_lamp_01`, the `asphalt_02` texture and the
-  `kloofendal_48d_partly_cloudy_puresky` HDRI. They were repacked to GLB with meshopt compression and WebP textures,
+  `kloofendal_48d_partly_cloudy_puresky` and `qwantani_moon_noon_puresky` HDRIs. They were repacked to GLB with meshopt compression and WebP textures,
   and a few dense meshes were decimated.
 - [three.js](https://threejs.org) is MIT licensed; see `vendor/three/LICENSE`.
 - The drones, the gloved hand, all effects and all sounds are generated in code.

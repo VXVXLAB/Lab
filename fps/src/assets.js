@@ -9,14 +9,16 @@ const MODEL_IDS = [
   'propane_tank', 'old_tyre', 'portable_generator', 'ammo_box', 'metal_trash_can',
   'utility_box_01', 'cardboard_box_01', 'trashbag',
 ];
-const SKY_URL = 'assets/sky/kloofendal_48d_partly_cloudy_puresky_2k.hdr';
+const NIGHT = globalThis.BRICKYARD_MODE === 'cuoi' || new URLSearchParams(location.search).get('mode') === 'cuoi';
+const SKY_NAME = NIGHT ? 'qwantani_moon_noon_puresky' : 'kloofendal_48d_partly_cloudy_puresky';
+const SKY_URL = `assets/sky/${SKY_NAME}_2k.hdr`;
 // Some hosts only serve web file types. Setting window.BRICKYARD_ASSETS = 'web' before the game loads makes it
 // read the same assets repacked as JSON glTF + WebP and a base64-wrapped HDRI from assets/web/.
 const WEB_PACK = globalThis.BRICKYARD_ASSETS === 'web';
 
 // Radiance above this is treated as "the sun" and moved out of the environment map into a
 // real directional light, so that it can cast shadows instead of lighting shadowed areas.
-const SUN_CLAMP = 24;
+const SUN_CLAMP_MAX = 24;
 const BACKGROUND_CLAMP = 900;
 
 export async function loadAll(renderer, onProgress) {
@@ -62,7 +64,7 @@ export async function loadAll(renderer, onProgress) {
 
   const hdrLoader = new HDRLoader().setDataType(THREE.FloatType);
   const skyJob = (WEB_PACK
-    ? fetch('assets/web/sky.json').then((r) => r.json()).then((j) => {
+    ? fetch(NIGHT ? 'assets/web/sky_night.json' : 'assets/web/sky.json').then((r) => r.json()).then((j) => {
       const bytes = Uint8Array.from(atob(j.hdr), (c) => c.charCodeAt(0));
       const d = hdrLoader.parse(bytes.buffer);
       return { image: { width: d.width, height: d.height, data: d.data }, dispose() {} };
@@ -103,6 +105,10 @@ function processSky(renderer, hdr) {
     return out.set(Math.cos(phi) * Math.cos(lat), Math.sin(lat), Math.sin(phi) * Math.cos(lat));
   };
 
+  // The brightest body (sun or moon) is whatever stands far above the rest of the sky.
+  let peak = 0;
+  for (let i = 0; i < w * h; i++) peak = Math.max(peak, lum(i * stride));
+  const SUN_CLAMP = Math.min(SUN_CLAMP_MAX, peak * 0.2);
   const env = new Uint16Array(w * h * 4);
   const bg = new Uint16Array(w * h * 4);
   const toHalf = THREE.DataUtils.toHalfFloat;

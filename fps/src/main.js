@@ -9,11 +9,14 @@ import { Player } from './player.js';
 import { Weapon } from './weapon.js';
 import { Enemies } from './enemies.js';
 import { createRage } from './rage.js';
+import { createCuoi } from './cuoi.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const WAVES = [2, 3, 4];
-const RAGE = globalThis.BRICKYARD_MODE === 'rage' || params.get('mode') === 'rage';
+const MODE = globalThis.BRICKYARD_MODE || params.get('mode') || '';
+const RAGE = MODE === 'rage', CUOI = MODE === 'cuoi';
+const TXT = CUOI ? { time: 'thời gian', again: 'BẤM ĐỂ CHƠI LẠI', paused: 'TẠM DỪNG · BẤM ĐỂ CHƠI TIẾP' } : { time: 'time', again: 'CLICK TO REDEPLOY', paused: 'PAUSED · CLICK TO RESUME' };
 const SUN_AZIMUTH = THREE.MathUtils.degToRad(-28); // where the sun sits, measured from +z towards +x
 const UP = new THREE.Vector3(0, 1, 0);
 const V = new THREE.Vector3(), V2 = new THREE.Vector3();
@@ -45,9 +48,10 @@ async function boot() {
   scene.backgroundRotation.set(0, turn, 0);
   scene.environmentRotation.set(0, turn, 0);
   scene.environmentIntensity = 1;
-  scene.fog = new THREE.FogExp2(0x9fb4c9, 0.0045);
+  scene.fog = CUOI ? new THREE.FogExp2(0x070b1c, 0.014) : new THREE.FogExp2(0x9fb4c9, 0.0045);
 
-  const sun = new THREE.DirectionalLight(sky.sunColor, sky.sunIrradiance);
+  // On the mid-autumn night the directional light is the moon: cool, and deliberately brighter than the real thing.
+  const sun = CUOI ? new THREE.DirectionalLight(0x9db6ff, 0.42) : new THREE.DirectionalLight(sky.sunColor, sky.sunIrradiance);
   sun.position.copy(sunDir).multiplyScalar(70);
   sun.castShadow = true;
   const sc = sun.shadow.camera;
@@ -56,8 +60,8 @@ async function boot() {
   scene.add(sun, sun.target);
   game.sun = sun;
   // Cheap stand-ins for bounced light: warm fill from the sunlit ground and from the lit north facade.
-  const groundBounce = new THREE.HemisphereLight(0x000000, 0x8a6f5c, sky.sunIrradiance * 0.11);
-  const wallBounce = new THREE.DirectionalLight(0xc98a6a, sky.sunIrradiance * 0.07);
+  const groundBounce = new THREE.HemisphereLight(CUOI ? 0x1b2a55 : 0x000000, CUOI ? 0x3a2414 : 0x8a6f5c, CUOI ? 0.1 : sky.sunIrradiance * 0.11);
+  const wallBounce = new THREE.DirectionalLight(0xc98a6a, CUOI ? 0 : sky.sunIrradiance * 0.07);
   wallBounce.position.set(-0.2, 0.25, -1);
   scene.add(groundBounce, wallBounce);
 
@@ -109,7 +113,8 @@ async function boot() {
     view.setQuality(q);
   };
   applyQuality();
-  view.renderer.toneMappingExposure = Number(params.get('exp')) || 0.74;
+  view.renderer.toneMappingExposure = Number(params.get('exp')) || (CUOI ? 0.85 : 0.74);
+  if (CUOI) { scene.environmentIntensity = Number(params.get('env')) || 0.6; scene.backgroundIntensity = Number(params.get('bg')) || 0.9; }
 
   // ---------------------------------------------------------------- game rules
   const stats = { shots: 0, hits: 0, kills: 0, time: 0 };
@@ -181,14 +186,14 @@ async function boot() {
       const acc = stats.shots ? Math.round(100 * stats.hits / stats.shots) : 0;
       $('result').classList.remove('hide');
       $('result').innerHTML = `<b style="color:var(--hud);font-size:22px;letter-spacing:.3em;font-weight:300">${custom ? custom.title : won ? 'YARD SECURED' : 'KILLED IN ACTION'}</b><br>` +
-        `${custom ? custom.line : `drones destroyed ${stats.kills} &nbsp;·&nbsp; accuracy ${acc}%`} &nbsp;·&nbsp; time ${stats.time.toFixed(1)}s<br><br>`;
+        `${custom ? custom.line : `drones destroyed ${stats.kills} &nbsp;·&nbsp; accuracy ${acc}%`} &nbsp;·&nbsp; ${TXT.time} ${stats.time.toFixed(1)}s<br><br>`;
       $('keys').classList.add('hide');
-      $('cta').textContent = 'CLICK TO REDEPLOY';
+      $('cta').textContent = TXT.again;
       $('overlay').classList.remove('hidden');
       $('hud').classList.remove('on');
       if (document.pointerLockElement) document.exitPointerLock();
     }, won ? 2600 : 1900);
-    if (custom) banner(custom.title, '', 4);
+    if (custom && !CUOI) banner(custom.title, '', 4);
     else if (won) { banner('YARD SECURED', 'ALL HOSTILES DOWN', 4); audio.announce(true); } else audio.announce(false);
   }
 
@@ -251,7 +256,7 @@ async function boot() {
   document.addEventListener('pointerlockchange', () => {
     if (document.pointerLockElement !== canvas && game.state === 'playing' && !noLock) {
       game.state = 'paused'; firing = aiming = false; player.keys.clear();
-      $('cta').textContent = 'PAUSED · CLICK TO RESUME';
+      $('cta').textContent = TXT.paused;
       $('overlay').classList.remove('hidden');
     }
   });
@@ -340,7 +345,7 @@ async function boot() {
       // is the player's head in direct sunlight? (drives the view-model's key light)
       sunCheck -= dt;
       if (sunCheck <= 0) { sunCheck = 0.08; inSun = !rayBoxes(player.eye, sunDir, 80, level.occluders); }
-      weapon.update(dt, playing && firing, playing && aiming, inSun);
+      weapon.update(dt, playing && firing, playing && aiming && !game.noAim, inSun);
       enemies.update(dt, time);
       fx.update(dt);
       camera.fov = THREE.MathUtils.damp(camera.fov, 72 - weapon.adsT * 16 + (player.sprinting ? 4 : 0), 12, dt);
@@ -378,6 +383,11 @@ async function boot() {
   }
 
   // ---------------------------------------------------------------- go
+  if (CUOI) {
+    rage = createCuoi({ game, scene, level, player, weapon, enemies, fx, audio, banner, $, sun, sunDir,
+      finish: (title, line) => endGame(true, { title, line }), fade: (v) => { view.lens.uFade.value = v; }, lens: () => view.lens });
+    game.rage = rage;
+  }
   if (RAGE) {
     rage = createRage({ game, level, player, weapon, enemies, fx, audio, banner, $,
       finish: (title, line) => endGame(true, { title, line }), fade: (v) => { view.lens.uFade.value = v; } });
