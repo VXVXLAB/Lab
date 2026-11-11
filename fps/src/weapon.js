@@ -102,6 +102,7 @@ export class Weapon {
     const { player, audio } = this.game;
     if (this.cooldown > 0 || this.reloading > 0 || this.raise > 0.2 || player.dead) return;
     if (this.sprintT > 0.5) return;
+    if (this.game.fireGate && !this.game.fireGate()) { this.cooldown = 0.3; return; }
     if (this.ammo <= 0) { audio.dryFire(); this.cooldown = 0.2; if (this.reserve > 0) this.startReload(); return; }
     this.ammo--;
     this.cooldown = FIRE_INTERVAL;

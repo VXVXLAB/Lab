@@ -8,10 +8,12 @@ import { GameAudio } from './audio.js';
 import { Player } from './player.js';
 import { Weapon } from './weapon.js';
 import { Enemies } from './enemies.js';
+import { createRage } from './rage.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const WAVES = [2, 3, 4];
+const RAGE = globalThis.BRICKYARD_MODE === 'rage' || params.get('mode') === 'rage';
 const SUN_AZIMUTH = THREE.MathUtils.degToRad(-28); // where the sun sits, measured from +z towards +x
 const UP = new THREE.Vector3(0, 1, 0);
 const V = new THREE.Vector3(), V2 = new THREE.Vector3();
@@ -114,6 +116,7 @@ async function boot() {
   let wave = 0, waveTimer = 0, waveActive = false;
   let hitFlash = 0, hitmarkerT = 0, dmgDirT = 0, dmgAngle = 0, shake = 0, bannerT = 0;
   let inSun = true, sunCheck = 0, sunVis = 0, sunSeen = false;
+  let rage = null;
 
   function banner(title, sub, seconds = 2.6) {
     $('bannertitle').textContent = title; $('bannersub').textContent = sub;
@@ -127,6 +130,7 @@ async function boot() {
     Object.assign(stats, { shots: 0, hits: 0, kills: 0, time: 0 });
     wave = 0; waveTimer = 2.2; waveActive = false; hitFlash = 0;
     $('objtext').textContent = 'SECURE THE YARD';
+    if (rage) rage.restart(true);
   }
 
   game.onHit = (kill, crit) => {
@@ -144,12 +148,12 @@ async function boot() {
     dmgDirT = 1.2;
     camera.getWorldDirection(V);
     dmgAngle = Math.atan2(-dir.x, -dir.z) - Math.atan2(V.x, V.z);
-    if (player.dead) endGame(false);
+    if (player.dead) { if (rage) rage.onDeath(); else endGame(false); }
   };
   // radial damage: player, drones, and chained propane tanks
   game.blast = (pos, radius, dmg, source) => {
     const d = pos.distanceTo(V.copy(player.pos).setY(player.pos.y + 0.9));
-    if (d < radius) game.onPlayerHit(dmg * (1 - d / radius), V2.copy(player.pos).sub(pos).setY(0).normalize());
+    if (d < radius) game.onPlayerHit(dmg * (game.blastScale || 1) * (1 - d / radius), V2.copy(player.pos).sub(pos).setY(0).normalize());
     if (d < radius * 3) shake = Math.min(1.2, shake + 0.9 * (1 - d / (radius * 3)));
     for (const dr of [...enemies.drones]) {
       if (dr === source || dr.state === 'dead') continue;
@@ -171,20 +175,21 @@ async function boot() {
     game.blast(pos, 5.2, 70, null);
   };
 
-  function endGame(won) {
+  function endGame(won, custom) {
     game.state = 'over';
     setTimeout(() => {
       const acc = stats.shots ? Math.round(100 * stats.hits / stats.shots) : 0;
       $('result').classList.remove('hide');
-      $('result').innerHTML = `<b style="color:var(--hud);font-size:22px;letter-spacing:.3em;font-weight:300">${won ? 'YARD SECURED' : 'KILLED IN ACTION'}</b><br>` +
-        `drones destroyed ${stats.kills} &nbsp;·&nbsp; accuracy ${acc}% &nbsp;·&nbsp; time ${stats.time.toFixed(1)}s<br><br>`;
+      $('result').innerHTML = `<b style="color:var(--hud);font-size:22px;letter-spacing:.3em;font-weight:300">${custom ? custom.title : won ? 'YARD SECURED' : 'KILLED IN ACTION'}</b><br>` +
+        `${custom ? custom.line : `drones destroyed ${stats.kills} &nbsp;·&nbsp; accuracy ${acc}%`} &nbsp;·&nbsp; time ${stats.time.toFixed(1)}s<br><br>`;
       $('keys').classList.add('hide');
       $('cta').textContent = 'CLICK TO REDEPLOY';
       $('overlay').classList.remove('hidden');
       $('hud').classList.remove('on');
       if (document.pointerLockElement) document.exitPointerLock();
     }, won ? 2600 : 1900);
-    if (won) { banner('YARD SECURED', 'ALL HOSTILES DOWN', 4); audio.announce(true); } else audio.announce(false);
+    if (custom) banner(custom.title, '', 4);
+    else if (won) { banner('YARD SECURED', 'ALL HOSTILES DOWN', 4); audio.announce(true); } else audio.announce(false);
   }
 
   function updateRules(dt) {
@@ -330,7 +335,7 @@ async function boot() {
     const playing = game.state === 'playing';
 
     if (playing || game.state === 'over') {
-      if (playing) updateRules(dt);
+      if (playing) { stats.time += rage ? dt : 0; if (rage) rage.update(dt); else updateRules(dt); }
       player.update(dt, playing);
       // is the player's head in direct sunlight? (drives the view-model's key light)
       sunCheck -= dt;
@@ -373,6 +378,11 @@ async function boot() {
   }
 
   // ---------------------------------------------------------------- go
+  if (RAGE) {
+    rage = createRage({ game, level, player, weapon, enemies, fx, audio, banner, $,
+      finish: (title, line) => endGame(true, { title, line }), fade: (v) => { view.lens.uFade.value = v; } });
+    game.rage = rage;
+  }
   resetGame();
   game.state = 'menu';
   $('loading').classList.add('hide'); $('menu').classList.remove('hide');

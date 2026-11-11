@@ -53,7 +53,7 @@
   #banner.on { opacity: 1; }
   #banner b { display: block; font-size: 44px; font-weight: 200; letter-spacing: .5em; margin-right: -.5em; }
   #banner span { font-size: 13px; letter-spacing: .3em; color: var(--dim); }
-  #prompt { position: absolute; left: 0; right: 0; bottom: 22%; text-align: center; font-size: 13px; letter-spacing: .24em; opacity: 0; transition: opacity .2s; }
+  #prompt { position: absolute; left: 0; right: 0; bottom: 29%; text-align: center; font-size: 13px; letter-spacing: .24em; opacity: 0; transition: opacity .2s; }
   #prompt.on { opacity: 1; }
 
   #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
@@ -71,6 +71,12 @@
   #loadbar b { display: block; height: 100%; width: 0; background: var(--hud); transition: width .2s; }
   #loadtext { font-size: 11px; letter-spacing: .28em; color: var(--dim); }
   #result { font-size: 13px; letter-spacing: .12em; color: var(--dim); line-height: 1.9; }
+  #radio { position: absolute; left: 50%; bottom: 5%; transform: translateX(-50%); width: min(70%, 760px); text-align: center; opacity: 0; transition: opacity .25s; }
+  #radio.on { opacity: 1; }
+  #radio span { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .34em; padding: 2px 10px 2px 13px; background: var(--hud); color: #0a0c0e; text-shadow: none; margin-bottom: 8px; }
+  #radio.red span { background: var(--warn); color: #fff; }
+  #radio p { margin: 0; font-size: clamp(15px, 1.7vw, 22px); line-height: 1.4; text-shadow: 0 2px 8px rgba(0,0,0,.95), 0 0 2px #000; text-wrap: balance; min-height: 1.4em; }
+  #retries { position: absolute; top: 96px; left: 40px; font-size: 11px; letter-spacing: .22em; color: var(--dim); }
   .hide { display: none !important; }
 </style>
 <script type="importmap">
@@ -85,6 +91,8 @@
   <div id="stats" class="mono"></div>
   <div id="banner"><b id="bannertitle"></b><span id="bannersub"></span></div>
   <div id="prompt"></div>
+  <div id="retries"></div>
+  <div id="radio"><span>CONTROL</span><p id="radiotext"></p></div>
   <div id="dmgdir"></div>
   <div id="crosshair"><i></i><i></i><i></i><i></i><i></i></div>
   <div id="hitmarker"></div>

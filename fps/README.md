@@ -17,6 +17,14 @@ python3 -m http.server 8000
 
 Opening `index.html` straight from disk does not work, because browsers block ES modules and asset fetches on `file://`.
 
+## Two modes
+
+- `index.html` is BRICKYARD: three waves of sentry drones, played straight.
+- `rage.html` is QUALIFICATION DAY, a rage-game take on the same yard. "Control" gives you orders over the radio and
+  nearly all of them are lies: the ammo box is a bomb, the target drone dodges only when you aim properly, the
+  recommended cover is a propane tank, the extraction door keeps moving. Dying costs two seconds. The last order is
+  the true one, and by then you will not want to follow it. The mode lives in `src/rage.js`.
+
 ## Controls
 
 | Input | Action |
@@ -65,6 +73,7 @@ src/level.js      facade kit assembly, ground shader, props, collision boxes
 src/player.js     first-person controller and collision
 src/weapon.js     pistol view-model, firing, recoil, reload
 src/enemies.js    drones and their projectiles
+src/rage.js       QUALIFICATION DAY: the lying-radio rage mode
 src/fx.js         pooled particles, decals, tracers, debris
 src/audio.js      synthesised sound
 vendor/three      three.js r187 (module build and the add-ons used)

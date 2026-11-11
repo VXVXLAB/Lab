@@ -226,7 +226,8 @@ class Drone {
 
     // --- weapons
     const eyeGlow = this.flicker > 0 ? (Math.random() > 0.5 ? 0.1 : 1) : 1;
-    if (this.state === 'combat' && !player.dead) {
+    if (this.passive) this.charge = Math.max(0, this.charge - dt);
+    if (this.state === 'combat' && !player.dead && !this.passive) {
       this.fireTimer -= dt;
       if (this.burst > 0) {
         this.burstTimer -= dt;
@@ -243,7 +244,8 @@ class Drone {
       }
     }
     const hot = this.charge > 0 ? 1 + (1 - this.charge / 0.5) * 5 : this.burst > 0 ? 6 : 1;
-    this.eyeMat.color.setRGB(6 * hot * eyeGlow, (0.5 + (hot - 1) * 0.5) * eyeGlow, 0.25 * eyeGlow);
+    if (this.friendly) { this.eyeMat.color.setRGB(0.3 * eyeGlow, 3.5 * hot * eyeGlow, 1.0 * eyeGlow); this.glow.material.color.setRGB(0.2, 2.4, 0.7); }
+    else this.eyeMat.color.setRGB(6 * hot * eyeGlow, (0.5 + (hot - 1) * 0.5) * eyeGlow, 0.25 * eyeGlow);
     this.glow.scale.setScalar(0.16 + (hot - 1) * 0.11);
     this.glow.material.opacity = eyeGlow;
     if (this.voice) this.voice.set(this.pos, 0.3 + this.vel.length() / 6, true);
@@ -254,9 +256,13 @@ class Drone {
     this.gimbal.getWorldPosition(V);
     // lead the target a little, with aim error that tightens at short range
     const d = V.distanceTo(player.eye);
-    V2.copy(player.eye); V2.y -= 0.3;
-    V2.addScaledVector(player.vel, d / BOLT_SPEED * 0.55);
-    V2.x += rnd(-1, 1) * 0.06 * d; V2.y += rnd(-1, 1) * 0.06 * d; V2.z += rnd(-1, 1) * 0.06 * d;
+    const forced = this.aimFn && this.aimFn(); // rage mode: the drone may have a better idea than shooting you directly
+    if (forced) V2.copy(forced);
+    else {
+      V2.copy(player.eye); V2.y -= 0.3;
+      V2.addScaledVector(player.vel, d / BOLT_SPEED * 0.55);
+      V2.x += rnd(-1, 1) * 0.06 * d; V2.y += rnd(-1, 1) * 0.06 * d; V2.z += rnd(-1, 1) * 0.06 * d;
+    }
     this.mgr.spawnBolt(V, V2.sub(V).normalize());
     game.audio.droneShot(V);
     game.fx.flash(V, 0xff5522, 14, 0.08, 8);
@@ -293,11 +299,13 @@ export class Enemies {
   }
 
   spawn(n) {
+    const made = [];
     for (let i = 0; i < n; i++) {
       const d = new Drone(this, i);
       this.game.scene.add(d.root);
-      this.drones.push(d);
+      this.drones.push(d); made.push(d);
     }
+    return made;
   }
 
   clear() {
@@ -343,6 +351,8 @@ export class Enemies {
           game.fx.sprite(V2, { size: 0.15, grow: 0.7, life: 0.6, alpha: 0.3, color: DARK });
           if (!hit) game.fx.decal(V2.setY(0), UP, 'scorch', 0.32);
           game.audio.impact(V2, 'concrete');
+          const ex = hit && hit.box.prop && hit.box.prop.userData.explosive;
+          if (ex && ex.alive) game.explode(ex);
           end = true;
         }
       }
