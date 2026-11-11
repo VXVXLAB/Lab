@@ -2,7 +2,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 const MODEL_IDS = [
   'service_pistol', 'modular_factory_facade', 'concrete_road_barrier', 'Barrel_01', 'barrel_03',
@@ -25,13 +24,19 @@ export async function loadAll(renderer, onProgress) {
   let done = 0;
   const tick = (v) => { done++; onProgress(done / total); return v; };
 
-  const gltf = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  const gltf = new GLTFLoader();
+  // The meshopt decoder is WebAssembly; the web pack is stored uncompressed so that it is never needed there.
+  if (!WEB_PACK) gltf.setMeshoptDecoder((await import('three/addons/libs/meshopt_decoder.module.js')).MeshoptDecoder);
+  const loadModel = WEB_PACK
+    ? (id) => fetch(`assets/web/${id}/model.json`).then((r) => { if (!r.ok) throw new Error(`${id}: HTTP ${r.status}`); return r.json(); })
+      .then((j) => gltf.parseAsync(packGlb(j.gltf, j.bin), `assets/web/${id}/`))
+    : (id) => gltf.loadAsync(`assets/models/${id}.glb`);
   const texLoader = new THREE.TextureLoader();
   const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 
   const models = {};
   const modelJobs = MODEL_IDS.map((id) =>
-    gltf.loadAsync(WEB_PACK ? `assets/web/${id}/model.json` : `assets/models/${id}.glb`).then((g) => {
+    loadModel(id).then((g) => {
       g.scene.traverse((o) => {
         if (!o.isMesh) return;
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
@@ -67,6 +72,19 @@ export async function loadAll(renderer, onProgress) {
   const [hdr] = await Promise.all([skyJob, ...modelJobs, ...texJobs]);
   const sky = processSky(renderer, hdr);
   return { models, groundTex, sky };
+}
+
+// Assembles a binary glTF in memory from its JSON and base64 buffer, so nothing has to be fetched from a data: URI.
+function packGlb(json, base64) {
+  const bin = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const text = new TextEncoder().encode(JSON.stringify(json));
+  const jsonLen = Math.ceil(text.length / 4) * 4, binLen = Math.ceil(bin.length / 4) * 4;
+  const out = new Uint8Array(12 + 8 + jsonLen + 8 + binLen).fill(0x20, 20, 20 + jsonLen);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, out.length, true);
+  dv.setUint32(12, jsonLen, true); dv.setUint32(16, 0x4E4F534A, true); out.set(text, 20);
+  dv.setUint32(20 + jsonLen, binLen, true); dv.setUint32(24 + jsonLen, 0x004E4942, true); out.set(bin, 28 + jsonLen);
+  return out.buffer;
 }
 
 // Splits the HDRI into: a background texture, a sun-less environment for image based lighting,
