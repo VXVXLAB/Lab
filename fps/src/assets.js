@@ -27,19 +27,32 @@ export async function loadAll(renderer, onProgress) {
   let done = 0;
   const tick = (v) => { done++; onProgress(done / total); return v; };
 
+  // Assets load three at a time and each one is retried, so a slow or throttled host does not sink the whole load;
+  // a final failure names the asset it happened on.
+  const queue = []; let active = 0;
+  const attempt = async (j) => {
+    let err;
+    for (let i = 0; i < 3; i++) {
+      try { return await j.fn(); } catch (e) { err = e; await new Promise((r) => setTimeout(r, 700 * (i + 1))); }
+    }
+    throw new Error(`${j.label}: ${(err && err.message) || (err && err.type) || err || 'no response'}`);
+  };
+  const pump = () => { while (active < 3 && queue.length) { const j = queue.shift(); active++; attempt(j).then(j.res, j.rej).finally(() => { active--; pump(); }); } };
+  const run = (label, fn) => new Promise((res, rej) => { queue.push({ label, fn, res, rej }); pump(); });
+  const getJson = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
+
   const gltf = new GLTFLoader();
   // The meshopt decoder is WebAssembly; the web pack is stored uncompressed so that it is never needed there.
   if (!WEB_PACK) gltf.setMeshoptDecoder((await import('three/addons/libs/meshopt_decoder.module.js')).MeshoptDecoder);
   const loadModel = WEB_PACK
-    ? (id) => fetch(`assets/web/${id}/model.json`).then((r) => { if (!r.ok) throw new Error(`${id}: HTTP ${r.status}`); return r.json(); })
-      .then((j) => gltf.parseAsync(packGlb(j.gltf, j.bin), `assets/web/${id}/`))
+    ? (id) => getJson(`assets/web/${id}/model.json`).then((j) => gltf.parseAsync(packGlb(j.gltf, j.bin), `assets/web/${id}/`))
     : (id) => gltf.loadAsync(`assets/models/${id}.glb`);
   const texLoader = new THREE.TextureLoader();
   const aniso = Math.min(16, renderer.capabilities.getMaxAnisotropy());
 
   const models = {};
   const modelJobs = MODEL_IDS.map((id) =>
-    loadModel(id).then((g) => {
+    run(`model ${id}`, () => loadModel(id)).then((g) => {
       g.scene.traverse((o) => {
         if (!o.isMesh) return;
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
@@ -55,14 +68,14 @@ export async function loadAll(renderer, onProgress) {
 
   const moonTex = {};
   const moonJobs = !NIGHT ? [] : ['diff', 'nor', 'arm'].map((k) =>
-    texLoader.loadAsync(`assets/textures/moon_01_${k}.webp`).then((t) => {
+    run(`texture moon_01_${k}`, () => texLoader.loadAsync(`assets/textures/moon_01_${k}.webp`)).then((t) => {
       t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso;
       if (k === 'diff') t.colorSpace = THREE.SRGBColorSpace;
       moonTex[k] = t; tick();
     }));
   const groundTex = {};
   const texJobs = ['diff', 'nor', 'arm'].map((k) =>
-    texLoader.loadAsync(`assets/textures/asphalt_02_${k}.webp`).then((t) => {
+    run(`texture asphalt_02_${k}`, () => texLoader.loadAsync(`assets/textures/asphalt_02_${k}.webp`)).then((t) => {
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
       t.anisotropy = aniso;
       if (k === 'diff') t.colorSpace = THREE.SRGBColorSpace;
@@ -71,13 +84,13 @@ export async function loadAll(renderer, onProgress) {
     }));
 
   const hdrLoader = new HDRLoader().setDataType(THREE.FloatType);
-  const skyJob = (WEB_PACK
-    ? fetch(NIGHT ? 'assets/web/sky_night.json' : 'assets/web/sky.json').then((r) => r.json()).then((j) => {
+  const skyJob = run('sky', () => (WEB_PACK
+    ? getJson(NIGHT ? 'assets/web/sky_night.json' : 'assets/web/sky.json').then((j) => {
       const bytes = Uint8Array.from(atob(j.hdr), (c) => c.charCodeAt(0));
       const d = hdrLoader.parse(bytes.buffer);
       return { image: { width: d.width, height: d.height, data: d.data }, dispose() {} };
     })
-    : hdrLoader.loadAsync(SKY_URL)).then((t) => tick(t));
+    : hdrLoader.loadAsync(SKY_URL))).then((t) => tick(t));
 
   const [hdr] = await Promise.all([skyJob, ...modelJobs, ...texJobs]);
   const sky = processSky(renderer, hdr);

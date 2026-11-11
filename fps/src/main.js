@@ -16,7 +16,10 @@ const params = new URLSearchParams(location.search);
 const WAVES = [2, 3, 4];
 const MODE = globalThis.BRICKYARD_MODE || params.get('mode') || '';
 const RAGE = MODE === 'rage', CUOI = MODE === 'cuoi';
-const TXT = CUOI ? { time: 'thời gian', again: 'BẤM ĐỂ CHƠI LẠI', paused: 'TẠM DỪNG · BẤM ĐỂ CHƠI TIẾP' } : { time: 'time', again: 'CLICK TO REDEPLOY', paused: 'PAUSED · CLICK TO RESUME' };
+const BUILD = '7';
+const TXT = CUOI
+  ? { time: 'thời gian', again: 'BẤM ĐỂ CHƠI LẠI', paused: 'TẠM DỪNG · BẤM ĐỂ CHƠI TIẾP', failed: 'KHÔNG TẢI ĐƯỢC:', nogl: 'Trình duyệt hoặc thiết bị này không bật được đồ hoạ 3D (WebGL 2). Hãy thử Chrome hoặc Edge trên máy tính, và bật tăng tốc phần cứng trong cài đặt trình duyệt.' }
+  : { time: 'time', again: 'CLICK TO REDEPLOY', paused: 'PAUSED · CLICK TO RESUME', failed: 'FAILED TO LOAD:', nogl: 'This browser or device could not start 3D graphics (WebGL 2). Try Chrome or Edge on a desktop, with hardware acceleration enabled.' };
 const SUN_AZIMUTH = THREE.MathUtils.degToRad(-28); // where the sun sits, measured from +z towards +x
 const UP = new THREE.Vector3(0, 1, 0);
 const V = new THREE.Vector3(), V2 = new THREE.Vector3();
@@ -27,14 +30,22 @@ const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.08, 4
 const audio = new GameAudio();
 const game = { scene, camera, audio, state: 'loading' };
 
-boot().catch((e) => {
+// Anything that goes wrong before the menu appears is shown on the loading screen, with the cause.
+function showFailure(e) {
+  if (game.state !== 'loading') return;
   console.error(e);
-  $('loadtext').textContent = 'FAILED TO LOAD: ' + (e.message || e);
-});
+  const msg = (e && (e.message || e.reason && (e.reason.message || e.reason))) || String(e);
+  $('loadtext').style.cssText = 'letter-spacing:.04em;line-height:1.6;max-width:36em;margin:0 auto;user-select:text;-webkit-user-select:text';
+  $('loadtext').textContent = `${TXT.failed} ${msg}  [build ${BUILD}]`;
+}
+addEventListener('error', (e) => showFailure(e.error || e.message));
+addEventListener('unhandledrejection', (e) => showFailure(e.reason));
+boot().catch(showFailure);
 
 async function boot() {
   const weaponScene = new THREE.Scene();
   const weaponCamera = new THREE.PerspectiveCamera(50, 1, 0.01, 10);
+  if (!document.createElement('canvas').getContext('webgl2')) throw new Error(TXT.nogl);
   const view = game.view = createRenderer(canvas, scene, camera, weaponScene, weaponCamera);
   const assets = await loadAll(view.renderer, (p) => { $('loadbar').firstElementChild.style.width = `${Math.round(p * 100)}%`; });
 
