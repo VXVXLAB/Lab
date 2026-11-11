@@ -12,7 +12,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 export const QUALITY = {
   low: { label: 'LOW', maxDpr: 1, pixelRatio: 0.75, msaa: 0, ao: false, shadow: 2048, reflection: 0 },
   medium: { label: 'MEDIUM', maxDpr: 1, pixelRatio: 1, msaa: 4, ao: true, aoSamples: 8, shadow: 2048, reflection: 0.5 },
-  high: { label: 'HIGH', maxDpr: 1.5, pixelRatio: 1, msaa: 4, ao: true, aoSamples: 16, shadow: 4096, reflection: 0.75 },
+  high: { label: 'HIGH', maxDpr: 2, pixelRatio: 1, msaa: 4, ao: true, aoSamples: 16, shadow: 4096, reflection: 1 },
 };
 
 // Draws a second scene (the weapon) on top of the already shaded world with a fresh depth buffer,
@@ -40,10 +40,11 @@ const LensShader = {
     uTime: { value: 0 },
     uTexel: { value: new THREE.Vector2(1 / 1280, 1 / 720) },
     uDamage: { value: 0 },
-    uGrain: { value: 0.035 },
+    uGrain: { value: 0.018 },
     uVignette: { value: 0.32 },
-    uAberration: { value: 0.00035 },
-    uSharpen: { value: 0.28 },
+    uAberration: { value: 0.00012 },
+    uSharpen: { value: 0.55 },
+    uGrade: { value: new THREE.Vector3(1, 1, 0) }, // contrast, saturation, split-toning amount
     uFade: { value: 0 },
     uSun: { value: new THREE.Vector3(0.5, 0.5, 0) }, // screen uv + visibility
     uAspect: { value: 16 / 9 },
@@ -54,6 +55,7 @@ const LensShader = {
   fragmentShader: /* glsl */`
     uniform sampler2D tDiffuse;
     uniform float uTime, uDamage, uGrain, uVignette, uAberration, uSharpen, uFade;
+    uniform vec3 uGrade;
     uniform vec2 uTexel;
     uniform vec3 uSun;
     uniform float uAspect;
@@ -71,7 +73,15 @@ const LensShader = {
       // unsharp mask
       vec3 blur = (texture2D(tDiffuse, vUv + vec2(uTexel.x, 0.)).rgb + texture2D(tDiffuse, vUv - vec2(uTexel.x, 0.)).rgb
                  + texture2D(tDiffuse, vUv + vec2(0., uTexel.y)).rgb + texture2D(tDiffuse, vUv - vec2(0., uTexel.y)).rgb) * 0.25;
-      col += (col - blur) * uSharpen;
+      // unsharp mask on luminance only, clamped so bright lanterns do not ring
+      float sharp = clamp(dot(col - blur, vec3(0.3, 0.6, 0.1)), -0.12, 0.12);
+      col += sharp * uSharpen * 1.6;
+      // grade: contrast, saturation, cool shadows / warm highlights
+      float gl = dot(col, vec3(0.3, 0.6, 0.1));
+      col = mix(vec3(gl), col, uGrade.y);
+      col = (col - 0.5) * uGrade.x + 0.5;
+      col += uGrade.z * (vec3(-0.016, 0.0, 0.03) * (1.0 - gl) + vec3(0.028, 0.01, -0.02) * gl);
+      col = max(col, 0.0);
       // vignette
       float vig = smoothstep(0.95, 0.25, length(c * vec2(1.0, 0.82)) );
       col *= mix(1.0 - uVignette, 1.0, vig);
@@ -145,12 +155,12 @@ export function createRenderer(canvas, scene, camera, weaponScene, weaponCamera)
     }
 
     composer.addPass(new OverlayPass(weaponScene, weaponCamera));
-    bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.22, 0.75, 1.15);
+    bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.2, 0.5, 1.15);
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
     const oldLens = lens;
     lens = new ShaderPass(LensShader);
-    if (oldLens) for (const k of ['uDamage', 'uFade']) lens.uniforms[k].value = oldLens.uniforms[k].value;
+    if (oldLens) for (const k of ['uDamage', 'uFade', 'uGrade']) lens.uniforms[k].value = oldLens.uniforms[k].value;
     lens.uniforms.uAspect.value = size.x / size.y;
     lens.uniforms.uTexel.value.set(1 / size.x, 1 / size.y);
     composer.addPass(lens);

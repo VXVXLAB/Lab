@@ -155,7 +155,7 @@ const FACADES = [
   },
 ];
 
-function buildFacades(kitScene, scene, shootables, colliders, occluders, facades = FACADES) {
+function buildFacades(kitScene, scene, shootables, colliders, occluders, facades = FACADES, windowSlots = []) {
   const kit = new FacadeKit(kitScene);
   const group = new THREE.Group();
   group.name = 'facades';
@@ -173,6 +173,7 @@ function buildFacades(kitScene, scene, shootables, colliders, occluders, facades
         kit.add(name.replace(/^wall_/, ''), frame, x, floor * 3, name);
         if (floor === 0 && name === STD[0]) kit.add('base_standard_standard_01', frame, x, 0);
         for (let i = 0; i < w; i += 3) {
+          if (floor > 0) windowSlots.push({ pos: new THREE.Vector3(x + i + 1.5, floor * 3 + 1.55, -0.44).applyMatrix4(frame), ry: f.ry });
           if (floor > 0) kit.add('cornice03_standard_standard_01', frame, x + i, floor * 3);
         }
         x += w;
@@ -499,7 +500,7 @@ export function buildLevel(assets, scene) {
   const { updateReflection, ground } = buildGround(assets.groundTex, scene, shootables);
   let groups = [];
   const level = {
-    colliders, shootables, explosives, pickups, occluders, map: '', floorY: 0,
+    colliders, shootables, explosives, pickups, occluders, windowSlots: [], map: '', floorY: 0,
     spawn: { pos: new THREE.Vector3(), yaw: 0 },
     updateReflection(renderer, scn, cam, scale) { updateReflection(renderer, scn, cam, level.floorY === 0 ? scale : 0); },
     // Tears down the current map and builds another one in place; the arrays other systems hold stay the same objects.
@@ -507,12 +508,13 @@ export function buildLevel(assets, scene) {
       if (level.map === id) return;
       const def = MAPS[id];
       for (const g of groups) { g.removeFromParent(); g.traverse((o) => { if (o.isMesh && o.userData.ownGeometry) o.geometry.dispose(); }); }
+      level.windowSlots.length = 0;
       colliders.length = shootables.length = explosives.length = pickups.length = occluders.length = removed.length = 0;
       groups = [];
       ground.visible = !def.noGround; level.floorY = def.noGround ? -1000 : 0;
       if (!def.noGround) shootables.push(ground);
       if (def.facades.length) {
-        const g = buildFacades(assets.models.modular_factory_facade, scene, shootables, colliders, occluders, def.facades);
+        const g = buildFacades(assets.models.modular_factory_facade, scene, shootables, colliders, occluders, def.facades, level.windowSlots);
         g.traverse((o) => { if (o.isMesh) o.userData.ownGeometry = true; });
         groups.push(g);
       }

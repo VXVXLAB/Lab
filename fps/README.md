@@ -94,7 +94,8 @@ assets/           models (GLB, meshopt + WebP), ground textures, HDRI
 - Models, textures and the HDRI are from [Poly Haven](https://polyhaven.com) and are CC0 (public domain):
   `service_pistol`, `modular_factory_facade`, `modular_chainlink_fence`, `concrete_road_barrier`, `covered_car`,
   `Barrel_01`, `barrel_03`, `propane_tank`, `wooden_military_crate`, `old_tyre`, `portable_generator`, `ammo_box`,
-  `metal_trash_can`, `utility_box_01`, `cardboard_box_01`, `trashbag`, `street_lamp_01`, the `asphalt_02` texture and the
+  `metal_trash_can`, `utility_box_01`, `cardboard_box_01`, `trashbag`, `street_lamp_01`, `moon_rock_01`, `moon_rock_02`,
+  the `asphalt_02` and `moon_01` textures and the
   `kloofendal_48d_partly_cloudy_puresky` and `qwantani_moon_noon_puresky` HDRIs. They were repacked to GLB with meshopt compression and WebP textures,
   and a few dense meshes were decimated.
 - [three.js](https://threejs.org) is MIT licensed; see `vendor/three/LICENSE`.

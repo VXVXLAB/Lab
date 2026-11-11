@@ -22,7 +22,8 @@ const SUN_CLAMP_MAX = 24;
 const BACKGROUND_CLAMP = 900;
 
 export async function loadAll(renderer, onProgress) {
-  const total = MODEL_IDS.length + 4;
+  if (NIGHT) MODEL_IDS.push('moon_rock_01', 'moon_rock_02');
+  const total = MODEL_IDS.length + 4 + (NIGHT ? 3 : 0);
   let done = 0;
   const tick = (v) => { done++; onProgress(done / total); return v; };
 
@@ -34,7 +35,7 @@ export async function loadAll(renderer, onProgress) {
       .then((j) => gltf.parseAsync(packGlb(j.gltf, j.bin), `assets/web/${id}/`))
     : (id) => gltf.loadAsync(`assets/models/${id}.glb`);
   const texLoader = new THREE.TextureLoader();
-  const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  const aniso = Math.min(16, renderer.capabilities.getMaxAnisotropy());
 
   const models = {};
   const modelJobs = MODEL_IDS.map((id) =>
@@ -52,6 +53,13 @@ export async function loadAll(renderer, onProgress) {
       tick();
     }));
 
+  const moonTex = {};
+  const moonJobs = !NIGHT ? [] : ['diff', 'nor', 'arm'].map((k) =>
+    texLoader.loadAsync(`assets/textures/moon_01_${k}.webp`).then((t) => {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso;
+      if (k === 'diff') t.colorSpace = THREE.SRGBColorSpace;
+      moonTex[k] = t; tick();
+    }));
   const groundTex = {};
   const texJobs = ['diff', 'nor', 'arm'].map((k) =>
     texLoader.loadAsync(`assets/textures/asphalt_02_${k}.webp`).then((t) => {
@@ -73,7 +81,8 @@ export async function loadAll(renderer, onProgress) {
 
   const [hdr] = await Promise.all([skyJob, ...modelJobs, ...texJobs]);
   const sky = processSky(renderer, hdr);
-  return { models, groundTex, sky };
+  await Promise.all(moonJobs);
+  return { models, groundTex, moonTex, sky };
 }
 
 // Assembles a binary glTF in memory from its JSON and base64 buffer, so nothing has to be fetched from a data: URI.

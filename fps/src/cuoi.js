@@ -21,7 +21,7 @@ const TAUNTS = [
 const COLORS = [[1.5, 0.16, 0.07], [1.35, 0.55, 0.07], [1.35, 0.17, 0.34], [1.25, 0.85, 0.14]];
 
 export function createCuoi(ctx) {
-  const { game, scene, level, player, weapon, fx, audio, banner, finish, $, sun } = ctx;
+  const { assets, game, scene, level, player, weapon, fx, audio, banner, finish, $, sun } = ctx;
   const R = { stage: 0, deaths: 0, lies: 0, said: new Set(), t: 0, respawn: 0 };
   let st = {};
   const known = {};
@@ -47,10 +47,19 @@ export function createCuoi(ctx) {
   }
 
   // ---------------------------------------------------------------- lanterns
-  const paper = COLORS.map((c) => new THREE.MeshStandardMaterial({ color: 0x2a0d08, emissive: new THREE.Color(c[0], c[1], c[2]), emissiveIntensity: 1, roughness: 0.8 }));
+  // paper lantern skin: bamboo ribs, darker poles, a hot band where the candle sits
+  const pc = document.createElement('canvas'); pc.width = 256; pc.height = 128;
+  { const g = pc.getContext('2d'); const gr = g.createLinearGradient(0, 0, 0, 128);
+    gr.addColorStop(0, '#3a3a3a'); gr.addColorStop(0.22, '#9a9a9a'); gr.addColorStop(0.55, '#ffffff'); gr.addColorStop(0.8, '#a8a8a8'); gr.addColorStop(1, '#353535');
+    g.fillStyle = gr; g.fillRect(0, 0, 256, 128);
+    for (let y = 10; y < 128; y += 9) { g.fillStyle = 'rgba(0,0,0,0.34)'; g.fillRect(0, y, 256, 1.6); g.fillStyle = 'rgba(255,255,255,0.10)'; g.fillRect(0, y + 2, 256, 1); }
+    for (let x = 0; x < 256; x += 32) { g.fillStyle = 'rgba(0,0,0,0.16)'; g.fillRect(x, 0, 1.5, 128); }
+    for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * 0.07})`; g.fillRect(Math.random() * 256, Math.random() * 128, 2 + Math.random() * 5, 1); } }
+  const paperTex = new THREE.CanvasTexture(pc); paperTex.wrapS = THREE.RepeatWrapping; paperTex.anisotropy = 8;
+  const paper = COLORS.map((c) => new THREE.MeshStandardMaterial({ color: 0x3a120a, emissive: new THREE.Color(c[0], c[1], c[2]).multiplyScalar(1.25), emissiveMap: paperTex, roughness: 0.85 }));
   const gold = new THREE.MeshStandardMaterial({ color: 0xc9a14a, metalness: 0.9, roughness: 0.35 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x0b0b0c, roughness: 0.9 });
-  const bodyGeo = new THREE.SphereGeometry(0.16, 18, 12).scale(1, 1.18, 1);
+  const bodyGeo = new THREE.SphereGeometry(0.16, 32, 20).scale(1, 1.18, 1);
   const capGeo = new THREE.CylinderGeometry(0.075, 0.075, 0.035, 12);
   const tasselGeo = new THREE.CylinderGeometry(0.006, 0.012, 0.16, 6);
   function lantern(ci, s = 1) {
@@ -79,12 +88,30 @@ export function createCuoi(ctx) {
     }
   }
   const light = (x, y, z, c, i) => { const pl = new THREE.PointLight(c, i, 16, 2); pl.position.set(x, y, z); decor.add(pl); };
+  const windowGeo = new THREE.PlaneGeometry(2.5, 2.3);
+  const windowMats = [[1.5, 0.82, 0.3], [1.25, 0.9, 0.5], [1.6, 0.7, 0.22], [0.9, 0.95, 1.1]].map((c, i) => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128; const g = cv.getContext('2d');
+    const gr = g.createRadialGradient(64 + (i - 1.5) * 18, 40, 6, 64, 64, 96); gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.6, '#8f8f8f'); gr.addColorStop(1, '#3c3c3c');
+    g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+    g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(0, 0, 14 + i * 7, 128); g.fillRect(128 - 20 + i * 3, 0, 20, 128);       // curtains
+    g.fillStyle = 'rgba(0,0,0,0.62)'; g.fillRect(20 + i * 16, 92, 44, 36); g.fillRect(78 - i * 9, 104, 30, 24);          // furniture
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(c[0], c[1], c[2]).multiplyScalar(0.8) });
+  });
   let decorMap = '';
   function buildDecor(map) {
     if (decorMap === map) return;
     decorMap = map;
     for (const t of tubes) t.geometry.dispose();
     tubes.length = 0; swing.length = 0; decor.clear();
+    // some upper-floor windows are lit from inside
+    let seed = map.length * 7919;
+    const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    for (const sl of level.windowSlots) {
+      if (rand() > 0.36) continue;
+      const m = new THREE.Mesh(windowGeo, windowMats[Math.floor(rand() * windowMats.length)]);
+      m.position.copy(sl.pos); m.rotation.y = sl.ry; decor.add(m);
+    }
     if (map === 'yard') {
       for (const x of [-10.5, -3.5, 3.5, 10.5]) string(new THREE.Vector3(x, 6.1, -8.9), new THREE.Vector3(x + 1.2, 5.7, 8.9), 1.7, 11);
       string(new THREE.Vector3(-14.9, 6.6, -1.5), new THREE.Vector3(14.9, 6.6, 1.0), 2.1, 15);
@@ -92,7 +119,7 @@ export function createCuoi(ctx) {
     } else if (map === 'alley') {
       for (let x = -22.5, k = 0; x < 22; x += 3.3, k++) string(new THREE.Vector3(x, 5.9 - (k % 2) * 0.5, -2.95), new THREE.Vector3(x + 1.6, 5.5 + (k % 2) * 0.4, 2.95), 0.6, 4);
       string(new THREE.Vector3(-23.8, 7.4, 0.4), new THREE.Vector3(23.8, 7.4, -0.4), 1.2, 22);
-      for (const [x, c] of [[-19, 0xff8a3c], [-9.5, 0xffa24a], [0, 0xff7a3c], [9.5, 0xff9a50], [19, 0xffa24a]]) light(x, 4.2, 0, c, 15);
+      for (const [x, c] of [[-19, 0xff8a3c], [-9.5, 0xffa24a], [0, 0xff7a3c], [9.5, 0xff9a50], [19, 0xffa24a]]) light(x, 4.2, 0, c, 24);
     }
   }
   const MAP_OF = ['yard', 'yard', 'alley', 'alley', 'moon', 'moon'];
@@ -101,12 +128,22 @@ export function createCuoi(ctx) {
   // the star lantern in the player's hand, and the light it throws
   weapon.gun.visible = false;
   const star = new THREE.Group();
-  const shape = new THREE.Shape();
-  for (let i = 0; i < 10; i++) { const a = Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.036 : 0.088; i ? shape.lineTo(Math.cos(a) * r, Math.sin(a) * r) : shape.moveTo(Math.cos(a) * r, Math.sin(a) * r); }
-  const starGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.022, bevelEnabled: false }).translate(0, 0, -0.011);
-  star.add(new THREE.Mesh(starGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(1.25, 0.72, 0.2) })));
-  star.add(new THREE.LineSegments(new THREE.EdgesGeometry(starGeo), new THREE.LineBasicMaterial({ color: new THREE.Color(1.2, 0.12, 0.06) })));
-  const ringM = new THREE.Mesh(new THREE.TorusGeometry(0.094, 0.0035, 6, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.9, 0.1, 0.05) })); star.add(ringM);
+  // a faceted five-point star: paper panels alternate light and shade so it reads as a solid lantern
+  const sp = [], sc = [], ring = [];
+  for (let i = 0; i < 10; i++) { const a = Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.037 : 0.09; ring.push([Math.cos(a) * r, Math.sin(a) * r]); }
+  for (const zf of [0.03, -0.03]) for (let i = 0; i < 10; i++) {
+    const p0 = ring[i], p1 = ring[(i + 1) % 10], k = (i % 2 ? 1 : 0.62) * (zf > 0 ? 1 : 0.8);
+    const tri = zf > 0 ? [[0, 0, zf], [p0[0], p0[1], 0], [p1[0], p1[1], 0]] : [[0, 0, zf], [p1[0], p1[1], 0], [p0[0], p0[1], 0]];
+    for (const v of tri) { sp.push(...v); sc.push(1.45 * k, 0.86 * k, 0.24 * k); }
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3)); starGeo.setAttribute('color', new THREE.Float32BufferAttribute(sc, 3));
+  star.add(new THREE.Mesh(starGeo, new THREE.MeshBasicMaterial({ vertexColors: true })));
+  const fp = []; for (let i = 0; i < 10; i++) { const p0 = ring[i], p1 = ring[(i + 1) % 10]; fp.push(p0[0], p0[1], 0, p1[0], p1[1], 0, 0, 0, 0.03, p0[0], p0[1], 0); }
+  const frameGeo = new THREE.BufferGeometry(); frameGeo.setAttribute('position', new THREE.Float32BufferAttribute(fp, 3));
+  star.add(new THREE.LineSegments(frameGeo, new THREE.LineBasicMaterial({ color: new THREE.Color(1.1, 0.1, 0.05) })));
+  const ringM = new THREE.Mesh(new THREE.TorusGeometry(0.096, 0.003, 6, 48), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.85, 0.09, 0.05) })); star.add(ringM);
+  for (const i of [3, 7]) { const t = new THREE.Mesh(new THREE.CylinderGeometry(0.002, 0.006, 0.07, 5), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.9, 0.1, 0.06) })); t.position.set(ring[i][0], ring[i][1] - 0.04, 0); star.add(t); }
   const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.5, 6), new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.8 }));
   stick.position.set(0.02, -0.33, 0.03); stick.rotation.z = -0.08; stick.rotation.x = -0.12; star.add(stick);
   star.traverse((o) => { o.frustumCulled = false; });
@@ -146,7 +183,7 @@ export function createCuoi(ctx) {
   const gifts = [[6, -0.5, 1, 1.5], [-6.5, -7.4, 3, 1.1], [-11, 1.6, 0, 0.75]].map(([x, z, ci, s]) => { const l = lantern(ci, s); l.position.set(x, 0.24 * s, z); scene.add(l); return l; });
   gifts[2].traverse((o) => { if (o.isSprite) o.visible = false; });   // the honest one does not glow much
   const moonSpot = new THREE.Group();
-  const disc = new THREE.Mesh(new THREE.CircleGeometry(1.25, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.9, 1.0, 1.4), transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(1.25, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.9, 1.0, 1.4), transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending, depthWrite: false }));
   disc.position.y = 0.02;
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.6, 16, 32, 1, true), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.7, 0.8, 1.3), transparent: true, opacity: 0.03, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
   shaft.position.y = 8;
@@ -156,14 +193,46 @@ export function createCuoi(ctx) {
 
   // ---------------------------------------------------------------- the moon map: platforms in the sky
   const sky = new THREE.Group(); sky.visible = false; scene.add(sky);
-  const stone = new THREE.MeshStandardMaterial({ color: 0xb9bfd6, roughness: 0.75, emissive: 0x161c36 });
-  const moonGlass = new THREE.MeshStandardMaterial({ color: 0xfff6d8, roughness: 0.3, emissive: new THREE.Color(1.1, 0.95, 0.6), transparent: true, opacity: 0.92 });
-  const slabGeo = new THREE.BoxGeometry(1, 1, 1);
-  const slab = (x, top, z, w, h, d, mat) => { const m = new THREE.Mesh(slabGeo, mat); m.scale.set(w, h, d); m.position.set(x, top - h / 2, z); m.castShadow = m.receiveShadow = true; sky.add(m); return m; };
-  const box = (m) => ({ min: new THREE.Vector3(m.position.x - m.scale.x / 2, m.position.y - m.scale.y / 2, m.position.z - m.scale.z / 2), max: new THREE.Vector3(m.position.x + m.scale.x / 2, m.position.y + m.scale.y / 2, m.position.z + m.scale.z / 2), moon: true, mesh: m });
+  const mt = assets.moonTex;
+  const stone = new THREE.MeshStandardMaterial({ map: mt.diff, normalMap: mt.nor, roughnessMap: mt.arm, aoMap: mt.arm, color: 0xe6e8f4, normalScale: new THREE.Vector2(1.6, 1.6), emissive: 0x0b0e1c });
+  const moonGlass = new THREE.MeshStandardMaterial({ color: 0xfff6d8, roughness: 0.3, emissive: new THREE.Color(0.5, 0.44, 0.3), transparent: true, opacity: 0.94 });
+  const slabGeo = (w, h, d) => { // box whose texture repeats by real size instead of stretching
+    const g = new THREE.BoxGeometry(w, h, d), uv = g.attributes.uv, dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+    for (let f = 0; f < 6; f++) for (let i = 0; i < 4; i++) uv.setXY(f * 4 + i, uv.getX(f * 4 + i) * dims[f][0] / 3, uv.getY(f * 4 + i) * dims[f][1] / 3);
+    return g;
+  };
+  const slab = (x, top, z, w, h, d, mat) => { const m = new THREE.Mesh(slabGeo(w, h, d), mat); m.userData.size = new THREE.Vector3(w, h, d); m.position.set(x, top - h / 2, z); m.castShadow = m.receiveShadow = true; sky.add(m); return m; };
+  const box = (m) => { const q = m.userData.size; return { min: new THREE.Vector3(m.position.x - q.x / 2, m.position.y - q.y / 2, m.position.z - q.z / 2), max: new THREE.Vector3(m.position.x + q.x / 2, m.position.y + q.y / 2, m.position.z + q.z / 2), moon: true, mesh: m }; };
   const startPad = slab(-0.5, 0, 0, 9, 1, 8, stone), decoyPad = slab(19.6, 0, 0, 3.2, 0.4, 3.2, stone), moonPad = slab(39, 3, 0, 11, 1, 11, stone);
   const fakes = [6.2, 8.8, 11.4, 14, 16.6].map((x) => slab(x, 0, 0, 1.9, 0.3, 1.9, stone));
   const bridge = Array.from({ length: 15 }, (_, i) => { const m = slab(5 + i * 2, 0.2 * i, 0, 2.02, 0.22, 2.6, moonGlass); m.castShadow = false; return m; });
+  // photoscanned moon rocks turn the slabs into floating islands
+  const rockSrc = [assets.models.moon_rock_02, assets.models.moon_rock_01].map((m) => { const r = m.children[0].clone(true); r.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } }); return r; });
+  const rock = (i, x, y, z, sx, sy, sz, ry = 0, flip = false) => { const g = new THREE.Group(); g.add(rockSrc[i].clone(true)); g.position.set(x, y, z); g.scale.set(sx, sy, sz); g.rotation.set(flip ? Math.PI : 0, ry, 0); sky.add(g); return g; };
+  for (const [cx, top, w] of [[-0.5, 0, 9], [39, 3, 11]]) {
+    rock(0, cx, top - 0.9, 0, w * 4.4, 26, w * 4.0, 0.4, true);                       // the hanging underside
+    for (let k = 0; k < 9; k++) { const a = k / 9 * 6.283 + cx, r = w * 0.5 + rnd(-0.3, 0.5); if (Math.abs(Math.sin(a) * r) < 2.4) continue; rock(k % 2, cx + Math.cos(a) * r, top - 0.25, Math.sin(a) * r * 0.92, rnd(5, 11), rnd(5, 12), rnd(5, 11), rnd(0, 6)); }
+  }
+  rock(0, 19.6, -0.35, 0, 13, 9, 13, 1, true);
+  for (let k = 0; k < 14; k++) rock(k % 2, rnd(-60, 110), rnd(-4, 22), (k % 2 ? 1 : -1) * rnd(14, 60), rnd(8, 30), rnd(8, 30), rnd(8, 30), rnd(0, 6), k % 3 === 0);   // drifting debris
+  // a moonlit sea of cloud far below
+  const clouds = new THREE.Mesh(new THREE.PlaneGeometry(900, 900).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, fog: false, uniforms: { uT: { value: 0 } },
+    vertexShader: 'varying vec2 vP; void main() { vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: /* glsl */`
+      varying vec2 vP; uniform float uT;
+      float h(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+      float n(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+      float fbm(vec2 p) { float a = 0.5, v = 0.0; for (int i = 0; i < 6; i++) { v += a * n(p); p = p * 2.02 + 11.3; a *= 0.5; } return v; }
+      void main() {
+        vec2 p = vP * 0.018 + vec2(uT * 0.006, 0.0);
+        float d = fbm(p + fbm(p * 1.7) * 0.6);
+        float a = smoothstep(0.34, 0.72, d) * smoothstep(440.0, 180.0, length(vP));
+        vec3 col = mix(vec3(0.03, 0.045, 0.10), vec3(0.42, 0.50, 0.72), smoothstep(0.42, 0.85, d));
+        gl_FragColor = vec4(col * 1.25, a * 0.92);
+      }`,
+  }));
+  clouds.position.set(20, -11, 0); clouds.userData.noAO = true; clouds.renderOrder = -1; sky.add(clouds);
   // the banyan tree, Cuội, and the moon itself
   const bark = new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.95 }), leaf = new THREE.MeshStandardMaterial({ color: 0x1c3a2c, roughness: 0.9, emissive: 0x04100a });
   const tree = new THREE.Group(); tree.position.set(41, 3, -1.6); sky.add(tree);
@@ -262,6 +331,7 @@ export function createCuoi(ctx) {
     const p = player.pos, t = R.t;
     // ambience: swaying lanterns, the star in hand, fuses
     for (const s of swing) s.l.rotation.z = Math.sin(t * 0.9 + s.p) * 0.06;
+    clouds.material.uniforms.uT.value = t;
     star.rotation.set(Math.sin(t * 1.3) * 0.05, Math.sin(t * 0.7) * 0.25, Math.sin(t * 1.1) * 0.06 + player.roll * 4);
     handLight.position.copy(player.eye).addScaledVector(player.forward, 0.5); handLight.position.y -= 0.25;
     handLight.intensity = 3.6 + Math.sin(t * 11) * 0.12 + Math.sin(t * 23) * 0.08;
@@ -323,7 +393,7 @@ export function createCuoi(ctx) {
       const w = st.w;
       if (prev < 1.2 && w >= 1.2) say('Đúng rồi. Cứ đứng đó.', { now: true });
       if (prev < 3 && w >= 3) { drop(moonSpot.position.x - 1.9, moonSpot.position.z + 1.2, 0.2); say('Đừng nhúc nhích nha.', { now: true }); }
-      disc.material.opacity = 0.35 + 0.1 * Math.sin(t * 3) + w * 0.08; shaft.material.opacity = 0.03 + w * 0.012; moonLight.intensity = 5 + w * 5;
+      disc.material.opacity = 0.12 + 0.04 * Math.sin(t * 3) + w * 0.035; shaft.material.opacity = 0.03 + w * 0.012; moonLight.intensity = 5 + w * 5;
       $('prompt').textContent = w > 0.2 ? `ĐỨNG YÊN  ${Math.max(0, 6.5 - w).toFixed(1)}` : ''; $('prompt').classList.toggle('on', w > 0.2);
       if (w >= 6.5) {
         known.trusted = true; audio.announce(true);

@@ -384,9 +384,10 @@ async function boot() {
 
   // ---------------------------------------------------------------- go
   if (CUOI) {
-    rage = createCuoi({ game, scene, level, player, weapon, enemies, fx, audio, banner, $, sun, sunDir,
+    rage = createCuoi({ assets, game, scene, level, player, weapon, enemies, fx, audio, banner, $, sun, sunDir,
       finish: (title, line) => endGame(true, { title, line }), fade: (v) => { view.lens.uFade.value = v; }, lens: () => view.lens });
     game.rage = rage;
+    view.lens.uGrade.value.set(1.1, 1.2, 1); view.lens.uVignette.value = 0.4;
   }
   if (RAGE) {
     rage = createRage({ game, level, player, weapon, enemies, fx, audio, banner, $,
