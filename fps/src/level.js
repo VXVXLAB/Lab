@@ -155,7 +155,7 @@ const FACADES = [
   },
 ];
 
-function buildFacades(kitScene, scene, shootables, colliders, occluders) {
+function buildFacades(kitScene, scene, shootables, colliders, occluders, facades = FACADES) {
   const kit = new FacadeKit(kitScene);
   const group = new THREE.Group();
   group.name = 'facades';
@@ -163,7 +163,7 @@ function buildFacades(kitScene, scene, shootables, colliders, occluders) {
   const roofMat = new THREE.MeshStandardMaterial({ color: 0x57493f, roughness: 0.92 });
   weather(roofMat);
 
-  for (const f of FACADES) {
+  for (const f of facades) {
     const frame = new THREE.Matrix4().makeRotationY(f.ry).setPosition(...f.pos);
     let width = 0;
     f.floors.forEach((mods, floor) => {
@@ -199,6 +199,7 @@ function buildFacades(kitScene, scene, shootables, colliders, occluders) {
   }
   kit.flush(group, shootables);
   scene.add(group);
+  return group;
 }
 
 // ---------------------------------------------------------------- ground
@@ -288,8 +289,7 @@ function buildGround(tex, scene, shootables) {
   ground.receiveShadow = true;
   ground.userData.surface = 'concrete';
   scene.add(ground);
-  shootables.push(ground);
-  return updateReflection;
+  return { updateReflection, ground };
 }
 
 // ---------------------------------------------------------------- props
@@ -371,12 +371,12 @@ const LAYOUT = [
   ['lamp', -6.0, 8.45, 180], ['lamp', 9.0, -8.45, 0], ['lamp', -14.5, 0.6, 90], ['lamp', 14.5, -3.0, -90],
 ];
 
-function buildProps(models, scene, shootables, colliders, explosives, pickups) {
+function buildProps(models, scene, shootables, colliders, explosives, pickups, layout = LAYOUT, extras = true) {
   const make = makePropFactory(models);
   const root = new THREE.Group();
   root.name = 'props';
   const box = new THREE.Box3();
-  for (const [kind, x, z, yaw = 0, y = 0] of LAYOUT) {
+  for (const [kind, x, z, yaw = 0, y = 0] of layout) {
     const def = PROPS[kind];
     const g = make(kind);
     g.position.set(x, y, z);
@@ -395,6 +395,7 @@ function buildProps(models, scene, shootables, colliders, explosives, pickups) {
     if (def.explosive) { explosives.push({ group: g, collider, alive: true }); g.userData.explosive = explosives[explosives.length - 1]; }
   }
 
+  if (extras) {
   // utility boxes hung on the walls
   for (const [x, z, yaw] of [[-11.2, -8.86, 0], [5.6, 8.86, 180], [14.86, 4.4, -90]]) {
     const g = make('utility');
@@ -456,18 +457,70 @@ function buildProps(models, scene, shootables, colliders, explosives, pickups) {
     root.add(g);
     pickups.push({ group: g, pos: new THREE.Vector3(x, y, z), active: true, respawn: 0 });
   }
+  }
   scene.add(root);
+  return root;
 }
+
+// ---------------------------------------------------------------- maps
+const cycle = (kinds, n, floor) => Array.from({ length: n }, (_, i) => WIN(kinds[i % kinds.length], floor));
+const MAPS = {
+  // the walled factory yard
+  yard: { facades: FACADES, layout: LAYOUT, extras: true, spawn: [-12.2, 0, 6.4, -1.05] },
+  // a long, narrow lantern alley between two tall brick rows
+  alley: {
+    spawn: [-21, 0, 0, -Math.PI / 2], extras: false,
+    facades: [
+      { pos: [-24, 0, -3], ry: 0, floors: [
+        [STD, ['wall_door_garage_double_01', 9], ['wall_door_recessed_small_01', 3], STD, ['wall_door_garage_door_01', 6], ['wall_door_centered_large_01', 3], STD, ['wall_door_garage_centered_01', 6], ['wall_door_centered_small_01', 3], STD, ['wall_door_recessed_large_01', 3], STD],
+        cycle(['tall_small', 'centered_large', 'centered_double', 'tall_large'], 16, 1),
+        cycle(['centered_medium', 'tall_small', 'centered_large', 'centered_double'], 16, 2),
+      ] },
+      { pos: [24, 0, 3], ry: Math.PI, floors: [
+        [['wall_door_garage_centered_01', 6], STD, ['wall_door_centered_small_01', 3], STD, STD, ['wall_door_garage_door_01', 6], ['wall_door_recessed_large_01', 3], STD, ['wall_door_garage_double_01', 9], STD, ['wall_door_recessed_small_01', 3], STD],
+        cycle(['centered_double', 'centered_medium', 'tall_small', 'centered_large'], 16, 2),
+        cycle(['tall_large', 'centered_small', 'centered_double', 'centered_medium'], 16, 3),
+      ] },
+      { pos: [-24, 0, 3], ry: Math.PI / 2, floors: [[STD, ['wall_door_centered_large_01', 3]], cycle(['centered_large', 'tall_small'], 2, 1), cycle(['centered_double', 'centered_large'], 2, 2)] },
+      { pos: [24, 0, -3], ry: -Math.PI / 2, floors: [[['wall_door_recessed_small_01', 3], STD], cycle(['tall_small', 'centered_large'], 2, 2), cycle(['centered_large', 'centered_double'], 2, 3)] },
+    ],
+    layout: [
+      ['bin', -18, 2.4, 10], ['bag', -17.2, 2.3, 0], ['crate', -13, -2.3, 2], ['crate', -13.05, -2.3, -3, 0.71], ['barrel', -8, 2.4, 0], ['drum', -7.2, 2.45, 40],
+      ['box', -4, -2.4, 15], ['box', -3.4, -2.45, -30], ['barrier', 0, 2.25, 2], ['binRust', 5, -2.4, 0], ['bag', 5.8, -2.35, 60], ['tyre', 9, 2.4, 0, 0], ['tyre', 9.02, 2.42, 40, 0.16],
+      ['crate', 13, 2.3, 90], ['generator', 17, -2.3, 180], ['lamp', -21, 2.62, 180], ['lamp', -9, -2.62, 0], ['lamp', 3, 2.62, 180], ['lamp', 15, -2.62, 0],
+    ],
+  },
+  // open sky: no ground, no walls. Whoever loads this map supplies the platforms.
+  moon: { facades: [], layout: [], extras: false, noGround: true, spawn: [0, 0, 0, -Math.PI / 2] },
+};
 
 export function buildLevel(assets, scene) {
   const colliders = [], shootables = [], explosives = [], pickups = [], occluders = [], removed = [];
-  const updateReflection = buildGround(assets.groundTex, scene, shootables);
-  buildFacades(assets.models.modular_factory_facade, scene, shootables, colliders, occluders);
-  buildProps(assets.models, scene, shootables, colliders, explosives, pickups);
-  for (const c of colliders) if (!c.wall && !c.seeThrough) occluders.push(c);
-  return {
-    colliders, shootables, explosives, pickups, occluders, updateReflection,
-    spawn: { pos: new THREE.Vector3(-12.2, 0, 6.4), yaw: -1.05 },
+  const { updateReflection, ground } = buildGround(assets.groundTex, scene, shootables);
+  let groups = [];
+  const level = {
+    colliders, shootables, explosives, pickups, occluders, map: '', floorY: 0,
+    spawn: { pos: new THREE.Vector3(), yaw: 0 },
+    updateReflection(renderer, scn, cam, scale) { updateReflection(renderer, scn, cam, level.floorY === 0 ? scale : 0); },
+    // Tears down the current map and builds another one in place; the arrays other systems hold stay the same objects.
+    load(id) {
+      if (level.map === id) return;
+      const def = MAPS[id];
+      for (const g of groups) { g.removeFromParent(); g.traverse((o) => { if (o.isMesh && o.userData.ownGeometry) o.geometry.dispose(); }); }
+      colliders.length = shootables.length = explosives.length = pickups.length = occluders.length = removed.length = 0;
+      groups = [];
+      ground.visible = !def.noGround; level.floorY = def.noGround ? -1000 : 0;
+      if (!def.noGround) shootables.push(ground);
+      if (def.facades.length) {
+        const g = buildFacades(assets.models.modular_factory_facade, scene, shootables, colliders, occluders, def.facades);
+        g.traverse((o) => { if (o.isMesh) o.userData.ownGeometry = true; });
+        groups.push(g);
+      }
+      groups.push(buildProps(assets.models, scene, shootables, colliders, explosives, pickups, def.layout, def.extras));
+      for (const c of colliders) if (!c.wall && !c.seeThrough) occluders.push(c);
+      level.spawn.pos.set(def.spawn[0], def.spawn[1], def.spawn[2]); level.spawn.yaw = def.spawn[3];
+      level.map = id;
+    },
     removeProp(group) {
       const entry = { group, parent: group.parent, colliders: [], shootables: [] };
       group.removeFromParent();
@@ -482,4 +535,6 @@ export function buildLevel(assets, scene) {
       for (const p of pickups) { p.active = true; p.group.visible = true; }
     },
   };
+  level.load('yard');
+  return level;
 }

@@ -341,7 +341,7 @@ async function boot() {
 
     if (playing || game.state === 'over') {
       if (playing) { stats.time += rage ? dt : 0; if (rage) rage.update(dt); else updateRules(dt); }
-      player.update(dt, playing);
+      player.update(dt, playing && !game.freeze);
       // is the player's head in direct sunlight? (drives the view-model's key light)
       sunCheck -= dt;
       if (sunCheck <= 0) { sunCheck = 0.08; inSun = !rayBoxes(player.eye, sunDir, 80, level.occluders); }

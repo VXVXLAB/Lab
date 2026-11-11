@@ -28,8 +28,10 @@ Opening `index.html` straight from disk does not work, because browsers block ES
 - `cuoi.html` is NÓI DỐI NHƯ CUỘI 3D, the first-person version of the 2D game in `../cuoi/`. Same yard on a
   mid-autumn night: moonlit sky, strings of glowing paper lanterns reflected in the wet ground, and a star lantern in
   your hand instead of a pistol. Cuội gives directions in Vietnamese and lies: a firecracker tripwire on the "straight"
-  path, a gift that explodes, lanterns that fall where you are about to be, reversed movement under a red moon. The
-  last instruction (stand still in the moonlight) is true. The mode lives in `src/cuoi.js`.
+  path, a gift that explodes, lanterns that fall where you are about to be, reversed movement under a red moon. It plays across
+  three maps that follow the story: the festival yard, a long lantern alley, and a moonlight bridge in the open sky
+  that leads up to Cuội under his banyan tree. The last instruction (stand still in the moonlight) is true. The mode
+  lives in `src/cuoi.js`; maps are defined in `src/level.js` and swapped in place with `level.load(id)`.
 
 ## Controls
 

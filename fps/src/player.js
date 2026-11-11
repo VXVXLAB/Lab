@@ -55,7 +55,7 @@ export class Player {
   blocking(b, y) { return y + STEP < b.max.y && y + HEIGHT * (1 - 0.4 * this.crouch) > b.min.y; }
 
   groundAt(x, z, y) {
-    let g = 0;
+    let g = this.level.floorY;
     for (const b of this.level.colliders) {
       if (b.max.y > y + STEP + 0.01) continue;
       const r = RADIUS * 0.6;
