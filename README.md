@@ -53,3 +53,11 @@ Chạy tự động mỗi giờ bằng cron:
 ```
 0 * * * * cd /duong/dan/Lab && python3 monitor.py watchlist.txt >> monitor.log 2>&1
 ```
+
+## fps/: BRICKYARD, a small browser FPS
+
+A tiny first-person shooter (three.js, photoscanned CC0 assets, no build step). See [fps/README.md](fps/README.md).
+
+```bash
+cd fps && python3 -m http.server 8000   # then open http://localhost:8000
+```
