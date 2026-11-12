@@ -249,13 +249,37 @@ def _internaldate(ts):
     return '"%02d-%s-%04d %02d:%02d:%02d +0000"' % (d.day, _MONTHS[d.month - 1], d.year, d.hour, d.minute, d.second)
 
 
-def _folder(name):
-    if isinstance(name, bytes):
-        name = name.decode("utf-8", "replace")
-    for imap_name, folder, _ in MAILBOXES:
-        if name == imap_name or (imap_name == "INBOX" and name.upper() == "INBOX"):
-            return folder
-    raise No("Mailbox does not exist")
+def mutf7_encode(name):
+    """Tên thư mục -> UTF-7 sửa đổi của IMAP (RFC 3501 mục 5.1.3), để tên có dấu hiển thị đúng."""
+    out, buf = [], ""
+
+    def flush():
+        nonlocal buf
+        if buf:
+            b64 = base64.b64encode(buf.encode("utf-16-be")).decode().rstrip("=").replace("/", ",")
+            out.append("&" + b64 + "-")
+            buf = ""
+    for ch in name:
+        if 0x20 <= ord(ch) <= 0x7e:
+            flush()
+            out.append("&-" if ch == "&" else ch)
+        else:
+            buf += ch
+    flush()
+    return "".join(out)
+
+
+def mutf7_decode(name):
+    def one(m):
+        b64 = m.group(1)
+        if not b64:
+            return "&"
+        b64 = b64.replace(",", "/")
+        return base64.b64decode(b64 + "=" * (-len(b64) % 4)).decode("utf-16-be")
+    try:
+        return re.sub(r"&([A-Za-z0-9+,]*)-", one, name)
+    except Exception:
+        raise No("Invalid mailbox name")
 
 
 def _text(tok):
@@ -385,6 +409,24 @@ class Imap(Conn):
         self.readonly = False
         self.uids = []   # ảnh chụp thư mục đang mở: vị trí i -> UID
         self.ids = {}    # UID -> id thư
+
+    def boxes(self):
+        """Mọi thư mục của người dùng: [(tên IMAP đã mã hóa, khóa thư mục, thuộc tính đặc biệt)]."""
+        custom = [(mutf7_encode(f["name"]), db.folder_key(f["id"]), "") for f in db.list_folders(self.user["id"])]
+        return MAILBOXES + custom
+
+    def mbox(self, name):
+        """Tên thư mục do máy khách gửi -> khóa thư mục; báo NO nếu không có."""
+        name = _text(name)
+        if name.upper() == "INBOX":
+            return "inbox"
+        for imap_name, key, _ in self.boxes():
+            if name == imap_name or mutf7_decode(name) == mutf7_decode(imap_name):
+                return key
+        raise No("[TRYCREATE] Mailbox does not exist")
+
+    def box_name(self, key):
+        return next(n for n, k, _ in self.boxes() if k == key)
 
     def caps(self):
         c = "IMAP4rev1 LITERAL+ IDLE NAMESPACE UIDPLUS MOVE SPECIAL-USE UNSELECT ID CHILDREN SASL-IR"
@@ -534,10 +576,32 @@ class Imap(Conn):
     async def do_ENABLE(self, tag, args):
         self.send("* ENABLED\r\n")
 
-    async def _refuse(self, tag, args):
-        raise No("Mailboxes are fixed on this server")
+    def _custom(self, name):
+        key = self.mbox(name)
+        row = db.custom_folder(self.user["id"], key)
+        if not row:
+            raise No("This mailbox cannot be changed")
+        return key, row
 
-    do_CREATE = do_DELETE = do_RENAME = _refuse
+    async def do_CREATE(self, tag, args):
+        name = mutf7_decode(_text(args[0])).rstrip("/")
+        try:
+            db.create_folder(self.user["id"], name)
+        except ValueError:
+            raise No("Cannot create mailbox with that name")
+
+    async def do_DELETE(self, tag, args):
+        key, row = self._custom(args[0])
+        if self.folder == key:
+            self.folder = None
+        db.delete_folder(self.user["id"], row["id"])
+
+    async def do_RENAME(self, tag, args):
+        key, row = self._custom(args[0])
+        try:
+            db.rename_folder(self.user["id"], row["id"], mutf7_decode(_text(args[1])).rstrip("/"))
+        except ValueError:
+            raise No("Cannot rename mailbox to that name")
 
     async def _ok(self, tag, args):
         return None
@@ -554,10 +618,10 @@ class Imap(Conn):
             self.send('* %s (\\Noselect) "/" ""\r\n' % kind)
             return
         glob = re.sub(r"[%*]+", "*", pattern.replace("[", "[[]"))
-        for name, _, special in MAILBOXES:
+        for name, _, special in self.boxes():
             if fnmatch.fnmatchcase(name, glob) or (name == "INBOX" and fnmatch.fnmatchcase(name, glob.upper())):
                 attrs = "\\HasNoChildren" + (" " + special if special and kind == "LIST" else "")
-                self.send('* %s (%s) "/" "%s"\r\n' % (kind, attrs, name))
+                self.send(b"* " + kind.encode() + b" (" + attrs.encode() + b') "/" ' + q(name) + b"\r\n")
 
     async def do_LIST(self, tag, args):
         await self._list("LIST", args)
@@ -572,12 +636,12 @@ class Imap(Conn):
         return r["n"], r["unseen"]
 
     async def do_STATUS(self, tag, args):
-        folder = _folder(args[0])
+        folder = self.mbox(args[0])
         n, unseen = self._counts(folder)
         vals = {"MESSAGES": n, "RECENT": 0, "UNSEEN": unseen, "UIDNEXT": db.peek_next_uid(), "UIDVALIDITY": 1}
         items = [_text(i).upper() for i in args[1]]
         out = " ".join("%s %d" % (i, vals[i]) for i in items if i in vals)
-        self.send('* STATUS "%s" (%s)\r\n' % (next(m[0] for m in MAILBOXES if m[1] == folder), out))
+        self.send(b"* STATUS " + q(self.box_name(folder)) + b" (" + out.encode() + b")\r\n")
 
     def _load(self):
         rows = db.conn().execute(
@@ -599,7 +663,7 @@ class Imap(Conn):
 
     async def _select(self, tag, args, readonly):
         self.folder = None
-        folder = _folder(args[0])
+        folder = self.mbox(args[0])
         self.folder, self.readonly = folder, readonly
         self.uids, self.ids = self._load()
         self.send("* FLAGS (%s)\r\n" % FLAGS)
@@ -628,7 +692,7 @@ class Imap(Conn):
         self.folder = None
 
     async def do_APPEND(self, tag, args):
-        folder = _folder(args[0])
+        folder = self.mbox(args[0])
         raw = args[-1]
         if not isinstance(raw, bytes):
             raise Bad("APPEND needs a message literal")
@@ -840,7 +904,7 @@ class Imap(Conn):
 
     async def do_COPY(self, tag, args, uid):
         idx = self._set(args[0], uid)
-        dst = _folder(args[1])
+        dst = self.mbox(args[1])
         src_uids, dst_uids = [], []
         with db.conn() as c:
             for i, row in list(self._rows(idx, "id,uid")):
@@ -862,7 +926,7 @@ class Imap(Conn):
         if self.readonly:
             raise No("Mailbox is read-only")
         idx = self._set(args[0], uid)
-        dst = _folder(args[1])
+        dst = self.mbox(args[1])
         if dst == self.folder:
             raise No("Source and destination are the same mailbox")
         rows = list(self._rows(idx, "id,uid"))

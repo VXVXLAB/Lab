@@ -58,6 +58,9 @@
     <nav id="sidebar" aria-label="Thư mục">
       <button class="btn primary big" id="compose-btn"><span data-icon="pen"></span>Soạn thư</button>
       <ul id="folders"></ul>
+      <div class="side-head"><span>Thư mục của bạn</span>
+        <button class="icon-btn" id="add-folder" title="Tạo thư mục" aria-label="Tạo thư mục" data-icon="plus"></button></div>
+      <ul id="custom-folders"></ul>
     </nav>
     <div id="scrim"></div>
 
@@ -68,6 +71,7 @@
         <div id="bulk" hidden>
           <button class="icon-btn" data-bulk="read" title="Đánh dấu đã đọc" data-icon="mailopen"></button>
           <button class="icon-btn" data-bulk="unread" title="Đánh dấu chưa đọc" data-icon="mail"></button>
+          <button class="icon-btn" data-bulk="move" title="Chuyển tới thư mục" data-icon="folder"></button>
           <button class="icon-btn" data-bulk="spam" title="Báo thư rác" data-icon="alert"></button>
           <button class="icon-btn" data-bulk="notspam" title="Không phải thư rác" data-icon="inbox" hidden></button>
           <button class="icon-btn" data-bulk="restore" title="Khôi phục" data-icon="restore" hidden></button>
@@ -98,6 +102,7 @@
           <button class="icon-btn" id="r-star" title="Gắn sao" data-icon="star"></button>
           <button class="icon-btn" id="r-unread" title="Đánh dấu chưa đọc" data-icon="mail"></button>
           <button class="btn small" id="r-notspam" hidden><span data-icon="inbox"></span>Không phải thư rác</button>
+          <button class="icon-btn" id="r-move" title="Chuyển tới thư mục" data-icon="folder"></button>
           <button class="icon-btn" id="r-spam" title="Báo thư rác" data-icon="alert"></button>
           <button class="icon-btn" id="r-restore" title="Khôi phục" data-icon="restore" hidden></button>
           <button class="icon-btn" id="r-delete" title="Xóa" data-icon="trash"></button>
@@ -147,6 +152,8 @@
     <button type="button" data-cmd="insertOrderedList" title="Danh sách đánh số" data-icon="listnum"></button>
     <button type="button" data-cmd="formatBlock" data-arg="blockquote" title="Trích dẫn" data-icon="quote"></button>
     <button type="button" data-cmd="createLink" title="Chèn liên kết" data-icon="link"></button>
+    <button type="button" id="c-image" title="Chèn ảnh vào nội dung" data-icon="image"></button>
+    <input type="file" id="c-image-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
     <span class="sep"></span>
     <button type="button" data-cmd="removeFormat" title="Xóa định dạng" data-icon="eraser"></button>
   </div>

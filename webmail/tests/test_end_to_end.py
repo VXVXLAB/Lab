@@ -272,6 +272,142 @@ def run(data, sink_file):
     im2.logout()
     im.logout()
 
+    print("Thư mục tự tạo")
+    st, r, _ = w.call("POST", "/api/folders", {"name": "Dự án & Hợp đồng"})
+    ok(st == 200, "tạo thư mục trên webmail")
+    fkey = r["id"]
+    st, _, _ = w.call("POST", "/api/folders", {"name": "dự án & hợp đồng"})
+    ok(st == 400, "không tạo trùng tên (không phân biệt hoa thường)")
+    st, _, _ = w.call("POST", "/api/folders", {"name": "Inbox"})
+    ok(st == 400, "không dùng được tên thư mục hệ thống")
+    st, _, _ = wb.call("PUT", "/api/folders/%s" % fkey[1:], {"name": "Của tôi"})
+    ok(st == 404, "người khác không đổi tên được thư mục của mình")
+    st, _, _ = wb.call("GET", "/api/messages?folder=%s" % fkey)
+    ok(st == 404, "người khác không mở được thư mục của mình")
+    smtp_in("kh@doitac.test", ["an@congty.test"], make("kh@doitac.test", "an@congty.test", "Hợp đồng số 7", "Nội dung hợp đồng"))
+    st, r, _ = w.call("GET", "/api/messages?folder=inbox")
+    cid_ = next(x["id"] for x in r["items"] if x["subject"] == "Hợp đồng số 7")
+    st, _, _ = wb.call("POST", "/api/messages/action", {"ids": [cid_], "action": "move", "folder": fkey})
+    st, _, _ = w.call("POST", "/api/messages/action", {"ids": [cid_], "action": "move", "folder": "f99999"})
+    ok(st == 400, "không chuyển được vào thư mục không tồn tại")
+    st, _, _ = w.call("POST", "/api/messages/action", {"ids": [cid_], "action": "move", "folder": fkey})
+    st, r, _ = w.call("GET", "/api/messages?folder=%s" % fkey)
+    ok(st == 200 and [x["subject"] for x in r["items"]] == ["Hợp đồng số 7"], "chuyển thư vào thư mục tự tạo")
+    im = imaplib.IMAP4_SSL("127.0.0.1", PORTS["IMAPS_PORT"], ssl_context=NOVERIFY)
+    im.login("an@congty.test", "matkhau-an-1")
+    typ, boxes = im.list()
+    from webmail.mailaccess import mutf7_encode
+    enc = mutf7_encode("Dự án & Hợp đồng")
+    ok(any(enc.encode() in b for b in boxes), "IMAP liệt kê thư mục tự tạo (tên có dấu mã hóa UTF-7 sửa đổi)")
+    typ, d = im.select('"%s"' % enc)
+    ok(typ == "OK" and int(d[0]) == 1, "IMAP mở được thư mục tự tạo")
+    typ, d = im.create('"Kh&AOE-ch h&AOA-ng"')
+    ok(typ == "OK", "IMAP CREATE")
+    typ, d = im.uid("COPY", "1:*", '"Kh&AOE-ch h&AOA-ng"')
+    ok(typ == "OK", "IMAP COPY sang thư mục mới")
+    st, r, _ = w.call("GET", "/api/folders")
+    names = {f["name"]: f["id"] for f in r["custom"]}
+    ok("Khách hàng" in names, "thư mục tạo qua IMAP hiện trên webmail với tên đúng")
+    typ, d = im.rename('"Kh&AOE-ch h&AOA-ng"', '"Doi tac"')
+    typ, d = im.create("Sent")
+    ok(typ == "NO", "IMAP không cho tạo trùng thư mục hệ thống")
+    typ, d = im.delete("INBOX")
+    ok(typ == "NO", "IMAP không cho xóa thư mục hệ thống")
+    typ, d = im.delete('"Doi tac"')
+    ok(typ == "OK", "IMAP RENAME rồi DELETE thư mục tự tạo")
+    st, r, _ = w.call("GET", "/api/messages?folder=trash")
+    ok(any(x["subject"] == "Hợp đồng số 7" for x in r["items"]), "xóa thư mục thì thư bên trong vào Thùng rác")
+    im.logout()
+
+    print("Ảnh chèn trong nội dung thư")
+    png = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                        "1f15c4890000000d49444154789c6360f8cf00000301010018dd8db00000000049454e44ae426082")
+    st, r, _ = w.call("POST", "/api/drafts", {"to": "binh@congty.test", "subject": "Có ảnh", "body": "x", "html": "x"})
+    did = r["id"]
+
+    def upload(web, did, data, inline):
+        boundary = "----t"
+        body = (("--%s\r\nContent-Disposition: form-data; name=\"inline\"\r\n\r\n%s\r\n" % (boundary, inline)).encode() +
+                ("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\n"
+                 "Content-Type: image/png\r\n\r\n" % boundary).encode() + data + ("\r\n--%s--\r\n" % boundary).encode())
+        req = urllib.request.Request("http://127.0.0.1:%d/api/drafts/%d/attachments" % (PORTS["WEB_PORT"], did), data=body, method="POST")
+        req.add_header("Content-Type", "multipart/form-data; boundary=" + boundary)
+        req.add_header("X-Requested-With", "webmail")
+        try:
+            with web.opener.open(req) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+    st, r = upload(w, did, b"<svg onload=alert(1)>", "1")
+    ok(st == 400, "tệp không phải ảnh bị từ chối khi chèn vào nội dung")
+    st, r = upload(wb, did, png, "1")
+    ok(st == 404, "người khác không tải được ảnh vào thư nháp của mình")
+    st, r = upload(w, did, png, "1")
+    ok(st == 200, "tải ảnh chèn vào thư nháp")
+    url = r["url"]
+    html = 'Xem ảnh: <img src="%s" onerror="x()"><img src="https://t.test/p.gif"><img src="/api/messages/1/attachments/1">' % url
+    st, _, _ = w.call("POST", "/api/drafts", {"id": did, "to": "binh@congty.test", "subject": "Có ảnh", "body": "Xem ảnh", "html": html})
+    st, r, _ = w.call("GET", "/api/messages/%d" % did)
+    ok(r["html"] == 'Xem ảnh: <img src="%s" alt="">' % url, "chỉ giữ ảnh của chính thư nháp, bỏ ảnh ngoài và thuộc tính lạ")
+    st, _, _ = w.call("POST", "/api/drafts/%d/send" % did, {})
+    st, r, _ = wb.call("GET", "/api/messages?folder=inbox")
+    got = next(x for x in r["items"] if x["subject"] == "Có ảnh")
+    st, page, _ = wb.call("GET", "/api/messages/%d/html" % got["id"])
+    m = re.search(r'<img src="(/api/messages/%d/attachments/\d+)"' % got["id"], page.decode())
+    ok(m is not None, "người nhận thấy ảnh nằm trong nội dung thư")
+    st, img, _ = wb.call("GET", m.group(1))
+    ok(img == png, "ảnh nhận được đúng nguyên bản")
+    st, r, _ = wb.call("GET", "/api/messages/%d" % got["id"])
+    ok(r["attachments"] == [], "ảnh trong nội dung không bị liệt kê như tệp đính kèm")
+
+    print("Client độc lập")
+    try:
+        import imapclient
+    except ImportError:
+        print("  bỏ qua imapclient (chưa cài)")
+    else:
+        ic = imapclient.IMAPClient("127.0.0.1", PORTS["IMAPS_PORT"], ssl=True, ssl_context=NOVERIFY)
+        ic.login("binh@congty.test", "matkhau-binh-1")
+        names = [f[2] for f in ic.list_folders()]
+        ok({"INBOX", "Sent", "Drafts", "Junk", "Trash"} <= set(names), "imapclient: liệt kê thư mục")
+        info = ic.select_folder("INBOX")
+        uids = ic.search(["ALL"])
+        ok(info[b"EXISTS"] == len(uids) > 5, "imapclient: SELECT và SEARCH khớp nhau")
+        data = ic.fetch(uids, ["ENVELOPE", "BODYSTRUCTURE", "FLAGS", "RFC822.SIZE", "INTERNALDATE"])
+        ok(len(data) == len(uids) and all(d[b"ENVELOPE"].subject is not None and d[b"BODYSTRUCTURE"] for d in data.values()),
+           "imapclient: phân tích được ENVELOPE và BODYSTRUCTURE của mọi thư")
+        pic = ic.search(["SUBJECT", "Có ảnh"], charset="UTF-8")
+        ok(len(pic) == 1, "imapclient: SEARCH tiếng Việt (UTF-8)")
+        part = ic.fetch(pic, ["BODY.PEEK[1]", "BODY.PEEK[2.2]<0.8>"])[pic[0]]
+        ok(part.get(b"BODY[2.2]<0>") == __import__("base64").b64encode(png)[:8], "imapclient: tải một đoạn của phần MIME lồng nhau (ảnh trong thư)")
+        ic.add_flags(uids[:2], [imapclient.SEEN, b"$Forwarded"])
+        ok(all(imapclient.SEEN in f and b"$Forwarded" in f for f in ic.get_flags(uids[:2]).values()), "imapclient: đặt cờ")
+        ic.idle()
+        smtp_in("idle@doitac.test", ["binh@congty.test"], make("idle@doitac.test", "binh@congty.test", "Thư khi đang IDLE", "x"))
+        got_push = ic.idle_check(timeout=12)
+        ic.idle_done()
+        ok(any(len(x) > 1 and x[1] == b"EXISTS" for x in got_push), "imapclient: IDLE báo thư mới")
+        ic.logout()
+    import shutil
+    if not shutil.which("curl"):
+        print("  bỏ qua curl (không có)")
+    else:
+        def curl(*args, data=None):
+            return subprocess.run(["curl", "-sS", "-k", "--max-time", "20", "--user", "binh@congty.test:matkhau-binh-1", *args],
+                                  capture_output=True, input=data)
+        r = curl("imaps://127.0.0.1:%d/" % PORTS["IMAPS_PORT"])
+        ok(r.returncode == 0 and b"INBOX" in r.stdout, "curl IMAPS: liệt kê thư mục")
+        r = curl("imaps://127.0.0.1:%d/INBOX;MAILINDEX=1" % PORTS["IMAPS_PORT"])
+        ok(r.returncode == 0 and b"Subject:" in r.stdout, "curl IMAPS: tải một thư")
+        r = curl("--ssl-reqd", "pop3://127.0.0.1:%d/1" % PORTS["POP3_PORT"])
+        ok(r.returncode == 0 and b"Subject:" in r.stdout, "curl POP3 + STLS: tải một thư")
+        r = curl("--ssl-reqd", "smtp://127.0.0.1:%d" % PORTS["SUBMISSION_PORT"], "--mail-from", "binh@congty.test",
+                 "--mail-rcpt", "an@congty.test", "-T", "-",
+                 data=b"From: binh@congty.test\r\nTo: an@congty.test\r\nSubject: Tu curl\r\n\r\nxin chao\r\n")
+        ok(r.returncode == 0, "curl SMTP + STARTTLS + đăng nhập: gửi thư")
+        st, r, _ = w.call("GET", "/api/messages?folder=inbox")
+        ok(any(x["subject"] == "Tu curl" for x in r["items"]), "thư gửi bằng curl tới nơi")
+
     print("POP3")
     pp = poplib.POP3_SSL("127.0.0.1", PORTS["POP3S_PORT"], context=NOVERIFY)
     pp.user("binh@congty.test")

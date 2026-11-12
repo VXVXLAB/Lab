@@ -41,6 +41,12 @@ CREATE TABLE IF NOT EXISTS messages (
   moved REAL,
   spam_trained INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS folders (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_folders_user ON folders(user_id);
 CREATE TABLE IF NOT EXISTS uidseq (id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE IF NOT EXISTS spam_tokens (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -189,6 +195,71 @@ def create_user(email, name, password, is_admin=False):
 def set_password(uid, password):
     with conn() as c:
         c.execute("UPDATE users SET pw_hash=? WHERE id=?", (hash_password(password), uid))
+
+
+# ---------- thư mục ----------
+
+SYSTEM_FOLDERS = ("inbox", "sent", "drafts", "spam", "trash")
+RESERVED_NAMES = {"inbox", "sent", "drafts", "junk", "trash", "spam", "hộp thư đến", "thư đã gửi", "thư nháp",
+                  "thư rác", "thùng rác", "có gắn sao"}
+MAX_FOLDERS = 100
+
+
+def list_folders(user_id):
+    return conn().execute("SELECT id, name FROM folders WHERE user_id=? ORDER BY name COLLATE NOCASE",
+                          (user_id,)).fetchall()
+
+
+def folder_key(fid):
+    return "f%d" % fid
+
+
+def custom_folder(user_id, key):
+    """Dòng thư mục tự tạo ứng với khóa 'f<id>' của đúng người dùng này, hoặc None."""
+    if not isinstance(key, str) or not key.startswith("f") or not key[1:].isdigit() or len(key) > 12:
+        return None
+    return conn().execute("SELECT id, name FROM folders WHERE id=? AND user_id=?", (int(key[1:]), user_id)).fetchone()
+
+
+def valid_folder(user_id, key):
+    return key in SYSTEM_FOLDERS or custom_folder(user_id, key) is not None
+
+
+def check_folder_name(user_id, name, skip_id=None):
+    name = " ".join((name or "").split()) if isinstance(name, str) else ""
+    if not 1 <= len(name) <= 60:
+        raise ValueError("Tên thư mục dài từ 1 đến 60 ký tự.")
+    if any(ch in name for ch in '/\\"%*{}()') or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+        raise ValueError("Tên thư mục không được chứa các ký tự / \\ \" % * { } ( )")
+    if name.casefold() in RESERVED_NAMES:
+        raise ValueError("Tên này trùng với thư mục có sẵn.")
+    rows = list_folders(user_id)
+    if any(r["name"].casefold() == name.casefold() and r["id"] != skip_id for r in rows):
+        raise ValueError("Đã có thư mục tên này.")
+    if skip_id is None and len(rows) >= MAX_FOLDERS:
+        raise ValueError("Bạn đã tạo quá nhiều thư mục.")
+    return name
+
+
+def create_folder(user_id, name):
+    name = check_folder_name(user_id, name)
+    with conn() as c:
+        return c.execute("INSERT INTO folders(user_id,name) VALUES(?,?)", (user_id, name)).lastrowid
+
+
+def rename_folder(user_id, fid, name):
+    name = check_folder_name(user_id, name, skip_id=fid)
+    with conn() as c:
+        c.execute("UPDATE folders SET name=? WHERE id=? AND user_id=?", (name, fid, user_id))
+
+
+def delete_folder(user_id, fid):
+    """Xóa thư mục tự tạo; thư bên trong được chuyển vào Thùng rác chứ không mất ngay."""
+    with conn() as c:
+        ids = [r["id"] for r in c.execute("SELECT id FROM messages WHERE user_id=? AND folder=?",
+                                          (user_id, folder_key(fid)))]
+        move_messages(c, user_id, ids, "trash")
+        c.execute("DELETE FROM folders WHERE id=? AND user_id=?", (fid, user_id))
 
 
 # ---------- thư ----------

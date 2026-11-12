@@ -12,8 +12,14 @@ _TWO_LEVEL = {"com", "net", "org", "edu", "gov", "co", "ac", "or", "ne", "go", "
 
 
 def org_domain(domain):
-    """Tên miền tổ chức (xấp xỉ, không dùng Public Suffix List): a.b.vidu.com.vn -> vidu.com.vn."""
-    labels = (domain or "").lower().strip(".").split(".")
+    """Tên miền tổ chức theo Public Suffix List: a.b.vidu.com.vn -> vidu.com.vn."""
+    domain = (domain or "").lower().strip(".")
+    try:
+        from publicsuffix2 import get_sld
+        return get_sld(domain) or domain
+    except Exception:  # thiếu thư viện: dùng quy tắc xấp xỉ bên dưới
+        pass
+    labels = domain.split(".")
     if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in _TWO_LEVEL:
         return ".".join(labels[-3:])
     return ".".join(labels[-2:])

@@ -4,6 +4,7 @@ import hmac
 import os
 import threading
 import re
+import secrets
 import time
 from datetime import timedelta
 from functools import wraps
@@ -289,9 +290,44 @@ def folders():
         counts[r["folder"]] = r["n"] if r["folder"] == "drafts" else (r["unread"] or 0)
     counts["sent"] = 0
     counts["trash"] = 0
+    custom = [{"id": db.folder_key(f["id"]), "name": f["name"], "unread": counts.pop(db.folder_key(f["id"]), 0)}
+              for f in db.list_folders(uid)]
+    counts = {k: v for k, v in counts.items() if k in FOLDERS}
     latest = c.execute("SELECT COALESCE(MAX(id),0) FROM messages WHERE user_id=? AND folder='inbox'",
                        (uid,)).fetchone()[0]
-    return jsonify(counts=counts, latest=latest)
+    return jsonify(counts=counts, latest=latest, custom=custom)
+
+
+@app.post("/api/folders")
+@login_required
+def create_folder():
+    d = request.get_json(silent=True) or {}
+    try:
+        fid = db.create_folder(g.user["id"], d.get("name"))
+    except ValueError as e:
+        return err(str(e))
+    return jsonify(id=db.folder_key(fid))
+
+
+@app.put("/api/folders/<int:fid>")
+@login_required
+def rename_folder(fid):
+    if not db.custom_folder(g.user["id"], db.folder_key(fid)):
+        return err("Thư mục không tồn tại.", 404)
+    try:
+        db.rename_folder(g.user["id"], fid, (request.get_json(silent=True) or {}).get("name"))
+    except ValueError as e:
+        return err(str(e))
+    return jsonify(ok=True)
+
+
+@app.delete("/api/folders/<int:fid>")
+@login_required
+def delete_folder(fid):
+    if not db.custom_folder(g.user["id"], db.folder_key(fid)):
+        return err("Thư mục không tồn tại.", 404)
+    db.delete_folder(g.user["id"], fid)
+    return jsonify(ok=True)
 
 
 @app.get("/api/messages")
@@ -310,11 +346,11 @@ def list_messages():
             where.append("folder!='trash'")
     if folder == "starred":
         where.append("starred=1 AND folder!='trash'")
-    elif folder in FOLDERS and not (q and folder != "trash"):
+    elif not db.valid_folder(g.user["id"], folder):
+        return err("Thư mục không tồn tại.", 404)
+    elif not (q and folder != "trash"):
         where.append("folder=?")
         params.append(folder)
-    elif folder not in FOLDERS:
-        return err("Thư mục không tồn tại.", 404)
     sql = " FROM messages WHERE " + " AND ".join(where)
     c = db.conn()
     total = c.execute("SELECT COUNT(*)" + sql, params).fetchone()[0]
@@ -342,7 +378,8 @@ def get_message(mid):
     out.update(
         is_read=True, cc=r["cc_addrs"], bcc=r["bcc_addrs"], reply_to=r["reply_to"], text=r["body_text"],
         has_html=bool(r["body_html"]),
-        html=mime.sanitize_fragment(r["body_html"]) if r["folder"] == "drafts" and r["body_html"] else None,
+        html=(mime.sanitize_fragment(r["body_html"], draft_images(mid)[1])
+              if r["folder"] == "drafts" and r["body_html"] else None),
         attachments=[{"id": a["id"], "filename": a["filename"], "size": a["size"], "ctype": a["ctype"]}
                      for a in db.list_attachments(mid) if not a["inline"]],
     )
@@ -384,7 +421,7 @@ def attachment(mid, aid):
     return resp
 
 
-def apply_action(c, uid, ids, action):
+def apply_action(c, uid, ids, action, target=None):
     marks = ",".join("?" * len(ids))
     base = " WHERE user_id=? AND id IN (%s)" % marks
     args = [uid] + ids
@@ -399,7 +436,9 @@ def apply_action(c, uid, ids, action):
     elif action == "restore":
         for r in rows:
             if r["folder"] == "trash":
-                back = r["prev_folder"] if r["prev_folder"] in ("inbox", "sent", "spam") else "inbox"
+                back = r["prev_folder"]
+                if back not in ("inbox", "sent", "spam") and not db.custom_folder(uid, back):
+                    back = "inbox"
                 db.move_messages(c, uid, [r["id"]], back)
     elif action in ("spam", "notspam"):
         # Báo thư rác / không phải thư rác: chuyển thư và dạy bộ lọc của riêng người dùng này.
@@ -408,6 +447,15 @@ def apply_action(c, uid, ids, action):
                 continue
             spam.set_trained(c, r, 1 if action == "spam" else 2)
             db.move_messages(c, uid, [r["id"]], "spam" if action == "spam" else "inbox")
+    elif action == "move":
+        if target != "inbox" and not db.custom_folder(uid, target):
+            raise ValueError("Thư mục đích không tồn tại.")
+        for r in rows:
+            if r["folder"] == "drafts":
+                continue
+            if r["folder"] == "spam":
+                spam.set_trained(c, r, 2)
+            db.move_messages(c, uid, [r["id"]], target)
     else:
         raise ValueError("Thao tác không hợp lệ.")
 
@@ -422,7 +470,7 @@ def messages_action():
         return err("Chưa chọn thư nào.")
     try:
         with db.conn() as c:
-            apply_action(c, g.user["id"], ids, d.get("action"))
+            apply_action(c, g.user["id"], ids, d.get("action"), d.get("folder"))
     except ValueError as e:
         return err(str(e))
     return jsonify(ok=True)
@@ -451,6 +499,23 @@ def own_draft(mid):
     return r if r and r["folder"] == "drafts" else None
 
 
+def draft_images(did):
+    """Hai hàm đổi địa chỉ ảnh chèn trong thư nháp: (trình duyệt -> cid:, cid: -> trình duyệt)."""
+    by_id, by_cid = {}, {}
+    for a in db.list_attachments(did):
+        if a["inline"] and a["cid"]:
+            by_id[a["id"]] = "cid:" + a["cid"]
+            by_cid["cid:" + a["cid"]] = "/api/messages/%d/attachments/%d" % (did, a["id"])
+
+    def to_cid(src):
+        if src in by_cid:
+            return src
+        m = re.search(r"/api/messages/(\d{1,15})/attachments/(\d{1,15})$", src)
+        return by_id.get(int(m.group(2))) if m and int(m.group(1)) == did else None
+
+    return to_cid, by_cid.get
+
+
 def as_id(value):
     """Số nguyên dương từ dữ liệu JSON của máy khách, hoặc None."""
     if isinstance(value, bool) or not isinstance(value, (int, str)) or not str(value).isdigit() or len(str(value)) > 15:
@@ -472,16 +537,22 @@ def save_draft():
         if len(v) > limit:
             return err("Nội dung quá dài.", 413)
         fields[k] = v
-    html_body = mime.sanitize_fragment(fields["html"]) if fields["html"].strip() else None
+    uid = g.user["id"]
+    did = as_id(d.get("id"))
+    if did and not own_draft(did):
+        return err("Thư nháp không còn tồn tại.", 404)
+    html_body = None
+    if fields["html"].strip():
+        html_body = mime.sanitize_fragment(fields["html"], draft_images(did)[0] if did else None)
     if html_body and not fields["body"].strip():
         fields["body"] = mime.html_to_text(html_body)
     snippet = re.sub(r"\s+", " ", fields["body"]).strip()[:200]
-    uid = g.user["id"]
-    did = as_id(d.get("id"))
     if did:
-        if not own_draft(did):
-            return err("Thư nháp không còn tồn tại.", 404)
         with db.conn() as c:
+            # Ảnh đã chèn nhưng người dùng xóa khỏi nội dung thì bỏ luôn tệp ảnh.
+            for a in db.list_attachments(did):
+                if a["inline"] and ("cid:%s" % a["cid"]) not in (html_body or ""):
+                    c.execute("DELETE FROM attachments WHERE id=?", (a["id"],))
             c.execute("UPDATE messages SET to_addrs=?,cc_addrs=?,bcc_addrs=?,subject=?,body_text=?,body_html=?,"
                       "snippet=?,date=? WHERE id=?",
                       (fields["to"], fields["cc"], fields["bcc"], fields["subject"], fields["body"], html_body,
@@ -527,12 +598,21 @@ def add_attachment(did):
         return err("Tổng dung lượng tệp đính kèm vượt quá giới hạn.", 413)
     name = os.path.basename((f.filename or "").replace("\\", "/"))
     name = re.sub(r"[\x00-\x1f\x7f]", "", name)[:200] or "tep-dinh-kem"
+    inline = request.form.get("inline") == "1"
+    ctype, cid = f.mimetype or "application/octet-stream", None
+    if inline:  # ảnh chèn vào giữa nội dung thư
+        ctype = mime.image_type(data)
+        if not ctype:
+            return err("Chỉ chèn được ảnh PNG, JPEG, GIF hoặc WebP.")
+        cid = "%s@%s" % (secrets.token_hex(12), config.DOMAIN)
     with db.conn() as c:
-        cur = c.execute("INSERT INTO attachments(message_id,filename,ctype,size,data) VALUES(?,?,?,?,?)",
-                        (did, name, f.mimetype or "application/octet-stream", len(data), data))
+        cur = c.execute("INSERT INTO attachments(message_id,filename,ctype,size,cid,inline,data) VALUES(?,?,?,?,?,?,?)",
+                        (did, name, ctype, len(data), cid, int(inline), data))
         db.refresh_has_attach(c, did)
-        delivery.rebuild_draft(c, g.user, did)
-    return jsonify(id=cur.lastrowid, filename=name, size=len(data))
+        if not inline:
+            delivery.rebuild_draft(c, g.user, did)
+    return jsonify(id=cur.lastrowid, filename=name, size=len(data),
+                   url="/api/messages/%d/attachments/%d" % (did, cur.lastrowid))
 
 
 @app.delete("/api/drafts/<int:did>/attachments/<int:aid>")

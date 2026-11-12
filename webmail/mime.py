@@ -137,9 +137,17 @@ def build(from_name, from_addr, to, cc, subject, text, attachments=(), in_reply_
     if refs:
         m["References"] = refs
     m.set_content(text or "")
+    embedded = [a for a in attachments if html and a["inline"] and a["cid"] and ("cid:" + a["cid"]) in html]
     if html:
         m.add_alternative("<!doctype html><html><body>%s</body></html>" % html, subtype="html")
+        html_part = m.get_payload()[1]
+        for a in embedded:  # ảnh chèn trong nội dung: đi kèm phần HTML (multipart/related)
+            main, _, sub = a["ctype"].partition("/")
+            html_part.add_related(bytes(a["data"]), maintype=main, subtype=sub, cid="<%s>" % a["cid"],
+                                  filename=a["filename"])
     for a in attachments:
+        if a["inline"]:
+            continue
         main, _, sub = (a["ctype"] or "application/octet-stream").partition("/")
         m.add_attachment(bytes(a["data"]), maintype=main, subtype=sub or "octet-stream", filename=a["filename"])
     return m.as_bytes(policy=policy.SMTP.clone(cte_type="7bit"))
@@ -259,8 +267,9 @@ _FRAG_TAGS = {"b", "strong", "i", "em", "u", "s", "strike", "p", "br", "div", "s
 
 
 class _Fragment(HTMLParser):
-    def __init__(self):
+    def __init__(self, img_src=None):
         super().__init__(convert_charrefs=True)
+        self.img_src = img_src
         self.out = []
         self.skip = 0
         self.open = []
@@ -268,6 +277,12 @@ class _Fragment(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag in _DROP_WITH_CONTENT or tag == "style":
             self.skip += 1
+            return
+        if tag == "img" and not self.skip and self.img_src:
+            # Chỉ giữ ảnh mà máy chủ nhận ra là ảnh đã tải lên cho chính thư nháp này.
+            src = self.img_src(dict(attrs).get("src") or "")
+            if src:
+                self.out.append('<img src="%s" alt="">' % html.escape(src, quote=True))
             return
         if self.skip or tag not in _FRAG_TAGS:
             return
@@ -281,7 +296,9 @@ class _Fragment(HTMLParser):
             self.open.append(tag)
 
     def handle_startendtag(self, tag, attrs):
-        if tag in ("br", "hr") and not self.skip:
+        if tag == "img":
+            self.handle_starttag(tag, attrs)
+        elif tag in ("br", "hr") and not self.skip:
             self.out.append("<%s>" % tag)
 
     def handle_endtag(self, tag):
@@ -301,9 +318,25 @@ class _Fragment(HTMLParser):
             self.out.append(html.escape(data, quote=False))
 
 
-def sanitize_fragment(doc):
-    """Làm sạch HTML soạn trong trình duyệt: chỉ giữ thẻ định dạng cơ bản, không thuộc tính (trừ liên kết)."""
-    f = _Fragment()
+def image_type(data):
+    """Loại ảnh theo chữ ký tệp (không tin phần mở rộng hay Content-Type do máy khách gửi), hoặc None."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def sanitize_fragment(doc, img_src=None):
+    """Làm sạch HTML soạn trong trình duyệt: chỉ giữ thẻ định dạng cơ bản, không thuộc tính (trừ liên kết).
+
+    img_src: hàm đổi địa chỉ ảnh thành địa chỉ được phép (hoặc None để bỏ ảnh); không truyền thì bỏ mọi ảnh.
+    """
+    f = _Fragment(img_src)
     try:
         f.feed(doc or "")
         f.close()

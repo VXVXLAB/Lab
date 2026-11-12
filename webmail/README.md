@@ -24,18 +24,18 @@ EOF
 ## Tính năng
 
 **Webmail**
-- Hộp thư đến, Có gắn sao, Thư đã gửi, Thư nháp, Thư rác, Thùng rác (khôi phục được); tìm kiếm; chọn nhiều thư để xử lý.
-- Soạn thư có định dạng (đậm, nghiêng, gạch chân, danh sách, trích dẫn, liên kết), trả lời, trả lời tất cả, chuyển tiếp, Cc/Bcc, đính kèm tệp, tự lưu nháp khi đóng, `Ctrl+Enter` để gửi.
+- Hộp thư đến, Có gắn sao, Thư đã gửi, Thư nháp, Thư rác, Thùng rác (khôi phục được); **thư mục tự tạo** (tạo, đổi tên, xóa, chuyển thư vào); tìm kiếm; chọn nhiều thư để xử lý.
+- Soạn thư có định dạng (đậm, nghiêng, gạch chân, danh sách, trích dẫn, liên kết, **chèn hoặc dán ảnh vào giữa nội dung**), trả lời, trả lời tất cả, chuyển tiếp, Cc/Bcc, đính kèm tệp, tự lưu nháp khi đóng, `Ctrl+Enter` để gửi.
 - Thư HTML được làm sạch và hiển thị trong khung cách ly; hình ảnh từ bên ngoài bị chặn cho tới khi bạn bấm "Hiện hình ảnh".
 - Thông báo thư mới, giao diện sáng/tối theo hệ thống, dùng tốt trên điện thoại.
 - Quản trị: tạo/xóa hộp thư, đặt lại mật khẩu, xem các bản ghi DNS cần khai báo.
 
 **Máy chủ thư**
-- **IMAP và POP3** (STARTTLS và TLS) để dùng với Outlook, Thunderbird, ứng dụng thư trên điện thoại; thông số kết nối xem trong mục **Kết nối ứng dụng thư** của webmail. Thay đổi trên ứng dụng thư và webmail đồng bộ với nhau.
+- **IMAP và POP3** (STARTTLS và TLS) để dùng với Outlook, Thunderbird, ứng dụng thư trên điện thoại; thông số kết nối xem trong mục **Kết nối ứng dụng thư** của webmail. Thay đổi trên ứng dụng thư và webmail đồng bộ với nhau, kể cả thư mục tự tạo (tên có dấu hiển thị đúng).
 - **Cổng gửi thư có xác thực** (submission): bắt buộc TLS và đăng nhập, chỉ gửi được dưới địa chỉ của chính mình.
 - Chỉ nhận thư cho tên miền của mình (không trung chuyển hộ), hỗ trợ địa chỉ `ten+nhan@`, hàng đợi gửi có thử lại, tự báo lại khi thư không tới.
 - **Ký DKIM** mọi thư gửi đi (khóa tự tạo trong thư mục dữ liệu).
-- **Lọc thư rác**: kiểm tra SPF, DKIM, DMARC của thư đến; chặn thư giả mạo tên miền nội bộ; bộ lọc Bayes học riêng cho từng người dùng từ các lần bấm "Báo thư rác" / "Không phải thư rác" (kể cả khi kéo thư vào/ra thư mục Junk trên ứng dụng thư); tùy chọn danh sách đen DNS. Thư trong Thư rác và Thùng rác tự xóa sau 30 ngày.
+- **Lọc thư rác**: kiểm tra SPF, DKIM, DMARC của thư đến (xác định tên miền tổ chức theo Public Suffix List); chặn thư giả mạo tên miền nội bộ; bộ lọc Bayes học riêng cho từng người dùng từ các lần bấm "Báo thư rác" / "Không phải thư rác" (kể cả khi kéo thư vào/ra thư mục Junk trên ứng dụng thư); tùy chọn danh sách đen DNS. Thư trong Thư rác và Thùng rác tự xóa sau 30 ngày.
 
 ## Cấu hình (biến môi trường)
 
@@ -87,11 +87,9 @@ python -m webmail dns                             # in các bản ghi DNS cần 
 python webmail/tests/test_end_to_end.py
 ```
 
-Bộ kiểm thử chạy một máy chủ thật trên cổng tạm rồi đi qua web API, SMTP, IMAP, POP3, kèm các kiểm tra bảo mật (phân quyền giữa người dùng, chống giả mạo người gửi, làm sạch HTML, khóa khi dò mật khẩu).
+Bộ kiểm thử chạy một máy chủ thật trên cổng tạm rồi đi qua web API, SMTP, IMAP, POP3, kèm các kiểm tra bảo mật (phân quyền giữa người dùng, chống giả mạo người gửi, làm sạch HTML, khóa khi dò mật khẩu). Nếu có cài `imapclient` và `curl`, bộ kiểm thử dùng thêm hai client này.
 
 ## Giới hạn hiện tại
 
-- IMAP/POP3 được kiểm thử bằng thư viện chuẩn của Python; chưa thử với từng ứng dụng thư cụ thể (Outlook, Thunderbird, iOS Mail).
-- Thư mục cố định (Hộp thư đến, Đã gửi, Nháp, Thư rác, Thùng rác); chưa tạo được thư mục riêng.
-- Việc xác định "tên miền tổ chức" khi kiểm tra DMARC là xấp xỉ (không dùng Public Suffix List).
-- Khung soạn thư chưa chèn được ảnh vào giữa nội dung (ảnh gửi dưới dạng tệp đính kèm).
+- IMAP/POP3/SMTP được kiểm thử tự động bằng bốn client độc lập (`imaplib`/`poplib`/`smtplib` của Python, `imapclient`, `curl`), nhưng chưa thử trực tiếp với Outlook, Thunderbird hay iOS Mail. Mỗi ứng dụng có thói quen riêng, nên hãy thử với ứng dụng bạn dùng trước khi triển khai rộng.
+- Thư mục tự tạo chỉ có một cấp (chưa có thư mục con).

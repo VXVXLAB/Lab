@@ -34,6 +34,10 @@ const ICONS = {
   link: 'M10 14a4 4 0 0 0 5.700 0l3-3a4 4 0 0 0-5.700-5.700l-1 1M14 10a4 4 0 0 0-5.700 0l-3 3a4 4 0 0 0 5.700 5.700l1-1',
   eraser: 'M8 19h11M5.500 15.500l8-8 4.500 4.500-7 7H8l-2.500-2.500a1 1 0 0 1 0-1z',
   copy: 'M9 9h10v11H9V9zM5 15V4h10',
+  plus: 'M12 5v14M5 12h14',
+  folder: 'M3 7a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7z',
+  image: 'M4 5h16v14H4V5zM4 16l4.500-4.500 4 4 3-3L20 16M9 9.500h.010',
+  more: 'M5 12h.010M12 12h.010M19 12h.010',
 };
 function icon(name) {
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + ICONS[name] + '"/></svg>';
@@ -65,12 +69,19 @@ const FOLDERS = [
   { id: 'spam', name: 'Thư rác', icon: 'alert', empty: 'Không có thư rác. Thư ở đây tự xóa sau 30 ngày.' },
   { id: 'trash', name: 'Thùng rác', icon: 'trash', empty: 'Thùng rác trống.' },
 ];
-const FOLDER_NAME = Object.fromEntries(FOLDERS.map((f) => [f.id, f.name]));
+/** Thông tin thư mục (có sẵn hoặc do người dùng tạo) theo mã. */
+function folderInfo(id) {
+  const sys = FOLDERS.find((f) => f.id === id);
+  if (sys) return sys;
+  const c = state.custom.find((f) => f.id === id);
+  return { id, name: c ? c.name : 'Thư mục', icon: 'folder', empty: 'Thư mục này chưa có thư. Mở một thư rồi bấm biểu tượng thư mục để chuyển thư vào đây.' };
+}
+const folderName = (id) => folderInfo(id).name;
 
 const state = {
   me: null, domain: '', setup: false,
   folder: 'inbox', q: '', page: 0, items: [], total: 0, pageSize: 50,
-  selected: new Set(), current: null, counts: {}, latest: null, timer: null,
+  selected: new Set(), current: null, counts: {}, custom: [], latest: null, timer: null,
 };
 
 // ---------- tiện ích ----------
@@ -207,6 +218,10 @@ function renderFolders() {
       onclick: () => openFolder(f.id),
     }, h('span', { html: icon(f.icon) }), f.name, n ? h('span', { class: 'count' }, String(n)) : null));
   }));
+  $('#custom-folders').replaceChildren(...state.custom.map((f) => h('li', { class: f.id === state.folder && !state.q ? 'active' : '' },
+    h('button', { class: 'open', onclick: () => openFolder(f.id) }, h('span', { html: icon('folder') }),
+      h('span', { class: 'name' }, f.name), f.unread ? h('span', { class: 'count' }, String(f.unread)) : null),
+    h('button', { class: 'icon-btn more', title: 'Đổi tên hoặc xóa thư mục', html: icon('more'), onclick: () => folderModal(f) }))));
 }
 
 async function refreshCounts() {
@@ -214,7 +229,10 @@ async function refreshCounts() {
   try {
     const r = await api('GET', '/api/folders');
     state.counts = r.counts;
+    state.custom = r.custom || [];
+    if (/^f\d+$/.test(state.folder) && !state.custom.some((f) => f.id === state.folder)) return openFolder('inbox');
     renderFolders();
+    if (!state.q && !state.selected.size) $('#folder-title').textContent = folderName(state.folder);
     document.title = (r.counts.inbox ? '(' + r.counts.inbox + ') ' : '') + 'Hộp thư';
     if (state.latest !== null && r.latest > state.latest) {
       toast('Bạn có thư mới');
@@ -245,7 +263,7 @@ async function loadList(quiet) {
 
 function renderList() {
   const { items, total, page, pageSize } = state;
-  $('#folder-title').textContent = state.q ? 'Kết quả cho “' + state.q + '”' : FOLDER_NAME[state.folder];
+  $('#folder-title').textContent = state.q ? 'Kết quả cho “' + state.q + '”' : folderName(state.folder);
   $('#range').textContent = total ? (page * pageSize + 1) + '–' + (page * pageSize + items.length) + ' / ' + total : '';
   $('#prev').disabled = page === 0;
   $('#next').disabled = (page + 1) * pageSize >= total;
@@ -253,7 +271,7 @@ function renderList() {
   $('#empty-trash').textContent = state.folder === 'spam' ? 'Xóa hết thư rác' : 'Dọn thùng rác';
   const list = $('#list');
   if (!items.length) {
-    const f = FOLDERS.find((x) => x.id === state.folder);
+    const f = folderInfo(state.folder);
     list.replaceChildren(h('div', { class: 'empty' },
       h('div', { class: 'empty-art', html: icon(state.q ? 'search' : f.icon) }),
       h('p', null, state.q ? 'Không tìm thấy thư nào phù hợp.' : f.empty)));
@@ -285,7 +303,7 @@ function rowEl(m) {
   h('span', { class: 'who' }, who),
   h('span', { class: 'date' }, fmtDate(m.date)),
   h('span', { class: 'line2' },
-    state.q || state.folder === 'starred' ? h('span', { class: 'tag' }, FOLDER_NAME[m.folder]) : null,
+    state.q || state.folder === 'starred' ? h('span', { class: 'tag' }, folderName(m.folder)) : null,
     h('span', { class: 'subject' }, m.subject || '(không có tiêu đề)'),
     h('span', { class: 'snippet' }, m.snippet ? '– ' + m.snippet : ''),
     m.has_attach ? h('span', { class: 'clip', title: 'Có tệp đính kèm', html: icon('clip') }) : null));
@@ -297,15 +315,16 @@ function updateBulk() {
   $('#folder-title').hidden = n > 0;
   document.querySelector('[data-bulk=restore]').hidden = state.folder !== 'trash';
   document.querySelector('[data-bulk=notspam]').hidden = state.folder !== 'spam';
+  document.querySelector('[data-bulk=move]').hidden = ['drafts', 'trash'].includes(state.folder);
   document.querySelector('[data-bulk=spam]').hidden = ['spam', 'sent', 'drafts', 'trash'].includes(state.folder);
   const all = $('#sel-all');
   all.checked = n > 0 && n === state.items.length;
   all.indeterminate = n > 0 && n < state.items.length;
 }
 
-async function act(ids, action, done) {
+async function act(ids, action, done, folder) {
   try {
-    await api('POST', '/api/messages/action', { ids, action });
+    await api('POST', '/api/messages/action', { ids, action, folder });
     if (done) toast(done);
     await loadList();
     refreshCounts();
@@ -326,6 +345,7 @@ $('#bulk').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-bulk]');
   if (!b) return;
   const ids = [...state.selected], a = b.dataset.bulk;
+  if (a === 'move') return moveModal(ids);
   if (state.current && ids.includes(state.current.id) && !['read', 'unread'].includes(a)) closeReader();
   const permanent = a === 'delete' && (state.folder === 'trash' || state.folder === 'drafts');
   const go = () => act(ids, a, { delete: permanent ? 'Đã xóa vĩnh viễn' : 'Đã chuyển vào Thùng rác', restore: 'Đã khôi phục',
@@ -390,7 +410,8 @@ async function openMessage(m) {
   $('#r-date').textContent = fmtDate(d.date, true);
   $('#r-restore').hidden = d.folder !== 'trash';
   $('#r-unread').hidden = d.folder === 'sent';
-  $('#r-spam').hidden = d.folder !== 'inbox';
+  $('#r-spam').hidden = d.folder !== 'inbox' && !/^f\d+$/.test(d.folder);
+  $('#r-move').hidden = d.folder === 'trash';
   $('#r-notspam').hidden = d.folder !== 'spam';
   paintStar();
   $('#r-images').hidden = true;
@@ -437,6 +458,7 @@ $('#r-star').addEventListener('click', () => {
 });
 $('#r-unread').addEventListener('click', () => { const id = state.current.id; closeReader(); act([id], 'unread', 'Đã đánh dấu chưa đọc'); });
 $('#r-restore').addEventListener('click', () => { const id = state.current.id; closeReader(); act([id], 'restore', 'Đã khôi phục'); });
+$('#r-move').addEventListener('click', () => moveModal([state.current.id]));
 $('#r-spam').addEventListener('click', () => { const id = state.current.id; closeReader(); act([id], 'spam', 'Đã chuyển vào Thư rác. Bộ lọc sẽ ghi nhớ.'); });
 $('#r-notspam').addEventListener('click', () => { const id = state.current.id; closeReader(); act([id], 'notspam', 'Đã chuyển về Hộp thư đến'); });
 $('#r-delete').addEventListener('click', () => {
@@ -492,7 +514,7 @@ const cFields = () => {
   const text = editor.innerText.replace(/\u00a0/g, ' ');
   return {
     to: $('#c-to').value.trim(), cc: $('#c-cc').value.trim(), bcc: $('#c-bcc').value.trim(),
-    subject: $('#c-subject').value, body: text, html: text.trim() ? editor.innerHTML : '',
+    subject: $('#c-subject').value, body: text, html: text.trim() || editor.querySelector('img') ? editor.innerHTML : '',
   };
 };
 
@@ -551,7 +573,7 @@ async function saveDraft() {
 /** Đóng khung soạn: lưu nháp nếu có nội dung. Trả về false nếu lưu lỗi. */
 async function closeCompose() {
   const f = cFields();
-  const hasContent = f.to || f.cc || f.bcc || f.subject.trim() || f.body.trim() || draft.attachments.length;
+  const hasContent = f.to || f.cc || f.bcc || f.subject.trim() || f.body.trim() || f.html || draft.attachments.length;
   try {
     if (hasContent && JSON.stringify(f) !== draft.saved) { await saveDraft(); toast('Đã lưu thư nháp'); }
     else if (!hasContent && draft.id) await api('POST', '/api/messages/action', { ids: [draft.id], action: 'delete' });
@@ -626,9 +648,30 @@ $('#c-tools').addEventListener('click', (ev) => {
   }
   document.execCommand(b.dataset.cmd, false, arg);
 });
-// Dán: chỉ lấy văn bản thuần để không mang theo định dạng và mã lạ từ trang khác.
+/** Tải ảnh lên thư nháp rồi chèn vào vị trí con trỏ; ảnh sẽ nằm ngay trong nội dung thư khi gửi. */
+async function insertImages(files) {
+  const status = $('#c-status');
+  try {
+    if (!draft.id) await saveDraft();
+    for (const file of files) {
+      status.textContent = 'Đang tải ảnh ' + (file.name || '') + '…';
+      const fd = new FormData();
+      fd.append('file', file, file.name || 'anh.png');
+      fd.append('inline', '1');
+      const r = await api('POST', '/api/drafts/' + draft.id + '/attachments', fd);
+      editor.focus();
+      document.execCommand('insertImage', false, r.url);
+    }
+  } catch (e) { fail(e); }
+  status.textContent = '';
+}
+$('#c-image').addEventListener('click', () => $('#c-image-file').click());
+$('#c-image-file').addEventListener('change', (ev) => { const files = [...ev.target.files]; ev.target.value = ''; insertImages(files); });
+// Dán: ảnh thì chèn vào thư; còn lại chỉ lấy văn bản thuần để không mang theo định dạng và mã lạ từ trang khác.
 editor.addEventListener('paste', (ev) => {
   ev.preventDefault();
+  const images = [...((ev.clipboardData || {}).files || [])].filter((f) => /^image\/(png|jpeg|gif|webp)$/.test(f.type));
+  if (images.length) return insertImages(images);
   document.execCommand('insertText', false, (ev.clipboardData || window.clipboardData).getData('text/plain'));
 });
 editor.addEventListener('drop', (ev) => ev.preventDefault());
@@ -732,6 +775,61 @@ function resetModal(u) {
   h('div', { class: 'modal-actions' },
     h('button', { type: 'button', class: 'btn', onclick: usersModal }, 'Quay lại'),
     h('button', { class: 'btn primary' }, 'Lưu'))));
+}
+
+function nameModal(title, value, okLabel, onOk) {
+  const input = h('input', { value: value || '', maxlength: '60', required: true, placeholder: 'Ví dụ: Dự án, Hóa đơn' });
+  const msg = h('p', { class: 'error', hidden: true });
+  openModal(h('form', { class: 'modal-form', onsubmit: async (ev) => {
+    ev.preventDefault();
+    try { await onOk(input.value.trim()); } catch (e) { msg.textContent = e.message; msg.hidden = false; }
+  } }, h('h2', null, title), h('label', null, 'Tên thư mục', input), msg,
+  h('div', { class: 'modal-actions' },
+    h('button', { type: 'button', class: 'btn', onclick: closeModal }, 'Thôi'),
+    h('button', { class: 'btn primary' }, okLabel))));
+  document.querySelector('.modal-form').style.cssText = 'display:grid;gap:14px';
+  input.select();
+}
+
+function newFolderModal(after) {
+  nameModal('Tạo thư mục', '', 'Tạo', async (name) => {
+    const r = await api('POST', '/api/folders', { name });
+    closeModal();
+    await refreshCounts();
+    if (after) after(r.id); else toast('Đã tạo thư mục ' + name);
+  });
+}
+$('#add-folder').addEventListener('click', () => newFolderModal());
+
+function folderModal(f) {
+  openModal(h('h2', null, f.name), h('div', { class: 'pick-list' },
+    h('button', { onclick: () => nameModal('Đổi tên thư mục', f.name, 'Lưu', async (name) => {
+      await api('PUT', '/api/folders/' + f.id.slice(1), { name });
+      closeModal(); toast('Đã đổi tên thư mục'); refreshCounts();
+    }) }, h('span', { html: icon('pen') }), 'Đổi tên'),
+    h('button', { onclick: () => confirmBox('Xóa thư mục “' + f.name + '”?', 'Thư bên trong sẽ được chuyển vào Thùng rác.', 'Xóa', async () => {
+      try {
+        await api('DELETE', '/api/folders/' + f.id.slice(1));
+        toast('Đã xóa thư mục');
+        if (state.folder === f.id) openFolder('inbox');
+        refreshCounts();
+      } catch (e) { fail(e); }
+    }) }, h('span', { html: icon('trash') }), 'Xóa thư mục')),
+  h('div', { class: 'modal-actions' }, h('button', { class: 'btn', onclick: closeModal }, 'Đóng')));
+}
+
+/** Chọn thư mục đích cho các thư đã chọn. */
+function moveModal(ids) {
+  const go = (id) => {
+    closeModal();
+    if (state.current && ids.includes(state.current.id)) closeReader();
+    act(ids, 'move', 'Đã chuyển vào ' + folderName(id), id);
+  };
+  const targets = [FOLDERS[0], ...state.custom.map((f) => folderInfo(f.id))].filter((f) => f.id !== state.folder || state.q);
+  openModal(h('h2', null, 'Chuyển tới thư mục'), h('div', { class: 'pick-list' },
+    targets.map((f) => h('button', { onclick: () => go(f.id) }, h('span', { html: icon(f.icon) }), f.name)),
+    h('button', { onclick: () => newFolderModal(go) }, h('span', { html: icon('plus') }), 'Tạo thư mục mới…')),
+  h('div', { class: 'modal-actions' }, h('button', { class: 'btn', onclick: closeModal }, 'Thôi')));
 }
 
 async function clientModal() {

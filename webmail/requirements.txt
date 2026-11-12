@@ -5,3 +5,4 @@ dnspython>=2.4
 cryptography>=42
 dkimpy>=1.1
 pyspf>=2.0.14
+publicsuffix2>=2.2
