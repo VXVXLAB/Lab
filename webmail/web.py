@@ -1,7 +1,9 @@
 """API web và phục vụ giao diện webmail."""
+import hashlib
+import hmac
 import os
+import threading
 import re
-import secrets
 import time
 from datetime import timedelta
 from functools import wraps
@@ -9,10 +11,10 @@ from urllib.parse import quote
 
 from flask import Flask, Response, g, jsonify, request, send_from_directory, session
 
-from . import config, db, delivery, mime
+from . import config, db, delivery, mime, security, spam
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-FOLDERS = ("inbox", "sent", "drafts", "trash")
+FOLDERS = ("inbox", "sent", "drafts", "spam", "trash")
 LOCAL_RE = re.compile(r"^[a-z0-9][a-z0-9._\-]{0,62}$")
 
 app = Flask(__name__, static_folder=STATIC, static_url_path="/static")
@@ -25,28 +27,38 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=14),
 )
 
-_fails = {}  # ip -> [số lần sai, khóa đến lúc]
+if config.TRUST_PROXY:  # lấy địa chỉ IP thật của người dùng từ X-Forwarded-For do reverse proxy đặt
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 
 def load_secret():
-    os.makedirs(config.DATA_DIR, exist_ok=True)
-    path = os.path.join(config.DATA_DIR, "secret.key")
-    if not os.path.exists(path):
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(secrets.token_hex(32))
-    with open(path) as f:
-        app.secret_key = f.read().strip()
+    app.secret_key = security.session_secret()
+
+
+_setup_lock = threading.Lock()
 
 
 def err(message, code=400):
     return jsonify(error=message), code
 
 
+def pw_stamp(user):
+    """Dấu vết của mật khẩu hiện tại; đổi mật khẩu thì mọi phiên đăng nhập cũ mất hiệu lực."""
+    return hashlib.sha256(("%s|%s" % (app.secret_key, user["pw_hash"])).encode()).hexdigest()[:24]
+
+
+def current_user():
+    user = db.get_user(session.get("uid") or 0)
+    if user and hmac.compare_digest(str(session.get("pw") or ""), pw_stamp(user)):
+        return user
+    return None
+
+
 def login_required(f):
     @wraps(f)
     def wrapper(*a, **kw):
-        user = db.get_user(session.get("uid") or 0)
+        user = current_user()
         if not user:
             return err("Phiên đăng nhập đã hết hạn.", 401)
         g.user = user
@@ -102,15 +114,32 @@ def user_json(u):
 
 
 def check_new_password(pw):
-    if len(pw or "") < 8:
+    if not isinstance(pw, str) or len(pw) < 8:
         raise ValueError("Mật khẩu cần ít nhất 8 ký tự.")
+    if len(pw) > 256:
+        raise ValueError("Mật khẩu quá dài.")
 
 
 @app.get("/api/me")
 def me():
-    user = db.get_user(session.get("uid") or 0)
+    user = current_user()
     return jsonify(user=user_json(user) if user else None, setup=db.user_count() == 0, domain=config.DOMAIN,
                    max_mb=config.MAX_SIZE // 1024 // 1024)
+
+
+@app.get("/api/client-settings")
+@login_required
+def client_settings():
+    """Thông số để cài hộp thư vào Outlook, Thunderbird, điện thoại."""
+    return jsonify(host=config.HOSTNAME, email=g.user["email"], self_signed=security.tls_self_signed(),
+                   imaps=config.IMAPS_PORT, imap=config.IMAP_PORT, pop3s=config.POP3S_PORT, pop3=config.POP3_PORT,
+                   submission=config.SUBMISSION_PORT)
+
+
+@app.get("/api/admin/dns")
+@admin_required
+def admin_dns():
+    return jsonify(records=security.dns_records())
 
 
 @app.post("/api/setup")
@@ -118,18 +147,29 @@ def setup():
     """Lần chạy đầu tiên: tạo tài khoản quản trị."""
     if db.user_count():
         return err("Hệ thống đã được thiết lập.", 403)
+    ip = request.remote_addr or "?"
+    if security.is_locked(ip):
+        return err("Nhập sai quá nhiều lần. Hãy thử lại sau vài phút.", 429)
     d = request.get_json(silent=True) or {}
-    local = (d.get("email") or "").strip().lower().split("@")[0]
+    if not security.check_setup_token(str(d.get("token") or "")):
+        security._record(ip, False)
+        return err("Mã thiết lập không đúng. Mã được in ra màn hình khi khởi động máy chủ.", 403)
+    local = str(d.get("email") or "").strip().lower().split("@")[0]
     try:
         if not LOCAL_RE.match(local):
             raise ValueError("Tên hộp thư chỉ gồm chữ thường, số, dấu chấm, gạch nối.")
         check_new_password(d.get("password"))
     except ValueError as e:
         return err(str(e))
-    uid = db.create_user("%s@%s" % (local, config.DOMAIN), d.get("name") or local, d["password"], True)
+    with _setup_lock:
+        if db.user_count():
+            return err("Hệ thống đã được thiết lập.", 403)
+        uid = db.create_user("%s@%s" % (local, config.DOMAIN), str(d.get("name") or local)[:100], d["password"], True)
+    security.clear_setup_token()
     session.clear()
     session.permanent = True
     session["uid"] = uid
+    session["pw"] = pw_stamp(db.get_user(uid))
     welcome = mime.build(
         "Hệ thống thư", "postmaster@" + config.DOMAIN, [("", "%s@%s" % (local, config.DOMAIN))], [],
         "Chào mừng bạn đến với hộp thư mới",
@@ -144,25 +184,17 @@ def setup():
 
 @app.post("/api/login")
 def login():
-    ip = request.remote_addr or "?"
-    rec = _fails.get(ip, [0, 0])
-    if rec[1] > time.time():
-        return err("Sai mật khẩu quá nhiều lần. Hãy thử lại sau vài phút.", 429)
     d = request.get_json(silent=True) or {}
-    email = (d.get("email") or "").strip().lower()
-    if "@" not in email:
-        email = "%s@%s" % (email, config.DOMAIN)
-    user = db.user_by_email(email)
-    if not user or not db.check_password(d.get("password") or "", user["pw_hash"]):
-        rec[0] += 1
-        if rec[0] >= 5:
-            rec = [0, time.time() + 300]
-        _fails[ip] = rec
+    user, why = security.authenticate(str(d.get("email") or ""), str(d.get("password") or ""),
+                                      request.remote_addr)
+    if why == "locked":
+        return err("Sai mật khẩu quá nhiều lần. Hãy thử lại sau vài phút.", 429)
+    if not user:
         return err("Địa chỉ thư hoặc mật khẩu không đúng.", 401)
-    _fails.pop(ip, None)
     session.clear()
     session.permanent = True
     session["uid"] = user["id"]
+    session["pw"] = pw_stamp(user)
     return jsonify(user=user_json(user))
 
 
@@ -176,13 +208,14 @@ def logout():
 @login_required
 def change_password():
     d = request.get_json(silent=True) or {}
-    if not db.check_password(d.get("old") or "", g.user["pw_hash"]):
+    if not db.check_password(str(d.get("old") or ""), g.user["pw_hash"]):
         return err("Mật khẩu hiện tại không đúng.")
     try:
         check_new_password(d.get("new"))
     except ValueError as e:
         return err(str(e))
     db.set_password(g.user["id"], d["new"])
+    session["pw"] = pw_stamp(db.get_user(g.user["id"]))  # giữ phiên này, các phiên khác bị đăng xuất
     return jsonify(ok=True)
 
 
@@ -197,9 +230,9 @@ def admin_users():
 @admin_required
 def admin_create_user():
     d = request.get_json(silent=True) or {}
-    local = (d.get("email") or "").strip().lower().split("@")[0]
+    local = str(d.get("email") or "").strip().lower().split("@")[0]
     try:
-        if not LOCAL_RE.match(local):
+        if not LOCAL_RE.match(local) or local in ("postmaster", "mailer-daemon"):
             raise ValueError("Tên hộp thư chỉ gồm chữ thường, số, dấu chấm, gạch nối.")
         check_new_password(d.get("password"))
     except ValueError as e:
@@ -207,7 +240,7 @@ def admin_create_user():
     email = "%s@%s" % (local, config.DOMAIN)
     if db.user_by_email(email):
         return err("Hộp thư %s đã tồn tại." % email)
-    uid = db.create_user(email, d.get("name") or local, d["password"], bool(d.get("is_admin")))
+    uid = db.create_user(email, str(d.get("name") or local)[:100], d["password"], bool(d.get("is_admin")))
     return jsonify(user=user_json(db.get_user(uid)))
 
 
@@ -255,6 +288,7 @@ def folders():
                        "GROUP BY folder", (uid,)):
         counts[r["folder"]] = r["n"] if r["folder"] == "drafts" else (r["unread"] or 0)
     counts["sent"] = 0
+    counts["trash"] = 0
     latest = c.execute("SELECT COALESCE(MAX(id),0) FROM messages WHERE user_id=? AND folder='inbox'",
                        (uid,)).fetchone()[0]
     return jsonify(counts=counts, latest=latest)
@@ -308,6 +342,7 @@ def get_message(mid):
     out.update(
         is_read=True, cc=r["cc_addrs"], bcc=r["bcc_addrs"], reply_to=r["reply_to"], text=r["body_text"],
         has_html=bool(r["body_html"]),
+        html=mime.sanitize_fragment(r["body_html"]) if r["folder"] == "drafts" and r["body_html"] else None,
         attachments=[{"id": a["id"], "filename": a["filename"], "size": a["size"], "ctype": a["ctype"]}
                      for a in db.list_attachments(mid) if not a["inline"]],
     )
@@ -353,16 +388,26 @@ def apply_action(c, uid, ids, action):
     marks = ",".join("?" * len(ids))
     base = " WHERE user_id=? AND id IN (%s)" % marks
     args = [uid] + ids
+    rows = c.execute("SELECT * FROM messages" + base, args).fetchall()
     if action in ("read", "unread"):
         c.execute("UPDATE messages SET is_read=?" + base, [int(action == "read")] + args)
     elif action in ("star", "unstar"):
         c.execute("UPDATE messages SET starred=?" + base, [int(action == "star")] + args)
     elif action == "delete":
         c.execute("DELETE FROM messages" + base + " AND folder IN ('trash','drafts')", args)
-        c.execute("UPDATE messages SET prev_folder=folder, folder='trash'" + base, args)
+        db.move_messages(c, uid, [r["id"] for r in rows if r["folder"] not in ("trash", "drafts")], "trash")
     elif action == "restore":
-        c.execute("UPDATE messages SET folder=COALESCE(prev_folder,'inbox'), prev_folder=NULL" + base +
-                  " AND folder='trash'", args)
+        for r in rows:
+            if r["folder"] == "trash":
+                back = r["prev_folder"] if r["prev_folder"] in ("inbox", "sent", "spam") else "inbox"
+                db.move_messages(c, uid, [r["id"]], back)
+    elif action in ("spam", "notspam"):
+        # Báo thư rác / không phải thư rác: chuyển thư và dạy bộ lọc của riêng người dùng này.
+        for r in rows:
+            if r["folder"] in ("drafts", "sent"):
+                continue
+            spam.set_trained(c, r, 1 if action == "spam" else 2)
+            db.move_messages(c, uid, [r["id"]], "spam" if action == "spam" else "inbox")
     else:
         raise ValueError("Thao tác không hợp lệ.")
 
@@ -371,7 +416,8 @@ def apply_action(c, uid, ids, action):
 @login_required
 def messages_action():
     d = request.get_json(silent=True) or {}
-    ids = [int(i) for i in d.get("ids") or [] if str(i).isdigit()][:500]
+    raw_ids = d.get("ids") if isinstance(d.get("ids"), list) else []
+    ids = [int(i) for i in raw_ids[:500] if isinstance(i, (int, str)) and str(i).isdigit() and len(str(i)) < 16]
     if not ids:
         return err("Chưa chọn thư nào.")
     try:
@@ -390,6 +436,14 @@ def empty_trash():
     return jsonify(ok=True)
 
 
+@app.post("/api/spam/empty")
+@login_required
+def empty_spam():
+    with db.conn() as c:
+        c.execute("DELETE FROM messages WHERE user_id=? AND folder='spam'", (g.user["id"],))
+    return jsonify(ok=True)
+
+
 # ---------- soạn thư ----------
 
 def own_draft(mid):
@@ -397,39 +451,63 @@ def own_draft(mid):
     return r if r and r["folder"] == "drafts" else None
 
 
+def as_id(value):
+    """Số nguyên dương từ dữ liệu JSON của máy khách, hoặc None."""
+    if isinstance(value, bool) or not isinstance(value, (int, str)) or not str(value).isdigit() or len(str(value)) > 15:
+        return None
+    return int(value)
+
+
+LIMITS = {"to": 20000, "cc": 20000, "bcc": 20000, "subject": 998, "body": 2_000_000, "html": 4_000_000}
+
+
 @app.post("/api/drafts")
 @login_required
 def save_draft():
     d = request.get_json(silent=True) or {}
-    fields = {k: str(d.get(k) or "") for k in ("to", "cc", "bcc", "subject", "body")}
+    fields = {}
+    for k, limit in LIMITS.items():
+        v = d.get(k)
+        v = v if isinstance(v, str) else ""
+        if len(v) > limit:
+            return err("Nội dung quá dài.", 413)
+        fields[k] = v
+    html_body = mime.sanitize_fragment(fields["html"]) if fields["html"].strip() else None
+    if html_body and not fields["body"].strip():
+        fields["body"] = mime.html_to_text(html_body)
     snippet = re.sub(r"\s+", " ", fields["body"]).strip()[:200]
     uid = g.user["id"]
-    if d.get("id"):
-        if not own_draft(int(d["id"])):
+    did = as_id(d.get("id"))
+    if did:
+        if not own_draft(did):
             return err("Thư nháp không còn tồn tại.", 404)
         with db.conn() as c:
-            c.execute("UPDATE messages SET to_addrs=?,cc_addrs=?,bcc_addrs=?,subject=?,body_text=?,snippet=?,date=?"
-                      " WHERE id=?", (fields["to"], fields["cc"], fields["bcc"], fields["subject"], fields["body"],
-                                      snippet, time.time(), int(d["id"])))
-        return jsonify(id=int(d["id"]))
+            c.execute("UPDATE messages SET to_addrs=?,cc_addrs=?,bcc_addrs=?,subject=?,body_text=?,body_html=?,"
+                      "snippet=?,date=? WHERE id=?",
+                      (fields["to"], fields["cc"], fields["bcc"], fields["subject"], fields["body"], html_body,
+                       snippet, time.time(), did))
+            delivery.rebuild_draft(c, g.user, did)
+        return jsonify(id=did)
     in_reply_to = refs = None
-    orig = own_message(int(d["reply_to_id"])) if d.get("reply_to_id") else None
+    reply_id, fwd_id = as_id(d.get("reply_to_id")), as_id(d.get("forward_of"))
+    orig = own_message(reply_id) if reply_id else None
     if orig and orig["msgid"]:
-        in_reply_to = orig["msgid"]
-        refs = ((orig["refs"] or "") + " " + orig["msgid"]).strip()
+        in_reply_to = orig["msgid"][:998]
+        refs = ((orig["refs"] or "") + " " + orig["msgid"]).strip()[-4000:]
     with db.conn() as c:
         cur = c.execute(
             "INSERT INTO messages(user_id,folder,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,subject,body_text,"
-            "snippet,date,is_read,in_reply_to,refs) VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?,?)",
+            "body_html,snippet,date,is_read,in_reply_to,refs,moved) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)",
             (uid, "drafts", g.user["email"], g.user["name"], fields["to"], fields["cc"], fields["bcc"],
-             fields["subject"], fields["body"], snippet, time.time(), in_reply_to, refs))
+             fields["subject"], fields["body"], html_body, snippet, time.time(), in_reply_to, refs, time.time()))
         did = cur.lastrowid
-        fwd = own_message(int(d["forward_of"])) if d.get("forward_of") else None
+        fwd = own_message(fwd_id) if fwd_id else None
         if fwd:
             c.execute("INSERT INTO attachments(message_id,filename,ctype,size,data) "
                       "SELECT ?,filename,ctype,size,data FROM attachments WHERE message_id=? AND inline=0",
                       (did, fwd["id"]))
             db.refresh_has_attach(c, did)
+        delivery.rebuild_draft(c, g.user, did)
     atts = [{"id": a["id"], "filename": a["filename"], "size": a["size"]} for a in db.list_attachments(did)]
     return jsonify(id=did, attachments=atts)
 
@@ -447,11 +525,13 @@ def add_attachment(did):
                              (did,)).fetchone()[0]
     if used + len(data) > config.MAX_SIZE * 0.7:
         return err("Tổng dung lượng tệp đính kèm vượt quá giới hạn.", 413)
-    name = os.path.basename((f.filename or "").replace("\\", "/")) or "tep-dinh-kem"
+    name = os.path.basename((f.filename or "").replace("\\", "/"))
+    name = re.sub(r"[\x00-\x1f\x7f]", "", name)[:200] or "tep-dinh-kem"
     with db.conn() as c:
         cur = c.execute("INSERT INTO attachments(message_id,filename,ctype,size,data) VALUES(?,?,?,?,?)",
                         (did, name, f.mimetype or "application/octet-stream", len(data), data))
         db.refresh_has_attach(c, did)
+        delivery.rebuild_draft(c, g.user, did)
     return jsonify(id=cur.lastrowid, filename=name, size=len(data))
 
 
@@ -463,6 +543,7 @@ def remove_attachment(did, aid):
     with db.conn() as c:
         c.execute("DELETE FROM attachments WHERE id=? AND message_id=?", (aid, did))
         db.refresh_has_attach(c, did)
+        delivery.rebuild_draft(c, g.user, did)
     return jsonify(ok=True)
 
 

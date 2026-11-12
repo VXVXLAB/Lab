@@ -1,15 +1,17 @@
-"""Nhận thư qua SMTP, phát thư nội bộ và hàng đợi gửi thư ra ngoài."""
+"""Nhận thư qua SMTP, cổng gửi thư có xác thực, phát thư nội bộ và hàng đợi gửi thư ra ngoài."""
+import asyncio
 import logging
 import smtplib
 import ssl
 import threading
 import time
-from email.utils import formatdate
+from email.utils import formatdate, parseaddr
 
-from . import config, db, mime
+from . import config, db, mime, security, spam
 
 log = logging.getLogger("webmail")
 RETRY_DELAYS = [60, 300, 900, 3600, 3 * 3600]  # giây; hết danh sách thì trả thư về
+MAX_RCPTS = 100
 _wake = threading.Event()
 
 
@@ -19,8 +21,25 @@ class PermanentError(Exception):
 
 # ---------- phát thư ----------
 
-def deliver_local(user, raw):
-    return db.insert_message(user["id"], "inbox", mime.parse(raw), raw=raw)
+def deliver_local(user, raw, auth=None):
+    """Lưu thư vào hộp của người dùng. auth: kết quả spam.check_inbound với thư từ bên ngoài, None với thư nội bộ."""
+    p = mime.parse(raw)
+    folder = "inbox"
+    toks = spam.tokens(p["subject"], p["text"], p["from_addr"]) if auth is not None else []
+    if auth is not None:
+        if auth["spam"]:
+            folder = "spam"
+        else:
+            score = spam.bayes_score(db.conn(), user["id"], toks)
+            if score is not None and score >= 0.92:
+                folder = "spam"
+    mid = db.insert_message(user["id"], folder, p, raw=raw)
+    if auth is not None and folder == "inbox":
+        # Coi thư vào hộp đến là thư thường; nếu người dùng báo rác, lần học này được đảo lại.
+        with db.conn() as c:
+            spam.train(c, user["id"], toks, False)
+            c.execute("UPDATE messages SET spam_trained=2 WHERE id=?", (mid,))
+    return mid
 
 
 def bounce(mail_from, rcpt, reason):
@@ -30,7 +49,7 @@ def bounce(mail_from, rcpt, reason):
         return
     text = (
         "Thư của bạn không gửi được tới địa chỉ sau:\n\n    %s\n\nLý do: %s\n\n"
-        "Hãy kiểm tra lại địa chỉ người nhận rồi gửi lại." % (rcpt, reason)
+        "Hãy kiểm tra lại địa chỉ người nhận rồi gửi lại." % (rcpt, str(reason)[:500])
     )
     raw = mime.build("Hệ thống thư", "postmaster@" + config.DOMAIN, [(sender["name"], sender["email"])], [],
                      "Không gửi được thư tới " + rcpt, text)
@@ -52,27 +71,58 @@ def route(mail_from, rcpt, raw):
     _wake.set()
 
 
+def _unique(addresses):
+    seen, out = set(), []
+    for a in addresses:
+        if a.lower() not in seen:
+            seen.add(a.lower())
+            out.append(a)
+    return out
+
+
+def rebuild_draft(c, user, did):
+    """Dựng lại bản MIME của thư nháp (để IMAP đọc được) và cấp UID mới vì nội dung đã đổi."""
+    d = c.execute("SELECT * FROM messages WHERE id=?", (did,)).fetchone()
+    atts = c.execute("SELECT * FROM attachments WHERE message_id=? ORDER BY id", (did,)).fetchall()
+
+    def lenient(value):
+        try:
+            return mime.split_addresses(value)
+        except ValueError:
+            return []
+    try:
+        raw = mime.build(user["name"], user["email"], lenient(d["to_addrs"]), lenient(d["cc_addrs"]), d["subject"],
+                         d["body_text"], atts, d["in_reply_to"], d["refs"], html=d["body_html"])
+    except Exception:
+        raw = None
+    c.execute("UPDATE messages SET raw=?, size=?, uid=? WHERE id=?",
+              (raw, len(raw) if raw else 0, db.next_uid(c), did))
+
+
 def send_draft(user, draft):
     """Gửi một thư nháp: lưu vào Thư đã gửi rồi phát tới từng người nhận."""
     to = mime.split_addresses(draft["to_addrs"])
     cc = mime.split_addresses(draft["cc_addrs"])
     bcc = mime.split_addresses(draft["bcc_addrs"])
-    if not (to or cc or bcc):
+    rcpts = _unique([a for _, a in to + cc + bcc])
+    if not rcpts:
         raise ValueError("Hãy nhập ít nhất một người nhận.")
+    if len(rcpts) > MAX_RCPTS:
+        raise ValueError("Mỗi thư chỉ gửi được tới tối đa %d người nhận." % MAX_RCPTS)
     atts = db.list_attachments(draft["id"], with_data=True)
     raw = mime.build(user["name"], user["email"], to, cc, draft["subject"], draft["body_text"], atts,
-                     draft["in_reply_to"], draft["refs"])
+                     draft["in_reply_to"], draft["refs"], html=draft["body_html"])
     if len(raw) > config.MAX_SIZE:
         raise ValueError("Thư vượt quá dung lượng cho phép.")
+    if not security.check_send_quota(user["id"], len(rcpts)):
+        raise ValueError("Bạn đã gửi quá nhiều thư trong một giờ. Hãy thử lại sau.")
+    raw = security.dkim_sign(raw, user["email"].rpartition("@")[2])
     with db.conn() as c:
         c.execute("DELETE FROM messages WHERE id=?", (draft["id"],))
     sent_id = db.insert_message(user["id"], "sent", mime.parse(raw), raw=raw, is_read=1,
                                 bcc=draft["bcc_addrs"])
-    seen = set()
-    for _, addr in to + cc + bcc:
-        if addr.lower() not in seen:
-            seen.add(addr.lower())
-            route(user["email"], addr, raw)
+    for addr in rcpts:
+        route(user["email"], addr, raw)
     return sent_id
 
 
@@ -96,12 +146,14 @@ def _smtp_send(host, port, mail_from, rcpt, raw, smarthost):
         if s.has_extn("starttls"):
             if smarthost:
                 s.starttls(context=ssl.create_default_context())
-            else:  # MX: mã hóa cơ hội, không bắt buộc chứng chỉ hợp lệ
+            else:  # MX: mã hóa cơ hội, không bắt buộc chứng chỉ hợp lệ (như các máy chủ thư khác)
                 ctx = ssl.create_default_context()
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
                 s.starttls(context=ctx)
             s.ehlo()
+        elif smarthost and config.SMARTHOST_USER:
+            raise RuntimeError("Máy chủ trung chuyển không hỗ trợ STARTTLS; không gửi mật khẩu qua kênh không mã hóa.")
         if smarthost and config.SMARTHOST_USER:
             s.login(config.SMARTHOST_USER, config.SMARTHOST_PASSWORD or "")
         s.sendmail(mail_from, [rcpt], raw)
@@ -129,7 +181,7 @@ def deliver_remote(mail_from, rcpt, raw):
             if 500 <= e.smtp_code < 600:
                 raise PermanentError(text)
             last = text
-        except (OSError, smtplib.SMTPException) as e:
+        except (OSError, smtplib.SMTPException, RuntimeError) as e:
             last = "%s: %s" % (host, e)
     raise RuntimeError(last or "Không kết nối được máy chủ nhận.")
 
@@ -160,20 +212,56 @@ def process_outbox():
                 bounce(row["mail_from"], row["rcpt"], failure)
 
 
+def purge_old():
+    """Xóa hẳn thư đã nằm trong Thư rác/Thùng rác quá thời hạn."""
+    if config.RETENTION_DAYS <= 0:
+        return
+    cutoff = time.time() - config.RETENTION_DAYS * 86400
+    with db.conn() as c:
+        c.execute("DELETE FROM messages WHERE folder IN ('trash','spam') AND COALESCE(moved,date)<?", (cutoff,))
+
+
 def outbox_worker():
+    last_purge = 0
     while True:
         _wake.wait(timeout=30)
         _wake.clear()
         try:
             process_outbox()
+            if time.time() - last_purge > 3600:
+                last_purge = time.time()
+                purge_old()
         except Exception:
             log.exception("Lỗi hàng đợi gửi thư")
 
 
-# ---------- nhận thư SMTP ----------
+# ---------- nhận thư SMTP (cổng 25) ----------
+
+def _store_inbound(peer, helo, mail_from, rcpts, content):
+    from_addr = mime.parse_from(content)
+    content = spam.strip_auth_results(content)
+    auth = spam.check_inbound(peer, helo, mail_from, content, from_addr)
+    # Thư từ Internet tự nhận là của tên miền nội bộ mà không có chữ ký hợp lệ: nhiều khả năng giả mạo.
+    if (not auth["spam"] and from_addr.rpartition("@")[2].lower() in config.DOMAINS
+            and spam._public_ip(peer) and auth["dkim"] != "pass"):
+        auth["spam"], auth["reason"] = True, "Giả mạo địa chỉ nội bộ"
+    received = "Received: from %s ([%s]) by %s with ESMTP; %s\r\n" % (
+        "".join(ch for ch in (helo or "unknown") if ch.isalnum() or ch in ".-_[]:")[:255] or "unknown",
+        peer, config.HOSTNAME, formatdate(localtime=True))
+    raw = auth["header"].encode("ascii", "replace") + received.encode("ascii", "replace") + content
+    done = set()
+    for rcpt in rcpts:
+        user = db.find_local_user(rcpt)
+        if user and user["id"] not in done:
+            done.add(user["id"])
+            deliver_local(user, raw, auth)
+    return auth
+
 
 class InboundHandler:
     async def handle_RCPT(self, server, session, envelope, address, rcpt_options):
+        if len(envelope.rcpt_tos) >= MAX_RCPTS:
+            return "452 4.5.3 Too many recipients"
         if address.rpartition("@")[2].lower() not in config.DOMAINS:
             return "550 5.7.1 Relaying denied"
         if not db.find_local_user(address):
@@ -183,21 +271,75 @@ class InboundHandler:
 
     async def handle_DATA(self, server, session, envelope):
         peer = session.peer[0] if session.peer else "unknown"
-        received = "Received: from %s ([%s]) by %s with ESMTP; %s\r\n" % (
-            session.host_name or "unknown", peer, config.HOSTNAME, formatdate(localtime=True))
-        raw = received.encode("ascii", "replace") + envelope.content
         try:
-            done = set()
-            for rcpt in envelope.rcpt_tos:
-                user = db.find_local_user(rcpt)
-                if user and user["id"] not in done:
-                    done.add(user["id"])
-                    deliver_local(user, raw)
+            auth = await asyncio.get_running_loop().run_in_executor(
+                None, _store_inbound, peer, session.host_name, envelope.mail_from, list(envelope.rcpt_tos),
+                envelope.content)
         except Exception:
             log.exception("Lỗi lưu thư đến")
             return "451 4.3.0 Temporary failure"
-        log.info("Nhận thư từ %s cho %s", envelope.mail_from, ", ".join(envelope.rcpt_tos))
+        log.info("Nhận thư từ %s cho %s%s", envelope.mail_from, ", ".join(envelope.rcpt_tos),
+                 " [thư rác: %s]" % auth["reason"] if auth["spam"] else "")
         return "250 2.0.0 OK"
+
+
+# ---------- cổng gửi thư cho ứng dụng thư (587) ----------
+
+def _smtp_authenticator(server, session, envelope, mechanism, auth_data):
+    from aiosmtpd.smtp import AuthResult, LoginPassword
+    if not isinstance(auth_data, LoginPassword):
+        return AuthResult(success=False, handled=False)
+    peer = session.peer[0] if session.peer else "?"
+    try:
+        user, _ = security.authenticate(auth_data.login.decode("utf-8", "replace"),
+                                        auth_data.password.decode("utf-8", "replace"), peer)
+    except Exception:
+        log.exception("Lỗi xác thực SMTP")
+        user = None
+    if not user:
+        return AuthResult(success=False, handled=False)
+    return AuthResult(success=True, auth_data={"id": user["id"], "email": user["email"]})
+
+
+def _submit(user, rcpts, content):
+    from_addr = mime.parse_from(content).lower()
+    if from_addr != user["email"]:
+        return "550 5.7.1 From header must be %s" % user["email"]
+    if not security.check_send_quota(user["id"], len(rcpts)):
+        return "451 4.7.1 Sending limit reached, try again later"
+    raw = security.dkim_sign(content, user["email"].rpartition("@")[2])
+    for rcpt in rcpts:
+        route(user["email"], rcpt, raw)
+    return "250 2.0.0 OK"
+
+
+class SubmissionHandler:
+    async def handle_MAIL(self, server, session, envelope, address, mail_options):
+        user = session.auth_data
+        if not user or address.lower() != user["email"]:
+            return "553 5.7.1 Sender address rejected: not owned by user"
+        envelope.mail_from = address
+        envelope.mail_options.extend(mail_options)
+        return "250 OK"
+
+    async def handle_RCPT(self, server, session, envelope, address, rcpt_options):
+        if len(envelope.rcpt_tos) >= MAX_RCPTS:
+            return "452 4.5.3 Too many recipients"
+        if not mime.ADDR_RE.match(address):
+            return "553 5.1.3 Bad recipient address"
+        envelope.rcpt_tos.append(address)
+        return "250 OK"
+
+    async def handle_DATA(self, server, session, envelope):
+        user = session.auth_data
+        if not user:
+            return "530 5.7.0 Authentication required"
+        try:
+            return await asyncio.get_running_loop().run_in_executor(
+                None, _submit, user, _unique(envelope.rcpt_tos), envelope.content)
+        except Exception:
+            log.exception("Lỗi gửi thư qua cổng submission")
+            return "451 4.3.0 Temporary failure"
 
 
 def start_smtp():
@@ -212,12 +354,18 @@ def start_smtp():
             return TolerantSMTP(self.handler, **self.SMTP_kwargs)
 
     logging.getLogger("mail.log").setLevel(logging.WARNING)
-    kwargs = {}
-    if config.TLS_CERT and config.TLS_KEY:
-        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        ctx.load_cert_chain(config.TLS_CERT, config.TLS_KEY)
-        kwargs["tls_context"] = ctx
-    controller = MailController(InboundHandler(), hostname=config.SMTP_HOST, port=config.SMTP_PORT,
-                            server_hostname=config.HOSTNAME, data_size_limit=config.MAX_SIZE, **kwargs)
-    controller.start()
-    return controller
+    tls = security.server_tls_context()
+    controllers = []
+    if config.SMTP_PORT:
+        controllers.append(MailController(
+            InboundHandler(), hostname=config.SMTP_HOST, port=config.SMTP_PORT, server_hostname=config.HOSTNAME,
+            data_size_limit=config.MAX_SIZE, tls_context=tls, timeout=120, ident="ESMTP"))
+    if config.SUBMISSION_PORT:
+        controllers.append(MailController(
+            SubmissionHandler(), hostname=config.SMTP_HOST, port=config.SUBMISSION_PORT,
+            server_hostname=config.HOSTNAME, data_size_limit=config.MAX_SIZE, tls_context=tls, timeout=120,
+            ident="ESMTP", authenticator=_smtp_authenticator, auth_required=True,
+            auth_require_tls=not config.ALLOW_PLAIN_AUTH))
+    for c in controllers:
+        c.start()
+    return controllers

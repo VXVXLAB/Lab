@@ -14,6 +14,9 @@
     <div class="logo" aria-hidden="true"></div>
     <h1 id="auth-title">Đăng nhập</h1>
     <p id="auth-sub" class="muted">Chào mừng bạn quay lại hộp thư.</p>
+    <label id="auth-token-row" hidden>Mã thiết lập
+      <input id="auth-token" autocomplete="off" spellcheck="false" placeholder="In trên màn hình máy chủ khi khởi động">
+    </label>
     <label id="auth-name-row" hidden>Họ và tên
       <input id="auth-name" autocomplete="name" placeholder="Nguyễn Văn An">
     </label>
@@ -44,6 +47,8 @@
     <div id="user-menu" class="menu" hidden>
       <div class="menu-head"><strong id="menu-name"></strong><span id="menu-email" class="muted"></span></div>
       <button id="act-users" hidden><span data-icon="users"></span>Quản lý người dùng</button>
+      <button id="act-dns" hidden><span data-icon="globe"></span>Bản ghi DNS của tên miền</button>
+      <button id="act-client"><span data-icon="phone"></span>Kết nối ứng dụng thư</button>
       <button id="act-password"><span data-icon="key"></span>Đổi mật khẩu</button>
       <button id="act-logout"><span data-icon="logout"></span>Đăng xuất</button>
     </div>
@@ -63,6 +68,8 @@
         <div id="bulk" hidden>
           <button class="icon-btn" data-bulk="read" title="Đánh dấu đã đọc" data-icon="mailopen"></button>
           <button class="icon-btn" data-bulk="unread" title="Đánh dấu chưa đọc" data-icon="mail"></button>
+          <button class="icon-btn" data-bulk="spam" title="Báo thư rác" data-icon="alert"></button>
+          <button class="icon-btn" data-bulk="notspam" title="Không phải thư rác" data-icon="inbox" hidden></button>
           <button class="icon-btn" data-bulk="restore" title="Khôi phục" data-icon="restore" hidden></button>
           <button class="icon-btn" data-bulk="delete" title="Xóa" data-icon="trash"></button>
         </div>
@@ -90,6 +97,8 @@
           <span class="spacer"></span>
           <button class="icon-btn" id="r-star" title="Gắn sao" data-icon="star"></button>
           <button class="icon-btn" id="r-unread" title="Đánh dấu chưa đọc" data-icon="mail"></button>
+          <button class="btn small" id="r-notspam" hidden><span data-icon="inbox"></span>Không phải thư rác</button>
+          <button class="icon-btn" id="r-spam" title="Báo thư rác" data-icon="alert"></button>
           <button class="icon-btn" id="r-restore" title="Khôi phục" data-icon="restore" hidden></button>
           <button class="icon-btn" id="r-delete" title="Xóa" data-icon="trash"></button>
         </div>
@@ -129,7 +138,19 @@
   <label class="c-row" id="c-cc-row" hidden><span>Cc</span><input id="c-cc" autocapitalize="none" spellcheck="false"></label>
   <label class="c-row" id="c-bcc-row" hidden><span>Bcc</span><input id="c-bcc" autocapitalize="none" spellcheck="false"></label>
   <label class="c-row"><span>Tiêu đề</span><input id="c-subject"></label>
-  <textarea id="c-body" placeholder="Viết nội dung thư…" aria-label="Nội dung"></textarea>
+  <div id="c-tools" role="toolbar" aria-label="Định dạng">
+    <button type="button" data-cmd="bold" title="Chữ đậm (Ctrl+B)"><b>B</b></button>
+    <button type="button" data-cmd="italic" title="Chữ nghiêng (Ctrl+I)"><i>I</i></button>
+    <button type="button" data-cmd="underline" title="Gạch chân (Ctrl+U)"><u>U</u></button>
+    <span class="sep"></span>
+    <button type="button" data-cmd="insertUnorderedList" title="Danh sách gạch đầu dòng" data-icon="list"></button>
+    <button type="button" data-cmd="insertOrderedList" title="Danh sách đánh số" data-icon="listnum"></button>
+    <button type="button" data-cmd="formatBlock" data-arg="blockquote" title="Trích dẫn" data-icon="quote"></button>
+    <button type="button" data-cmd="createLink" title="Chèn liên kết" data-icon="link"></button>
+    <span class="sep"></span>
+    <button type="button" data-cmd="removeFormat" title="Xóa định dạng" data-icon="eraser"></button>
+  </div>
+  <div id="c-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Nội dung" data-placeholder="Viết nội dung thư…"></div>
   <div id="c-attachments"></div>
   <div class="compose-foot">
     <button class="btn primary" id="c-send"><span data-icon="send"></span>Gửi</button>

@@ -45,6 +45,20 @@ def _content(part):
         return data.decode("utf-8", "replace")
 
 
+def parse_from(raw):
+    """Địa chỉ trong tiêu đề From; rỗng nếu thiếu hoặc có nhiều dòng From (dấu hiệu giả mạo)."""
+    from email.parser import BytesHeaderParser
+    try:
+        head = BytesHeaderParser(policy=policy.default).parsebytes(raw.split(b"\r\n\r\n", 1)[0])
+        values = head.get_all("From") or []
+        if len(values) != 1:
+            return ""
+        addrs = getaddresses([str(values[0])])
+        return addrs[0][1].strip() if len(addrs) == 1 else ""
+    except Exception:
+        return ""
+
+
 def parse(raw):
     msg = message_from_bytes(raw, policy=policy.default)
 
@@ -104,7 +118,7 @@ def parse(raw):
     }
 
 
-def build(from_name, from_addr, to, cc, subject, text, attachments=(), in_reply_to=None, refs=None):
+def build(from_name, from_addr, to, cc, subject, text, attachments=(), in_reply_to=None, refs=None, html=None):
     """to/cc: [(tên, địa chỉ)]; attachments: các dòng có filename/ctype/data. Trả về bytes."""
     def addrs(pairs):
         return [Address(display_name=n, addr_spec=a) for n, a in pairs]
@@ -123,6 +137,8 @@ def build(from_name, from_addr, to, cc, subject, text, attachments=(), in_reply_
     if refs:
         m["References"] = refs
     m.set_content(text or "")
+    if html:
+        m.add_alternative("<!doctype html><html><body>%s</body></html>" % html, subtype="html")
     for a in attachments:
         main, _, sub = (a["ctype"] or "application/octet-stream").partition("/")
         m.add_attachment(bytes(a["data"]), maintype=main, subtype=sub or "octet-stream", filename=a["filename"])
@@ -234,3 +250,65 @@ def sanitize_html(doc, cid_urls=None, allow_remote=False):
         "color:#57606a}</style></head><body>" + "".join(s.out) + "</body></html>"
     )
     return page, s.blocked
+
+
+# ---------- HTML do người dùng soạn: chỉ giữ một số thẻ định dạng ----------
+
+_FRAG_TAGS = {"b", "strong", "i", "em", "u", "s", "strike", "p", "br", "div", "span", "ul", "ol", "li", "a",
+              "blockquote", "h1", "h2", "h3", "pre", "code", "hr"}
+
+
+class _Fragment(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out = []
+        self.skip = 0
+        self.open = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _DROP_WITH_CONTENT or tag == "style":
+            self.skip += 1
+            return
+        if self.skip or tag not in _FRAG_TAGS:
+            return
+        extra = ""
+        if tag == "a":
+            href = re.sub(r"[\x00-\x20]", "", dict(attrs).get("href") or "")
+            if re.match(r"(?i)^(https?://|mailto:)", href):
+                extra = ' href="%s" target="_blank" rel="noopener noreferrer"' % html.escape(href, quote=True)
+        self.out.append("<%s%s>" % (tag, extra))
+        if tag not in ("br", "hr"):
+            self.open.append(tag)
+
+    def handle_startendtag(self, tag, attrs):
+        if tag in ("br", "hr") and not self.skip:
+            self.out.append("<%s>" % tag)
+
+    def handle_endtag(self, tag):
+        if tag in _DROP_WITH_CONTENT or tag == "style":
+            self.skip = max(0, self.skip - 1)
+            return
+        if self.skip or tag not in self.open:
+            return
+        while self.open:  # đóng cả các thẻ con còn mở để HTML luôn cân bằng
+            t = self.open.pop()
+            self.out.append("</%s>" % t)
+            if t == tag:
+                break
+
+    def handle_data(self, data):
+        if not self.skip:
+            self.out.append(html.escape(data, quote=False))
+
+
+def sanitize_fragment(doc):
+    """Làm sạch HTML soạn trong trình duyệt: chỉ giữ thẻ định dạng cơ bản, không thuộc tính (trừ liên kết)."""
+    f = _Fragment()
+    try:
+        f.feed(doc or "")
+        f.close()
+    except Exception:
+        return html.escape(html_to_text(doc or ""))
+    while f.open:
+        f.out.append("</%s>" % f.open.pop())
+    return "".join(f.out)

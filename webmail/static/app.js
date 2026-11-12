@@ -25,6 +25,15 @@ const ICONS = {
   key: 'M14.500 9.500a4 4 0 1 0-4.300 4L4 19.500V21h3v-2h2v-2h2l1.700-1.700a4 4 0 0 0 1.800-5.800zM16 8h.01',
   logout: 'M10 4H5v16h5M15 8l4 4-4 4M19 12H9',
   download: 'M12 4v11M7 11l5 5 5-5M5 20h14',
+  alert: 'M12 3l9.5 17h-19L12 3zM12 10v4.5M12 17.500v.010',
+  globe: 'M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zM3 12h18M12 3c2.500 2.500 3.800 5.500 3.800 9s-1.300 6.500-3.800 9c-2.500-2.500-3.800-5.500-3.800-9S9.500 5.500 12 3z',
+  phone: 'M8 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM11 18h2',
+  list: 'M9 6h11M9 12h11M9 18h11M4.500 6h.010M4.500 12h.010M4.500 18h.010',
+  listnum: 'M10 6h10M10 12h10M10 18h10M4 5l1.500-1v4M4 16.500c0-1.500 2.500-1.500 2.500 0c0 1-2.500 2-2.500 3.500h2.500',
+  quote: 'M5 17c2-1 3-2.500 3-5H5V7h5v5c0 3-1.500 5-4 6zM14 17c2-1 3-2.500 3-5h-3V7h5v5c0 3-1.500 5-4 6z',
+  link: 'M10 14a4 4 0 0 0 5.700 0l3-3a4 4 0 0 0-5.700-5.700l-1 1M14 10a4 4 0 0 0-5.700 0l-3 3a4 4 0 0 0 5.700 5.700l1-1',
+  eraser: 'M8 19h11M5.500 15.500l8-8 4.500 4.500-7 7H8l-2.500-2.500a1 1 0 0 1 0-1z',
+  copy: 'M9 9h10v11H9V9zM5 15V4h10',
 };
 function icon(name) {
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + ICONS[name] + '"/></svg>';
@@ -44,7 +53,7 @@ function h(tag, attrs, ...kids) {
     else if (k === 'html') el.innerHTML = v; // chỉ dùng cho biểu tượng cố định
     else el.setAttribute(k, v === true ? '' : v);
   }
-  for (const kid of kids.flat()) if (kid != null) el.append(kid);
+  for (const kid of kids.flat(Infinity)) if (kid != null) el.append(kid);
   return el;
 }
 
@@ -53,6 +62,7 @@ const FOLDERS = [
   { id: 'starred', name: 'Có gắn sao', icon: 'star', empty: 'Chưa có thư nào được gắn sao.' },
   { id: 'sent', name: 'Thư đã gửi', icon: 'send', empty: 'Bạn chưa gửi thư nào.' },
   { id: 'drafts', name: 'Thư nháp', icon: 'file', empty: 'Không có thư nháp.' },
+  { id: 'spam', name: 'Thư rác', icon: 'alert', empty: 'Không có thư rác. Thư ở đây tự xóa sau 30 ngày.' },
   { id: 'trash', name: 'Thùng rác', icon: 'trash', empty: 'Thùng rác trống.' },
 ];
 const FOLDER_NAME = Object.fromEntries(FOLDERS.map((f) => [f.id, f.name]));
@@ -142,12 +152,13 @@ function showAuth() {
   $('#auth-title').textContent = s ? 'Thiết lập hộp thư' : 'Đăng nhập';
   $('#auth-sub').textContent = s ? 'Tạo tài khoản quản trị đầu tiên để bắt đầu.' : 'Chào mừng bạn quay lại hộp thư.';
   $('#auth-name-row').hidden = !s;
+  $('#auth-token-row').hidden = !s;
   $('#auth-submit').textContent = s ? 'Tạo tài khoản' : 'Đăng nhập';
   $('#auth-password').autocomplete = s ? 'new-password' : 'current-password';
   $('#auth-domain').textContent = '@' + state.domain;
   $('#auth-error').hidden = true;
   document.title = 'Hộp thư';
-  (s ? $('#auth-name') : $('#auth-email')).focus();
+  (s ? $('#auth-token') : $('#auth-email')).focus();
 }
 
 $('#auth-form').addEventListener('submit', async (ev) => {
@@ -155,7 +166,8 @@ $('#auth-form').addEventListener('submit', async (ev) => {
   const btn = $('#auth-submit');
   btn.disabled = true;
   try {
-    const body = { email: $('#auth-email').value, password: $('#auth-password').value, name: $('#auth-name').value };
+    const body = { email: $('#auth-email').value, password: $('#auth-password').value, name: $('#auth-name').value,
+      token: $('#auth-token').value };
     const r = await api('POST', state.setup ? '/api/setup' : '/api/login', body);
     state.me = r.user; state.setup = false;
     $('#auth-password').value = '';
@@ -175,6 +187,7 @@ function showApp() {
   $('#menu-name').textContent = state.me.name;
   $('#menu-email').textContent = state.me.email;
   $('#act-users').hidden = !state.me.is_admin;
+  $('#act-dns').hidden = !state.me.is_admin;
   state.folder = 'inbox'; state.q = ''; state.page = 0; state.latest = null;
   $('#search-input').value = '';
   closeReader();
@@ -236,7 +249,8 @@ function renderList() {
   $('#range').textContent = total ? (page * pageSize + 1) + '–' + (page * pageSize + items.length) + ' / ' + total : '';
   $('#prev').disabled = page === 0;
   $('#next').disabled = (page + 1) * pageSize >= total;
-  $('#empty-trash').hidden = !(state.folder === 'trash' && total && !state.q);
+  $('#empty-trash').hidden = !((state.folder === 'trash' || state.folder === 'spam') && total && !state.q);
+  $('#empty-trash').textContent = state.folder === 'spam' ? 'Xóa hết thư rác' : 'Dọn thùng rác';
   const list = $('#list');
   if (!items.length) {
     const f = FOLDERS.find((x) => x.id === state.folder);
@@ -282,6 +296,8 @@ function updateBulk() {
   $('#bulk').hidden = n === 0;
   $('#folder-title').hidden = n > 0;
   document.querySelector('[data-bulk=restore]').hidden = state.folder !== 'trash';
+  document.querySelector('[data-bulk=notspam]').hidden = state.folder !== 'spam';
+  document.querySelector('[data-bulk=spam]').hidden = ['spam', 'sent', 'drafts', 'trash'].includes(state.folder);
   const all = $('#sel-all');
   all.checked = n > 0 && n === state.items.length;
   all.indeterminate = n > 0 && n < state.items.length;
@@ -310,9 +326,10 @@ $('#bulk').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-bulk]');
   if (!b) return;
   const ids = [...state.selected], a = b.dataset.bulk;
-  if (state.current && ids.includes(state.current.id) && (a === 'delete' || a === 'restore')) closeReader();
+  if (state.current && ids.includes(state.current.id) && !['read', 'unread'].includes(a)) closeReader();
   const permanent = a === 'delete' && (state.folder === 'trash' || state.folder === 'drafts');
-  const go = () => act(ids, a, { delete: permanent ? 'Đã xóa vĩnh viễn' : 'Đã chuyển vào Thùng rác', restore: 'Đã khôi phục' }[a]);
+  const go = () => act(ids, a, { delete: permanent ? 'Đã xóa vĩnh viễn' : 'Đã chuyển vào Thùng rác', restore: 'Đã khôi phục',
+    spam: 'Đã chuyển vào Thư rác', notspam: 'Đã chuyển về Hộp thư đến' }[a]);
   if (permanent) confirmBox('Xóa vĩnh viễn ' + ids.length + ' thư?', 'Thao tác này không thể hoàn tác.', 'Xóa', go);
   else go();
 });
@@ -320,8 +337,12 @@ $('#refresh').addEventListener('click', () => { loadList(); refreshCounts(); });
 $('#prev').addEventListener('click', () => { state.page--; loadList(); });
 $('#next').addEventListener('click', () => { state.page++; loadList(); });
 $('#empty-trash').addEventListener('click', () => {
-  confirmBox('Dọn sạch thùng rác?', 'Toàn bộ thư trong thùng rác sẽ bị xóa vĩnh viễn.', 'Dọn sạch', async () => {
-    try { await api('POST', '/api/trash/empty'); closeReader(); toast('Đã dọn thùng rác'); loadList(); } catch (e) { fail(e); }
+  const spam = state.folder === 'spam';
+  confirmBox(spam ? 'Xóa hết thư rác?' : 'Dọn sạch thùng rác?', 'Toàn bộ thư trong thư mục này sẽ bị xóa vĩnh viễn.', 'Xóa hết', async () => {
+    try {
+      await api('POST', spam ? '/api/spam/empty' : '/api/trash/empty');
+      closeReader(); toast('Đã xóa'); loadList(); refreshCounts();
+    } catch (e) { fail(e); }
   });
 });
 $('#search').addEventListener('submit', (ev) => {
@@ -349,7 +370,7 @@ async function openMessage(m) {
   let d;
   try { d = await api('GET', '/api/messages/' + m.id); } catch (e) { return fail(e); }
   if (d.folder === 'drafts') return openCompose({
-    id: d.id, to: d.to, cc: d.cc, bcc: d.bcc, subject: d.subject, body: d.text, attachments: d.attachments,
+    id: d.id, to: d.to, cc: d.cc, bcc: d.bcc, subject: d.subject, body: d.text, html: d.html, attachments: d.attachments,
   });
   state.current = d;
   if (!m.is_read) { m.is_read = true; refreshCounts(); }
@@ -369,6 +390,8 @@ async function openMessage(m) {
   $('#r-date').textContent = fmtDate(d.date, true);
   $('#r-restore').hidden = d.folder !== 'trash';
   $('#r-unread').hidden = d.folder === 'sent';
+  $('#r-spam').hidden = d.folder !== 'inbox';
+  $('#r-notspam').hidden = d.folder !== 'spam';
   paintStar();
   $('#r-images').hidden = true;
   renderBody(d, false);
@@ -414,6 +437,8 @@ $('#r-star').addEventListener('click', () => {
 });
 $('#r-unread').addEventListener('click', () => { const id = state.current.id; closeReader(); act([id], 'unread', 'Đã đánh dấu chưa đọc'); });
 $('#r-restore').addEventListener('click', () => { const id = state.current.id; closeReader(); act([id], 'restore', 'Đã khôi phục'); });
+$('#r-spam').addEventListener('click', () => { const id = state.current.id; closeReader(); act([id], 'spam', 'Đã chuyển vào Thư rác. Bộ lọc sẽ ghi nhớ.'); });
+$('#r-notspam').addEventListener('click', () => { const id = state.current.id; closeReader(); act([id], 'notspam', 'Đã chuyển về Hộp thư đến'); });
 $('#r-delete').addEventListener('click', () => {
   const d = state.current;
   const go = () => { closeReader(); act([d.id], 'delete', d.folder === 'trash' ? 'Đã xóa vĩnh viễn' : 'Đã chuyển vào Thùng rác'); };
@@ -421,9 +446,16 @@ $('#r-delete').addEventListener('click', () => {
   else go();
 });
 
+/** Các dòng văn bản -> nút DOM (chữ + xuống dòng), an toàn vì không đi qua innerHTML. */
+function textNodes(text) {
+  const out = [];
+  (text || '').replace(/\s+$/, '').split('\n').forEach((line, i) => { if (i) out.push(h('br')); out.push(line); });
+  return out;
+}
 function quote(d) {
-  return '\n\n\nVào ' + fmtDate(d.date, true) + ', ' + (d.from_name || d.from_addr) + ' <' + d.from_addr + '> đã viết:\n' +
-    (d.text || '').replace(/\s+$/, '').split('\n').map((l) => '> ' + l).join('\n') + '\n';
+  return [h('div', null, h('br')), h('div', null, h('br')),
+    h('div', null, 'Vào ' + fmtDate(d.date, true) + ', ' + (d.from_name || d.from_addr) + ' <' + d.from_addr + '> đã viết:'),
+    h('blockquote', null, textNodes(d.text))];
 }
 const withPrefix = (p, s) => (new RegExp('^' + p + ':', 'i').test(s || '') ? s : p + ': ' + (s || ''));
 
@@ -439,24 +471,30 @@ function reply(all) {
     }
     cc = rest.join(', ');
   }
-  openCompose({ to, cc, subject: withPrefix('Re', d.subject), body: quote(d), reply_to_id: d.id, title: 'Trả lời', focusBody: true });
+  openCompose({ to, cc, subject: withPrefix('Re', d.subject), nodes: quote(d), reply_to_id: d.id, title: 'Trả lời', focusBody: true });
 }
 $('#r-reply').addEventListener('click', () => reply(false));
 $('#r-replyall').addEventListener('click', () => reply(true));
 $('#r-forward').addEventListener('click', () => {
   const d = state.current;
-  const body = '\n\n\n---------- Thư chuyển tiếp ----------\nTừ: ' + (d.from_name ? d.from_name + ' ' : '') + '<' + d.from_addr +
-    '>\nNgày: ' + fmtDate(d.date, true) + '\nTiêu đề: ' + d.subject + '\nĐến: ' + d.to + '\n\n' + (d.text || '');
-  openCompose({ subject: withPrefix('Fwd', d.subject), body, forward_of: d.attachments.length ? d.id : null, title: 'Chuyển tiếp' });
+  const nodes = [h('div', null, h('br')), h('div', null, h('br')), h('div', null, textNodes(
+    '---------- Thư chuyển tiếp ----------\nTừ: ' + (d.from_name ? d.from_name + ' ' : '') + '<' + d.from_addr +
+    '>\nNgày: ' + fmtDate(d.date, true) + '\nTiêu đề: ' + d.subject + '\nĐến: ' + d.to)), h('div', null, h('br')),
+  h('div', null, textNodes(d.text))];
+  openCompose({ subject: withPrefix('Fwd', d.subject), nodes, forward_of: d.attachments.length ? d.id : null, title: 'Chuyển tiếp' });
 });
 
 // ---------- soạn thư ----------
 
 const draft = { id: null, reply_to_id: null, forward_of: null, attachments: [], busy: false, saved: '' };
-const cFields = () => ({
-  to: $('#c-to').value.trim(), cc: $('#c-cc').value.trim(), bcc: $('#c-bcc').value.trim(),
-  subject: $('#c-subject').value, body: $('#c-body').value,
-});
+const editor = $('#c-body');
+const cFields = () => {
+  const text = editor.innerText.replace(/\u00a0/g, ' ');
+  return {
+    to: $('#c-to').value.trim(), cc: $('#c-cc').value.trim(), bcc: $('#c-bcc').value.trim(),
+    subject: $('#c-subject').value, body: text, html: text.trim() ? editor.innerHTML : '',
+  };
+};
 
 async function openCompose(o) {
   o = o || {};
@@ -465,7 +503,10 @@ async function openCompose(o) {
     attachments: o.attachments || [], busy: false });
   $('#c-title').textContent = o.title || (o.id ? 'Thư nháp' : 'Thư mới');
   $('#c-to').value = o.to || ''; $('#c-cc').value = o.cc || ''; $('#c-bcc').value = o.bcc || '';
-  $('#c-subject').value = o.subject || ''; $('#c-body').value = o.body || '';
+  $('#c-subject').value = o.subject || '';
+  // o.html là HTML thư nháp đã được máy chủ làm sạch (chỉ còn thẻ định dạng cơ bản).
+  if (o.html) editor.innerHTML = o.html;
+  else editor.replaceChildren(...(o.nodes || textNodes(o.body)));
   $('#c-cc-row').hidden = !o.cc; $('#c-bcc-row').hidden = !o.bcc;
   $('#c-more').hidden = !!(o.cc && o.bcc);
   $('#c-status').textContent = '';
@@ -473,9 +514,15 @@ async function openCompose(o) {
   $('#compose').hidden = false;
   renderChips();
   if (draft.forward_of) { try { await saveDraft(); } catch (e) { fail(e); } }
-  const body = $('#c-body');
-  if (o.focusBody || o.to) { body.focus(); body.setSelectionRange(0, 0); body.scrollTop = 0; }
-  else $('#c-to').focus();
+  if (o.focusBody || o.to) {
+    editor.focus();
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    const range = document.createRange();
+    range.setStart(editor, 0); range.collapse(true);
+    sel.addRange(range);
+    editor.scrollTop = 0;
+  } else $('#c-to').focus();
 }
 
 function renderChips() {
@@ -566,6 +613,25 @@ $('#compose').addEventListener('submit', async (ev) => {
   if (!f.subject.trim()) confirmBox('Gửi thư không có tiêu đề?', 'Người nhận sẽ dễ theo dõi hơn nếu thư có tiêu đề.', 'Vẫn gửi', go);
   else go();
 });
+// Thanh định dạng: giữ vùng chọn trong khung soạn khi bấm nút.
+$('#c-tools').addEventListener('mousedown', (ev) => ev.preventDefault());
+$('#c-tools').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-cmd]');
+  if (!b) return;
+  editor.focus();
+  let arg = b.dataset.arg || null;
+  if (b.dataset.cmd === 'createLink') {
+    arg = (window.prompt('Địa chỉ liên kết (https://…):', 'https://') || '').trim();
+    if (!/^(https?:\/\/|mailto:)\S+$/i.test(arg)) { if (arg && arg !== 'https://') toast('Liên kết phải bắt đầu bằng https:// hoặc mailto:', true); return; }
+  }
+  document.execCommand(b.dataset.cmd, false, arg);
+});
+// Dán: chỉ lấy văn bản thuần để không mang theo định dạng và mã lạ từ trang khác.
+editor.addEventListener('paste', (ev) => {
+  ev.preventDefault();
+  document.execCommand('insertText', false, (ev.clipboardData || window.clipboardData).getData('text/plain'));
+});
+editor.addEventListener('drop', (ev) => ev.preventDefault());
 $('#compose').addEventListener('keydown', (ev) => {
   if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') { ev.preventDefault(); $('#compose').requestSubmit(); }
 });
@@ -574,10 +640,13 @@ $('#compose').addEventListener('keydown', (ev) => {
 
 function openModal(...kids) {
   const box = document.querySelector('.modal-box');
+  box.classList.remove('wide');
+  box.style.display = '';
   box.replaceChildren(...kids);
   $('#modal').hidden = false;
   const first = box.querySelector('input, button.primary');
-  if (first) first.focus();
+  if (first) first.focus({ preventScroll: true });
+  box.scrollTop = 0;
 }
 function closeModal() { $('#modal').hidden = true; }
 $('#modal').addEventListener('mousedown', (ev) => { if (ev.target.id === 'modal') closeModal(); });
@@ -665,12 +734,48 @@ function resetModal(u) {
     h('button', { class: 'btn primary' }, 'Lưu'))));
 }
 
+async function clientModal() {
+  let c;
+  try { c = await api('GET', '/api/client-settings'); } catch (e) { return fail(e); }
+  const row = (k, v) => [h('dt', null, k), h('dd', null, v)];
+  const box = (title, rows) => h('fieldset', null, h('legend', null, title), h('dl', { class: 'kv' }, rows));
+  const parts = [h('h2', null, 'Kết nối ứng dụng thư'),
+    h('p', { class: 'muted' }, 'Dùng các thông số sau để thêm hộp thư vào Outlook, Thunderbird hoặc ứng dụng thư trên điện thoại.'),
+    box('Tài khoản', [row('Tên đăng nhập', c.email), row('Mật khẩu', 'Mật khẩu hộp thư của bạn')])];
+  if (c.imaps || c.imap) parts.push(box('Nhận thư bằng IMAP (khuyên dùng)', [row('Máy chủ', c.host),
+    c.imaps ? row('Cổng', c.imaps + ' · SSL/TLS') : null, c.imap ? row(c.imaps ? 'Hoặc cổng' : 'Cổng', c.imap + ' · STARTTLS') : null]));
+  if (c.pop3s || c.pop3) parts.push(box('Nhận thư bằng POP3', [row('Máy chủ', c.host),
+    c.pop3s ? row('Cổng', c.pop3s + ' · SSL/TLS') : null, c.pop3 ? row(c.pop3s ? 'Hoặc cổng' : 'Cổng', c.pop3 + ' · STARTTLS') : null]));
+  if (c.submission) parts.push(box('Gửi thư bằng SMTP', [row('Máy chủ', c.host), row('Cổng', c.submission + ' · STARTTLS'),
+    row('Xác thực', 'Cùng tên đăng nhập và mật khẩu')]));
+  if (c.self_signed) parts.push(h('p', { class: 'notice' }, 'Máy chủ đang dùng chứng chỉ tự ký nên ứng dụng thư sẽ hỏi bạn có tin cậy chứng chỉ không. Quản trị viên nên cài chứng chỉ thật.'));
+  parts.push(h('div', { class: 'modal-actions' }, h('button', { class: 'btn primary', onclick: closeModal }, 'Đóng')));
+  openModal(...parts);
+}
+
+async function dnsModal() {
+  let recs;
+  try { recs = (await api('GET', '/api/admin/dns')).records; } catch (e) { return fail(e); }
+  openModal(h('h2', null, 'Bản ghi DNS của tên miền'),
+    h('p', { class: 'muted' }, 'Khai báo các bản ghi sau ở nơi quản lý tên miền để nhận được thư và để thư gửi đi không bị coi là thư rác.'),
+    h('div', { class: 'rec-list' }, recs.map((r) => h('div', { class: 'rec' },
+      h('div', { class: 'rec-head' }, h('span', { class: 'tag' }, r.type), h('strong', null, r.name), h('span', { class: 'spacer' }),
+        h('button', { class: 'icon-btn', title: 'Sao chép giá trị', html: icon('copy'), onclick: async () => {
+          try { await navigator.clipboard.writeText(r.value); toast('Đã sao chép'); } catch (e) { toast('Không sao chép được, hãy chọn và chép thủ công.', true); }
+        } })),
+      h('code', null, r.value), h('span', { class: 'muted' }, r.note)))),
+    h('div', { class: 'modal-actions' }, h('button', { class: 'btn primary', onclick: closeModal }, 'Đóng')));
+  document.querySelector('.modal-box').classList.add('wide');
+}
+
 // ---------- thanh trên ----------
 
 $('#user-btn').addEventListener('click', (ev) => { ev.stopPropagation(); $('#user-menu').hidden = !$('#user-menu').hidden; });
 document.addEventListener('click', (ev) => { if (!ev.target.closest('#user-menu')) $('#user-menu').hidden = true; });
 $('#act-password').addEventListener('click', () => { $('#user-menu').hidden = true; passwordModal(); });
 $('#act-users').addEventListener('click', () => { $('#user-menu').hidden = true; usersModal(); });
+$('#act-dns').addEventListener('click', () => { $('#user-menu').hidden = true; dnsModal(); });
+$('#act-client').addEventListener('click', () => { $('#user-menu').hidden = true; clientModal(); });
 $('#act-logout').addEventListener('click', async () => {
   $('#user-menu').hidden = true;
   if (!$('#compose').hidden && !(await closeCompose())) return;

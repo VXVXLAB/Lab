@@ -35,7 +35,24 @@ CREATE TABLE IF NOT EXISTS messages (
   size INTEGER NOT NULL DEFAULT 0,
   is_read INTEGER NOT NULL DEFAULT 0,
   starred INTEGER NOT NULL DEFAULT 0,
-  has_attach INTEGER NOT NULL DEFAULT 0
+  has_attach INTEGER NOT NULL DEFAULT 0,
+  uid INTEGER,
+  imap_flags TEXT NOT NULL DEFAULT '',
+  moved REAL,
+  spam_trained INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS uidseq (id INTEGER PRIMARY KEY AUTOINCREMENT);
+CREATE TABLE IF NOT EXISTS spam_tokens (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL,
+  spam INTEGER NOT NULL DEFAULT 0,
+  ham INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, token)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS spam_stats (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  spam INTEGER NOT NULL DEFAULT 0,
+  ham INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_msg_folder ON messages(user_id, folder, date DESC);
 CREATE TABLE IF NOT EXISTS attachments (
@@ -75,9 +92,50 @@ def conn():
     return c
 
 
+MIGRATIONS = [  # cột thêm sau phiên bản đầu
+    ("uid", "INTEGER"), ("imap_flags", "TEXT NOT NULL DEFAULT ''"), ("moved", "REAL"),
+    ("spam_trained", "INTEGER NOT NULL DEFAULT 0"),
+]
+
+
 def init():
-    with conn() as c:
+    c = conn()
+    have = {r["name"] for r in c.execute("PRAGMA table_info(messages)")}
+    with c:
+        for name, decl in MIGRATIONS:
+            if have and name not in have:
+                c.execute("ALTER TABLE messages ADD COLUMN %s %s" % (name, decl))
         c.executescript(SCHEMA)
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_msg_uid ON messages(uid)")
+        for r in c.execute("SELECT id FROM messages WHERE uid IS NULL ORDER BY id").fetchall():
+            c.execute("UPDATE messages SET uid=? WHERE id=?", (next_uid(c), r["id"]))
+
+
+def next_uid(c):
+    """UID IMAP: tăng dần trên toàn hệ thống, không bao giờ dùng lại."""
+    uid = c.execute("INSERT INTO uidseq DEFAULT VALUES").lastrowid
+    c.execute("DELETE FROM uidseq")
+    return uid
+
+
+def peek_next_uid():
+    r = conn().execute("SELECT seq FROM sqlite_sequence WHERE name='uidseq'").fetchone()
+    return (r[0] if r else 0) + 1
+
+
+def move_messages(c, user_id, ids, folder):
+    """Chuyển thư sang thư mục khác; mỗi thư nhận UID mới (yêu cầu của IMAP). Trả về {id: uid mới}."""
+    out = {}
+    for mid in ids:
+        r = c.execute("SELECT folder FROM messages WHERE id=? AND user_id=?", (mid, user_id)).fetchone()
+        if not r or r["folder"] == folder:
+            continue
+        uid = next_uid(c)
+        c.execute("UPDATE messages SET prev_folder=folder, folder=?, uid=?, moved=?, "
+                  "imap_flags=trim(replace(imap_flags, '\\Deleted', '')) WHERE id=?",
+                  (folder, uid, time.time(), mid))
+        out[mid] = uid
+    return out
 
 
 # ---------- mật khẩu ----------
@@ -135,19 +193,21 @@ def set_password(uid, password):
 
 # ---------- thư ----------
 
-def insert_message(user_id, folder, p, raw=None, is_read=0, bcc="", date=None):
+def insert_message(user_id, folder, p, raw=None, is_read=0, bcc="", date=None, starred=0, imap_flags=""):
     """p: dict từ mime.parse(). Trả về id thư."""
     with conn() as c:
         cur = c.execute(
             """INSERT INTO messages(user_id,folder,msgid,in_reply_to,refs,from_addr,from_name,reply_to,
-               to_addrs,cc_addrs,bcc_addrs,subject,date,snippet,body_text,body_html,raw,size,is_read,has_attach)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               to_addrs,cc_addrs,bcc_addrs,subject,date,snippet,body_text,body_html,raw,size,is_read,has_attach,
+               uid,starred,imap_flags,moved)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, folder, p.get("msgid"), p.get("in_reply_to"), p.get("refs"),
              p.get("from_addr", ""), p.get("from_name", ""), p.get("reply_to", ""),
              p.get("to", ""), p.get("cc", ""), bcc, p.get("subject", ""),
              date or time.time(), p.get("snippet", ""), p.get("text", ""), p.get("html"),
              raw, len(raw) if raw else 0, is_read,
-             int(any(not a["inline"] for a in p.get("attachments", [])))),
+             int(any(not a["inline"] for a in p.get("attachments", []))),
+             next_uid(c), starred, imap_flags, time.time()),
         )
         mid = cur.lastrowid
         for a in p.get("attachments", []):

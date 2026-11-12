@@ -31,6 +31,7 @@ def main():
     p = sub.add_parser("passwd", help="đặt lại mật khẩu")
     p.add_argument("name")
     sub.add_parser("users", help="liệt kê hộp thư")
+    sub.add_parser("dns", help="in các bản ghi DNS cần khai báo")
     args = ap.parse_args()
 
     db.init()
@@ -53,18 +54,35 @@ def main():
             print("%-32s %s%s" % (u["email"], u["name"], "  [quản trị]" if u["is_admin"] else ""))
         return
 
+    if args.cmd == "dns":
+        from . import security
+        for r in security.dns_records():
+            print("%-4s %s\n     %s\n     (%s)\n" % (r["type"], r["name"], r["value"], r["note"]))
+        return
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     from waitress import serve
+    from . import mailaccess, security
     from .web import app, load_secret
 
     load_secret()
+    security.dkim_key()
     delivery.start_smtp()
+    access = mailaccess.start()
     threading.Thread(target=delivery.outbox_worker, daemon=True).start()
     out = ("qua %s:%d" % (config.SMARTHOST, config.SMARTHOST_PORT)) if config.SMARTHOST else "gửi thẳng theo MX"
     print("Tên miền thư : %s" % ", ".join(config.DOMAINS))
     print("SMTP nhận thư: %s:%d" % (config.SMTP_HOST, config.SMTP_PORT))
+    if config.SUBMISSION_PORT:
+        print("SMTP gửi thư : %s:%d (STARTTLS + đăng nhập)" % (config.SMTP_HOST, config.SUBMISSION_PORT))
+    print("Đọc thư      : %s" % ", ".join("%s %d" % a for a in access))
     print("Gửi ra ngoài : %s" % out)
+    print("TLS          : %s" % ("chứng chỉ tự ký (ứng dụng thư sẽ cảnh báo; hãy đặt TLS_CERT/TLS_KEY)"
+                                 if security.tls_self_signed() else config.TLS_CERT))
     print("Webmail      : http://%s:%d" % (config.WEB_HOST, config.WEB_PORT))
+    if db.user_count() == 0:
+        print("\n>>> Mã thiết lập lần đầu: %s  (nhập mã này trên trang web để tạo tài khoản quản trị)\n"
+              % security.setup_token())
     serve(app, host=config.WEB_HOST, port=config.WEB_PORT, threads=8, ident=None)
 
 

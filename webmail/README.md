@@ -1,6 +1,6 @@
 # Webmail + máy chủ thư
 
-Một ứng dụng gọn nhẹ gồm cả **máy chủ thư** (nhận thư qua SMTP, gửi thư ra ngoài) và **webmail** tiếng Việt chạy trên trình duyệt. Dữ liệu nằm trong một tệp SQLite, không cần cài thêm dịch vụ nào.
+Một ứng dụng gọn nhẹ gồm cả **máy chủ thư** (SMTP nhận/gửi, IMAP, POP3) và **webmail** tiếng Việt chạy trên trình duyệt. Dữ liệu nằm trong một tệp SQLite, không cần cài thêm dịch vụ nào.
 
 ## Chạy thử
 
@@ -9,7 +9,7 @@ pip install -r webmail/requirements.txt
 MAIL_DOMAIN=congty.vn python -m webmail      # chạy từ thư mục gốc của repo
 ```
 
-Mở http://127.0.0.1:8080. Lần đầu, trang sẽ mời bạn tạo tài khoản quản trị; sau đó thêm người dùng trong mục **Quản lý người dùng** (bấm ảnh đại diện góc trên bên phải).
+Khi khởi động, màn hình in ra **mã thiết lập lần đầu**. Mở http://127.0.0.1:8080, nhập mã đó để tạo tài khoản quản trị; sau đó thêm người dùng trong mục **Quản lý người dùng** (bấm ảnh đại diện góc trên bên phải).
 
 Gửi thử một thư vào hộp thư qua SMTP:
 
@@ -23,33 +23,54 @@ EOF
 
 ## Tính năng
 
-- Hộp thư đến, Có gắn sao, Thư đã gửi, Thư nháp, Thùng rác (khôi phục được); tìm kiếm; chọn nhiều thư để xử lý.
-- Soạn thư, trả lời, trả lời tất cả, chuyển tiếp, Cc/Bcc, đính kèm tệp, tự lưu nháp khi đóng, `Ctrl+Enter` để gửi.
+**Webmail**
+- Hộp thư đến, Có gắn sao, Thư đã gửi, Thư nháp, Thư rác, Thùng rác (khôi phục được); tìm kiếm; chọn nhiều thư để xử lý.
+- Soạn thư có định dạng (đậm, nghiêng, gạch chân, danh sách, trích dẫn, liên kết), trả lời, trả lời tất cả, chuyển tiếp, Cc/Bcc, đính kèm tệp, tự lưu nháp khi đóng, `Ctrl+Enter` để gửi.
 - Thư HTML được làm sạch và hiển thị trong khung cách ly; hình ảnh từ bên ngoài bị chặn cho tới khi bạn bấm "Hiện hình ảnh".
-- Thông báo thư mới (tự kiểm tra 15 giây một lần), giao diện sáng/tối theo hệ thống, dùng tốt trên điện thoại.
-- Quản trị: tạo/xóa hộp thư, đặt lại mật khẩu ngay trên web hoặc bằng dòng lệnh.
-- Máy chủ: chỉ nhận thư cho tên miền của mình (không trung chuyển hộ), hỗ trợ địa chỉ `ten+nhan@`, hàng đợi gửi có thử lại, tự báo lại khi thư không tới.
+- Thông báo thư mới, giao diện sáng/tối theo hệ thống, dùng tốt trên điện thoại.
+- Quản trị: tạo/xóa hộp thư, đặt lại mật khẩu, xem các bản ghi DNS cần khai báo.
+
+**Máy chủ thư**
+- **IMAP và POP3** (STARTTLS và TLS) để dùng với Outlook, Thunderbird, ứng dụng thư trên điện thoại; thông số kết nối xem trong mục **Kết nối ứng dụng thư** của webmail. Thay đổi trên ứng dụng thư và webmail đồng bộ với nhau.
+- **Cổng gửi thư có xác thực** (submission): bắt buộc TLS và đăng nhập, chỉ gửi được dưới địa chỉ của chính mình.
+- Chỉ nhận thư cho tên miền của mình (không trung chuyển hộ), hỗ trợ địa chỉ `ten+nhan@`, hàng đợi gửi có thử lại, tự báo lại khi thư không tới.
+- **Ký DKIM** mọi thư gửi đi (khóa tự tạo trong thư mục dữ liệu).
+- **Lọc thư rác**: kiểm tra SPF, DKIM, DMARC của thư đến; chặn thư giả mạo tên miền nội bộ; bộ lọc Bayes học riêng cho từng người dùng từ các lần bấm "Báo thư rác" / "Không phải thư rác" (kể cả khi kéo thư vào/ra thư mục Junk trên ứng dụng thư); tùy chọn danh sách đen DNS. Thư trong Thư rác và Thùng rác tự xóa sau 30 ngày.
 
 ## Cấu hình (biến môi trường)
 
 | Biến | Mặc định | Ý nghĩa |
 |------|----------|---------|
 | `MAIL_DOMAIN` | `localhost` | Tên miền thư; nhiều tên miền cách nhau bằng dấu phẩy |
-| `MAIL_HOSTNAME` | tên máy | Tên máy chủ dùng khi chào SMTP |
-| `MAIL_DATA_DIR` | `data` | Nơi lưu cơ sở dữ liệu và khóa phiên |
+| `MAIL_HOSTNAME` | tên máy | Tên máy chủ (dùng khi chào SMTP, trong chứng chỉ và hướng dẫn kết nối) |
+| `MAIL_DATA_DIR` | `data` | Nơi lưu cơ sở dữ liệu, khóa phiên, khóa DKIM |
 | `WEB_HOST` / `WEB_PORT` | `127.0.0.1` / `8080` | Địa chỉ webmail |
-| `SMTP_HOST` / `SMTP_PORT` | `127.0.0.1` / `2525` | Địa chỉ nhận thư SMTP |
-| `TLS_CERT` / `TLS_KEY` | – | Chứng chỉ để bật STARTTLS khi nhận thư |
-| `SMARTHOST`, `SMARTHOST_PORT`, `SMARTHOST_USER`, `SMARTHOST_PASSWORD` | – / `587` | Máy chủ trung chuyển để gửi thư ra ngoài |
-| `MAX_SIZE_MB` | `25` | Dung lượng tối đa một thư |
 | `COOKIE_SECURE` | `0` | Đặt `1` khi webmail chạy sau HTTPS |
+| `TRUST_PROXY` | `0` | Đặt `1` khi webmail đứng sau reverse proxy (để lấy đúng IP người dùng) |
+| `SMTP_HOST` | `127.0.0.1` | Địa chỉ mà mọi dịch vụ thư lắng nghe |
+| `SMTP_PORT` | `2525` | Nhận thư từ máy chủ khác (thực tế: 25) |
+| `SUBMISSION_PORT` | `1587` | Ứng dụng thư gửi đi (thực tế: 587) |
+| `IMAP_PORT` / `IMAPS_PORT` | `1143` / `1993` | IMAP với STARTTLS / TLS (thực tế: 143 / 993) |
+| `POP3_PORT` / `POP3S_PORT` | `1110` / `1995` | POP3 với STLS / TLS (thực tế: 110 / 995) |
+| `TLS_CERT` / `TLS_KEY` | – | Chứng chỉ TLS; không đặt thì máy chủ tự tạo chứng chỉ tự ký |
+| `ALLOW_PLAIN_AUTH` | `0` | Cho đăng nhập không mã hóa từ máy khác (không nên bật) |
+| `SMARTHOST`, `SMARTHOST_PORT`, `SMARTHOST_USER`, `SMARTHOST_PASSWORD` | – / `587` | Máy chủ trung chuyển để gửi thư ra ngoài |
+| `DKIM_SELECTOR` | `mail` | Tên bộ chọn DKIM |
+| `SPAM_CHECKS` | `1` | Kiểm tra SPF/DKIM/DMARC thư đến |
+| `DNSBL` | – | Danh sách đen DNS, ví dụ `zen.spamhaus.org` |
+| `RETENTION_DAYS` | `30` | Số ngày giữ thư trong Thư rác/Thùng rác (`0` = không tự xóa) |
+| `SEND_LIMIT_PER_HOUR` | `300` | Số người nhận tối đa mỗi tài khoản mỗi giờ |
+| `MAX_SIZE_MB` | `25` | Dung lượng tối đa một thư |
+
+Đặt cổng bằng `0` để tắt một dịch vụ.
 
 ## Đưa lên Internet
 
-1. DNS: bản ghi `MX` của tên miền trỏ về máy chủ; thêm bản ghi SPF.
-2. Nhận thư: `SMTP_HOST=0.0.0.0 SMTP_PORT=25` (cần quyền mở cổng 25) và nên đặt `TLS_CERT`/`TLS_KEY`.
-3. Gửi thư: nên đặt `SMARTHOST` (dịch vụ SMTP của nhà cung cấp tên miền, Amazon SES, Mailgun…). Không đặt thì máy chủ gửi thẳng theo bản ghi MX, nhưng thư dễ vào mục rác vì ứng dụng chưa ký DKIM.
-4. Web: đặt sau một reverse proxy có HTTPS (Caddy, nginx), rồi bật `COOKIE_SECURE=1`.
+1. Chạy `python -m webmail dns` (hoặc mở **Bản ghi DNS của tên miền** trong webmail) và khai báo các bản ghi MX, SPF, DKIM, DMARC ở nơi quản lý tên miền. Nên có thêm bản ghi PTR (reverse DNS) cho địa chỉ IP của máy chủ.
+2. Đặt `SMTP_HOST=0.0.0.0` và các cổng chuẩn (25, 587, 143/993, 110/995; cần quyền mở cổng dưới 1024).
+3. Đặt `TLS_CERT`/`TLS_KEY` bằng chứng chỉ thật (ví dụ Let's Encrypt) để ứng dụng thư không cảnh báo.
+4. Gửi thư: gửi thẳng theo bản ghi MX cần nhà mạng cho phép cổng 25 đi ra; nếu không, đặt `SMARTHOST`.
+5. Web: đặt sau một reverse proxy có HTTPS (Caddy, nginx), rồi bật `COOKIE_SECURE=1` và `TRUST_PROXY=1`.
 
 ## Dòng lệnh
 
@@ -57,11 +78,20 @@ EOF
 python -m webmail adduser binh "Trần Thị Bình"   # thêm --admin để cấp quyền quản trị
 python -m webmail passwd binh
 python -m webmail users
+python -m webmail dns                             # in các bản ghi DNS cần khai báo
 ```
+
+## Kiểm thử
+
+```bash
+python webmail/tests/test_end_to_end.py
+```
+
+Bộ kiểm thử chạy một máy chủ thật trên cổng tạm rồi đi qua web API, SMTP, IMAP, POP3, kèm các kiểm tra bảo mật (phân quyền giữa người dùng, chống giả mạo người gửi, làm sạch HTML, khóa khi dò mật khẩu).
 
 ## Giới hạn hiện tại
 
-- Chưa có IMAP/POP3 và cổng gửi thư có xác thực, nên chưa dùng được với Outlook, Thunderbird hay ứng dụng thư trên điện thoại; chỉ đọc và gửi qua webmail.
-- Chưa lọc thư rác, chưa kiểm tra SPF/DKIM của thư đến, chưa ký DKIM cho thư đi.
-- Soạn thư dạng văn bản thuần (thư HTML nhận về vẫn hiển thị đầy đủ).
-- Trang thiết lập lần đầu ai truy cập trước sẽ tạo được tài khoản quản trị: hãy thiết lập ngay sau khi cài.
+- IMAP/POP3 được kiểm thử bằng thư viện chuẩn của Python; chưa thử với từng ứng dụng thư cụ thể (Outlook, Thunderbird, iOS Mail).
+- Thư mục cố định (Hộp thư đến, Đã gửi, Nháp, Thư rác, Thùng rác); chưa tạo được thư mục riêng.
+- Việc xác định "tên miền tổ chức" khi kiểm tra DMARC là xấp xỉ (không dùng Public Suffix List).
+- Khung soạn thư chưa chèn được ảnh vào giữa nội dung (ảnh gửi dưới dạng tệp đính kèm).
