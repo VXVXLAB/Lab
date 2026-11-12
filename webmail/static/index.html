@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hộp thư</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<!-- Đăng nhập / thiết lập lần đầu -->
+<main id="auth" hidden>
+  <form id="auth-form" class="card" autocomplete="on">
+    <div class="logo" aria-hidden="true"></div>
+    <h1 id="auth-title">Đăng nhập</h1>
+    <p id="auth-sub" class="muted">Chào mừng bạn quay lại hộp thư.</p>
+    <label id="auth-name-row" hidden>Họ và tên
+      <input id="auth-name" autocomplete="name" placeholder="Nguyễn Văn An">
+    </label>
+    <label>Địa chỉ thư
+      <span class="with-suffix">
+        <input id="auth-email" autocomplete="username" required placeholder="ten" autocapitalize="none" spellcheck="false">
+        <span id="auth-domain" class="suffix"></span>
+      </span>
+    </label>
+    <label>Mật khẩu
+      <input id="auth-password" type="password" autocomplete="current-password" required>
+    </label>
+    <p id="auth-error" class="error" role="alert" hidden></p>
+    <button class="btn primary big" id="auth-submit">Đăng nhập</button>
+  </form>
+</main>
+
+<!-- Ứng dụng -->
+<div id="app" hidden>
+  <header class="topbar">
+    <button class="icon-btn" id="menu-btn" title="Thư mục" aria-label="Thư mục" data-icon="menu"></button>
+    <div class="brand"><span class="logo small" aria-hidden="true"></span><span>Hộp thư</span></div>
+    <form id="search" role="search">
+      <span data-icon="search" class="search-icon"></span>
+      <input id="search-input" type="search" placeholder="Tìm thư theo người gửi, tiêu đề, nội dung…" aria-label="Tìm thư">
+    </form>
+    <button class="avatar-btn" id="user-btn" aria-haspopup="true" aria-label="Tài khoản"></button>
+    <div id="user-menu" class="menu" hidden>
+      <div class="menu-head"><strong id="menu-name"></strong><span id="menu-email" class="muted"></span></div>
+      <button id="act-users" hidden><span data-icon="users"></span>Quản lý người dùng</button>
+      <button id="act-password"><span data-icon="key"></span>Đổi mật khẩu</button>
+      <button id="act-logout"><span data-icon="logout"></span>Đăng xuất</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <nav id="sidebar" aria-label="Thư mục">
+      <button class="btn primary big" id="compose-btn"><span data-icon="pen"></span>Soạn thư</button>
+      <ul id="folders"></ul>
+    </nav>
+    <div id="scrim"></div>
+
+    <section id="list-pane" aria-label="Danh sách thư">
+      <div class="toolbar">
+        <input type="checkbox" id="sel-all" title="Chọn tất cả" aria-label="Chọn tất cả">
+        <h2 id="folder-title"></h2>
+        <div id="bulk" hidden>
+          <button class="icon-btn" data-bulk="read" title="Đánh dấu đã đọc" data-icon="mailopen"></button>
+          <button class="icon-btn" data-bulk="unread" title="Đánh dấu chưa đọc" data-icon="mail"></button>
+          <button class="icon-btn" data-bulk="restore" title="Khôi phục" data-icon="restore" hidden></button>
+          <button class="icon-btn" data-bulk="delete" title="Xóa" data-icon="trash"></button>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn small" id="empty-trash" hidden>Dọn thùng rác</button>
+        <span id="range" class="muted"></span>
+        <button class="icon-btn" id="prev" title="Trang trước" data-icon="left"></button>
+        <button class="icon-btn" id="next" title="Trang sau" data-icon="right"></button>
+        <button class="icon-btn" id="refresh" title="Tải lại" data-icon="refresh"></button>
+      </div>
+      <div id="list" role="list"></div>
+    </section>
+
+    <section id="reader" aria-label="Nội dung thư">
+      <div id="reader-empty" class="empty">
+        <div class="empty-art" data-icon="mailopen"></div>
+        <p>Chọn một thư để đọc</p>
+      </div>
+      <article id="reader-body" hidden>
+        <div class="reader-bar">
+          <button class="icon-btn" id="back" title="Quay lại" data-icon="left"></button>
+          <button class="btn small" id="r-reply"><span data-icon="reply"></span>Trả lời</button>
+          <button class="btn small" id="r-replyall"><span data-icon="replyall"></span>Trả lời tất cả</button>
+          <button class="btn small" id="r-forward"><span data-icon="forward"></span>Chuyển tiếp</button>
+          <span class="spacer"></span>
+          <button class="icon-btn" id="r-star" title="Gắn sao" data-icon="star"></button>
+          <button class="icon-btn" id="r-unread" title="Đánh dấu chưa đọc" data-icon="mail"></button>
+          <button class="icon-btn" id="r-restore" title="Khôi phục" data-icon="restore" hidden></button>
+          <button class="icon-btn" id="r-delete" title="Xóa" data-icon="trash"></button>
+        </div>
+        <div class="reader-scroll">
+          <h1 id="r-subject"></h1>
+          <div class="r-head">
+            <span class="avatar" id="r-avatar"></span>
+            <div class="r-who">
+              <div><strong id="r-from"></strong> <span id="r-addr" class="muted"></span></div>
+              <div id="r-to" class="muted"></div>
+            </div>
+            <time id="r-date" class="muted"></time>
+          </div>
+          <div id="r-images" class="notice" hidden>
+            Hình ảnh từ bên ngoài đã bị chặn để bảo vệ quyền riêng tư.
+            <button class="link" id="r-show-images">Hiện hình ảnh</button>
+          </div>
+          <div id="r-content"></div>
+          <div id="r-attachments"></div>
+        </div>
+      </article>
+    </section>
+  </div>
+</div>
+
+<!-- Soạn thư -->
+<form id="compose" hidden autocomplete="off">
+  <div class="compose-head">
+    <strong id="c-title">Thư mới</strong>
+    <span class="spacer"></span>
+    <button type="button" class="icon-btn" id="c-close" title="Lưu nháp và đóng" data-icon="close"></button>
+  </div>
+  <label class="c-row"><span>Đến</span>
+    <input id="c-to" placeholder="ten@vidu.vn, cách nhau bằng dấu phẩy" autocapitalize="none" spellcheck="false">
+    <button type="button" class="link" id="c-more">Cc/Bcc</button>
+  </label>
+  <label class="c-row" id="c-cc-row" hidden><span>Cc</span><input id="c-cc" autocapitalize="none" spellcheck="false"></label>
+  <label class="c-row" id="c-bcc-row" hidden><span>Bcc</span><input id="c-bcc" autocapitalize="none" spellcheck="false"></label>
+  <label class="c-row"><span>Tiêu đề</span><input id="c-subject"></label>
+  <textarea id="c-body" placeholder="Viết nội dung thư…" aria-label="Nội dung"></textarea>
+  <div id="c-attachments"></div>
+  <div class="compose-foot">
+    <button class="btn primary" id="c-send"><span data-icon="send"></span>Gửi</button>
+    <button type="button" class="icon-btn" id="c-attach" title="Đính kèm tệp" data-icon="clip"></button>
+    <input type="file" id="c-file" multiple hidden>
+    <span id="c-status" class="muted"></span>
+    <span class="spacer"></span>
+    <button type="button" class="icon-btn" id="c-discard" title="Hủy thư" data-icon="trash"></button>
+  </div>
+</form>
+
+<div id="modal" hidden><div class="modal-box" role="dialog" aria-modal="true"></div></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
