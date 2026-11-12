@@ -26,13 +26,16 @@ def org_domain(domain):
 
 
 def _txt(name):
+    """Các bản ghi TXT; [] nếu không có bản ghi; None nếu DNS lỗi (khác với "không có")."""
     import dns.resolver
     try:
         r = dns.resolver.Resolver()
         r.lifetime = 5
         return [b"".join(rd.strings).decode("ascii", "replace") for rd in r.resolve(name, "TXT")]
-    except Exception:
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
         return []
+    except Exception:
+        return None
 
 
 def _public_ip(ip):
@@ -74,7 +77,10 @@ def check_dkim(raw):
 
 def dmarc_policy(domain):
     for name in dict.fromkeys([domain, org_domain(domain)]):
-        for txt in _txt("_dmarc." + name):
+        records = _txt("_dmarc." + name)
+        if records is None:
+            return "temperror"
+        for txt in records:
             if txt.lower().replace(" ", "").startswith("v=dmarc1"):
                 tags = dict(p.strip().split("=", 1) for p in txt.split(";") if "=" in p)
                 tags = {k.strip().lower(): v.strip().lower() for k, v in tags.items()}
@@ -110,17 +116,24 @@ def dnsbl_listed(ip):
 
 def check_inbound(ip, helo, mail_from, raw, from_addr):
     """Đánh giá xác thực của thư đến. Trả về dict gồm kết quả, cờ spam và dòng Authentication-Results."""
-    res = {"spf": "none", "dkim": "none", "dmarc": "none", "spam": False, "reason": ""}
+    res = {"spf": "none", "dkim": "none", "dmarc": "none", "spam": False, "reason": "", "dkim_domains": []}
+    if not from_addr:
+        # Thiếu From, nhiều dòng From hoặc nhiều địa chỉ trong From: thủ thuật quen thuộc để qua mặt
+        # kiểm tra giả mạo (máy chủ xét một dòng, người đọc thấy dòng khác).
+        res["spam"], res["reason"] = True, "Tiêu đề From thiếu hoặc bị lặp"
     if config.SPAM_CHECKS and _public_ip(ip):
         from_domain = (from_addr or "").rpartition("@")[2].lower()
         res["spf"] = check_spf(ip, helo, mail_from)
         res["dkim"], dkim_domains = check_dkim(raw)
+        res["dkim_domains"] = dkim_domains
         if from_domain:
             env_domain = (mail_from or "").rpartition("@")[2].lower() or (helo or "").lower()
             aligned = ((res["spf"] == "pass" and org_domain(env_domain) == org_domain(from_domain)) or
                        any(org_domain(d) == org_domain(from_domain) for d in dkim_domains))
             policy = dmarc_policy(from_domain)
-            if policy is not None:
+            if policy == "temperror":
+                res["dmarc"] = "temperror"
+            elif policy is not None:
                 res["dmarc"] = "pass" if aligned else "fail"
                 if not aligned and policy in ("quarantine", "reject"):
                     res["spam"], res["reason"] = True, "DMARC không đạt (chính sách %s)" % policy
@@ -134,11 +147,18 @@ def check_inbound(ip, helo, mail_from, raw, from_addr):
 
 
 def strip_auth_results(raw):
-    """Bỏ các dòng Authentication-Results mang tên máy chủ này mà người gửi tự chèn để giả mạo kết quả."""
+    """Bỏ mọi dòng Authentication-Results có sẵn trong thư đến: chỉ kết quả do chính máy chủ này ghi mới đáng tin."""
     head, sep, body = raw.partition(b"\r\n\r\n")
-    pat = re.compile(rb"(?im)^authentication-results:[ \t]*" + re.escape(config.HOSTNAME.encode()) +
-                     rb"\b.*(?:\r\n[ \t].*)*(?:\r\n|$)")
-    return pat.sub(b"", head) + sep + body
+    out, dropping = [], False
+    for line in head.split(b"\r\n"):
+        if line[:1] in (b" ", b"\t"):       # dòng nối tiếp của tiêu đề phía trên
+            if not dropping:
+                out.append(line)
+            continue
+        dropping = line.split(b":", 1)[0].strip().lower() == b"authentication-results"
+        if not dropping:
+            out.append(line)
+    return b"\r\n".join(out) + sep + body
 
 
 # ---------- bộ lọc Bayes ----------
@@ -146,7 +166,10 @@ def strip_auth_results(raw):
 MIN_TRAIN = 8  # cần ít nhất chừng này thư mỗi loại trước khi bộ lọc được phép tự phân loại
 
 
-def tokens(subject, text, from_addr):
+def tokens(subject, text, from_addr, html=None):
+    if html:  # chấm điểm cả phần HTML, nếu không thư rác chỉ cần kèm một phần văn bản vô hại là lọt
+        from . import mime
+        text = (text or "") + "\n" + mime.html_to_text(html[:300000])
     out = set()
     for w in re.findall(r"[^\W_]{3,24}", (subject or "").lower()):
         out.add("s:" + w)
@@ -157,11 +180,21 @@ def tokens(subject, text, from_addr):
         out.add("f:" + domain)
     if re.search(r"https?://", text or ""):
         out.add("has:url")
-    return list(out)[:1500]
+    return sorted(out)[:600]
 
 
 def row_tokens(row):
-    return tokens(row["subject"], row["body_text"], row["from_addr"])
+    return tokens(row["subject"], row["body_text"], row["from_addr"], row["body_html"])
+
+
+def learn_ham_on_read(c, row):
+    """Người dùng mở đọc một thư ngoài Thư rác: coi là thư thường (nếu sau đó họ báo rác, lần học này bị đảo lại).
+
+    Bộ lọc chỉ học từ hành động của chính người dùng, không tự học từ thư vừa nhận, để người gửi
+    không thể "dạy" bộ lọc bằng cách gửi sẵn nội dung rác.
+    """
+    if row["spam_trained"] == 0 and row["folder"] not in ("spam", "trash", "drafts", "sent") and row["raw"] is not None:
+        set_trained(c, row, 2)
 
 
 def train(c, user_id, toks, is_spam, sign=1):

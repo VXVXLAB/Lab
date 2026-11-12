@@ -12,31 +12,47 @@ import time
 from . import config, db
 
 # ---------- chống dò mật khẩu ----------
+#
+# Hai lớp: (1) theo địa chỉ IP và theo từng nhóm giao thức, để web không khóa nhầm IMAP và ngược lại;
+# (2) theo tài khoản, làm chậm dần mọi nơi đang đoán mật khẩu của cùng một tài khoản, trừ địa chỉ IP
+# đã từng đăng nhập đúng tài khoản đó (để chủ tài khoản không bị kẻ tấn công khóa ngoài).
 
-MAX_FAILS = 8        # số lần sai liên tiếp từ một địa chỉ IP trước khi bị khóa
+MAX_FAILS = 20       # số lần sai từ một IP trong WINDOW giây trước khi IP bị khóa
+WINDOW = 300
 LOCK_SECONDS = 300
-_fails = {}          # ip -> [số lần sai, khóa đến lúc, lần sai gần nhất]
+ACCOUNT_FREE_FAILS = 10   # sau chừng này lần sai cho một tài khoản thì bắt đầu bắt chờ
+_fails = {}          # "nhóm:ip" -> [số lần sai, khóa đến lúc, lần sai gần nhất]
+_acct = {}           # email -> [số lần sai, lần sai gần nhất]
+_good = {}           # (ip, email) -> lần đăng nhập đúng gần nhất
 _fails_lock = threading.Lock()
 # Băm một mật khẩu giả khi tài khoản không tồn tại để thời gian phản hồi không lộ tài khoản nào có thật.
 _DUMMY_HASH = db.hash_password(secrets.token_hex(8))
 
 
-def is_locked(ip):
-    rec = _fails.get(ip)
+def _key(ip, scope):
+    return "%s:%s" % (scope, ip or "?")
+
+
+def is_locked(ip, scope="web"):
+    rec = _fails.get(_key(ip, scope))
     return bool(rec and rec[1] > time.time())
 
 
-def _record(ip, ok):
+def _prune(table, now, age, index):
+    if len(table) > 20000:  # giới hạn bộ nhớ khi bị quét từ rất nhiều địa chỉ
+        for k in [k for k, v in table.items() if now - (v[index] if isinstance(v, list) else v) > age]:
+            del table[k]
+        if len(table) > 20000:
+            table.clear()
+
+
+def record_failure(ip, scope="web"):
+    """Ghi một lần sai cho địa chỉ IP. Lần đăng nhập đúng KHÔNG xóa bộ đếm; nó chỉ tự giảm theo thời gian."""
+    now = time.time()
     with _fails_lock:
-        if ok:
-            _fails.pop(ip, None)
-            return
-        now = time.time()
-        if len(_fails) > 20000:  # giới hạn bộ nhớ khi bị quét từ rất nhiều địa chỉ
-            for k in [k for k, v in _fails.items() if v[1] < now and now - v[2] > LOCK_SECONDS]:
-                del _fails[k]
-        rec = _fails.setdefault(ip, [0, 0, now])
-        if now - rec[2] > LOCK_SECONDS:
+        _prune(_fails, now, WINDOW, 2)
+        rec = _fails.setdefault(_key(ip, scope), [0, 0, now])
+        if now - rec[2] > WINDOW:
             rec[0] = 0
         rec[0] += 1
         rec[2] = now
@@ -44,19 +60,97 @@ def _record(ip, ok):
             rec[0], rec[1] = 0, now + LOCK_SECONDS
 
 
-def authenticate(login, password, ip):
+def _undo_failure(ip, scope):
+    with _fails_lock:
+        rec = _fails.get(_key(ip, scope))
+        if rec and rec[0] > 0:
+            rec[0] -= 1
+
+
+def _account_wait(login, ip, now):
+    """Số giây tài khoản này còn phải chờ trước lần thử tiếp theo từ một địa chỉ IP lạ."""
+    rec = _acct.get(login)
+    if not rec or (ip, login) in _good:
+        return 0
+    if now - rec[1] > 900:
+        _acct.pop(login, None)
+        return 0
+    if rec[0] < ACCOUNT_FREE_FAILS:
+        return 0
+    return max(0, min(2 ** (rec[0] - ACCOUNT_FREE_FAILS), 60) - (now - rec[1]))
+
+
+def authenticate(login, password, ip, scope="web"):
     """Trả về (user, lỗi). lỗi là 'locked' hoặc 'invalid'."""
     ip = ip or "?"
-    if is_locked(ip):
-        return None, "locked"
-    login = (login or "").strip().lower()
+    now = time.time()
+    login = (login or "").strip().lower()[:320]
     if "@" not in login:
         login = "%s@%s" % (login, config.DOMAIN)
+    with _fails_lock:
+        if is_locked(ip, scope) or _account_wait(login, ip, now) > 0:
+            return None, "locked"
+    # Tính trước lần thử này là sai, để nhiều kết nối song song không vượt được giới hạn.
+    record_failure(ip, scope)
     user = db.user_by_email(login) if len(login) <= 254 else None
     password = (password or "")[:1024]
     ok = db.check_password(password, user["pw_hash"] if user else _DUMMY_HASH) and user is not None
-    _record(ip, ok)
+    with _fails_lock:
+        if ok:
+            _good[(ip, login)] = now
+            _acct.pop(login, None)
+            _prune(_good, now, 30 * 86400, 0)
+        else:
+            _prune(_acct, now, 900, 1)
+            rec = _acct.setdefault(login, [0, now])
+            rec[0] += 1
+            rec[1] = now
+    if ok:
+        _undo_failure(ip, scope)
     return (user, None) if ok else (None, "invalid")
+
+
+# ---------- phiên đăng nhập web (lưu phía máy chủ để đăng xuất là hết hiệu lực thật) ----------
+
+SESSION_DAYS = 14
+
+
+def _sid(token):
+    import hashlib
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def new_session(user_id):
+    token = secrets.token_urlsafe(32)
+    with db.conn() as c:
+        c.execute("INSERT INTO sessions(id,user_id,expires) VALUES(?,?,?)",
+                  (_sid(token), user_id, time.time() + SESSION_DAYS * 86400))
+    return token
+
+
+def session_user(token):
+    if not isinstance(token, str) or not token:
+        return None
+    return db.conn().execute(
+        "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=? AND s.expires>?",
+        (_sid(token), time.time())).fetchone()
+
+
+def end_session(token):
+    if isinstance(token, str) and token:
+        with db.conn() as c:
+            c.execute("DELETE FROM sessions WHERE id=?", (_sid(token),))
+
+
+def end_other_sessions(user_id, keep_token=None):
+    """Đổi/đặt lại mật khẩu: đăng xuất mọi thiết bị khác."""
+    with db.conn() as c:
+        c.execute("DELETE FROM sessions WHERE user_id=? AND id!=?", (user_id, _sid(keep_token or "")))
+
+
+def purge_sessions():
+    with db.conn() as c:
+        c.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
 
 
 def is_local_peer(ip):
@@ -191,7 +285,10 @@ def dkim_sign(raw, domain=None):
         import dkim
         header = dkim.sign(
             raw, config.DKIM_SELECTOR.encode(), (domain or config.DOMAIN).encode(), dkim_key(),
-            include_headers=[b"from", b"to", b"cc", b"subject", b"date", b"message-id", b"in-reply-to",
+            # Các tiêu đề người đọc nhìn thấy được liệt kê thừa một lần ("oversign") để không ai chèn thêm
+            # một dòng From/Subject khác vào thư đã ký mà chữ ký vẫn hợp lệ.
+            include_headers=[b"from", b"from", b"to", b"to", b"cc", b"cc", b"subject", b"subject", b"date", b"date",
+                             b"message-id", b"message-id", b"reply-to", b"reply-to", b"in-reply-to",
                              b"references", b"mime-version", b"content-type"])
         return header + raw
     except Exception:

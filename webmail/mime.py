@@ -29,12 +29,55 @@ def _clean(s):
     return re.sub(r"\s+", " ", s or "").strip()
 
 
+MAX_HTML = 3 * 1024 * 1024   # phần HTML dài hơn mức này bị cắt bớt trước khi xử lý
+MAX_PARTS = 1000             # số phần MIME tối đa được duyệt trong một thư
+MAX_ATTACHMENTS = 200
+
+
+class _TextExtractor(HTMLParser):
+    """HTML -> văn bản. Dùng bộ phân tích tuyến tính thay cho biểu thức chính quy (tránh treo máy với thư cố ý)."""
+    _SKIP = {"script", "style", "head", "title"}
+    _BREAK = {"p", "div", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "table"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out = []
+        self.skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP:
+            self.skip += 1
+        elif tag == "br":
+            self.out.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP:
+            self.skip = max(0, self.skip - 1)
+        elif tag in self._BREAK:
+            self.out.append("\n")
+
+    def handle_data(self, data):
+        if not self.skip:
+            self.out.append(data)
+
+
 def html_to_text(doc):
-    doc = re.sub(r"(?is)<(script|style|head|title)\b.*?</\1\s*>", " ", doc)
-    doc = re.sub(r"(?i)<br\s*/?>|</(p|div|tr|li|h[1-6])\s*>", "\n", doc)
-    doc = html.unescape(re.sub(r"(?s)<[^>]*>", "", doc))
-    doc = re.sub(r"[ \t\xa0]+", " ", doc)
-    return re.sub(r"\n\s*\n\s*", "\n\n", doc).strip()
+    t = _TextExtractor()
+    try:
+        t.feed((doc or "")[:MAX_HTML])
+        t.close()
+    except Exception:
+        pass
+    lines, blank = [], True
+    for line in "".join(t.out).replace("\xa0", " ").split("\n"):
+        line = " ".join(line.split())
+        if line:
+            lines.append(line)
+            blank = False
+        elif not blank:
+            lines.append("")
+            blank = True
+    return "\n".join(lines).strip()
 
 
 def _content(part):
@@ -60,6 +103,25 @@ def parse_from(raw):
 
 
 def parse(raw):
+    """Phân tích thư thành các trường để lưu. Thư có cấu trúc bất thường vẫn được lưu ở dạng tối giản."""
+    try:
+        return _parse(raw)
+    except (RecursionError, Exception):
+        from email.parser import BytesHeaderParser
+        try:
+            head = BytesHeaderParser(policy=policy.compat32).parsebytes(raw.split(b"\r\n\r\n", 1)[0][:65536])
+            name, addr = parseaddr(_clean(str(head.get("From", "") or ""))[:500])
+            subject = _clean(str(head.get("Subject", "") or ""))[:500]
+            to = _clean(str(head.get("To", "") or ""))[:2000]
+        except Exception:
+            name = addr = subject = to = ""
+        text = "(Thư này có cấu trúc không hợp lệ nên không hiển thị được nội dung.)"
+        return {"msgid": None, "in_reply_to": None, "refs": None, "from_addr": addr, "from_name": name,
+                "reply_to": "", "to": to, "cc": "", "subject": subject, "text": text, "html": None,
+                "snippet": text, "attachments": []}
+
+
+def _parse(raw):
     msg = message_from_bytes(raw, policy=policy.default)
 
     def hdr(name):
@@ -80,11 +142,15 @@ def parse(raw):
         text = ""
     if body_html is not None and not isinstance(body_html, str):
         body_html = None
+    if body_html is not None:
+        body_html = body_html[:MAX_HTML]
     if not text.strip() and body_html:
         text = html_to_text(body_html)
 
     attachments = []
-    for part in msg.walk():
+    for count, part in enumerate(msg.walk()):
+        if count >= MAX_PARTS or len(attachments) >= MAX_ATTACHMENTS:
+            break
         if part.is_multipart() or part is text_part or part is html_part:
             continue
         data = part.get_payload(decode=True)
@@ -97,7 +163,7 @@ def parse(raw):
             filename = None
         inline = bool(cid and body_html and ("cid:" + cid) in body_html)
         attachments.append({
-            "filename": _clean(filename) or "tep-dinh-kem",
+            "filename": _clean(filename)[:200] or "tep-dinh-kem",
             "ctype": part.get_content_type(),
             "data": data,
             "cid": cid,
@@ -105,13 +171,13 @@ def parse(raw):
         })
 
     return {
-        "msgid": hdr("Message-ID") or None,
-        "in_reply_to": hdr("In-Reply-To") or None,
-        "refs": hdr("References") or None,
+        "msgid": hdr("Message-ID")[:998] or None,
+        "in_reply_to": hdr("In-Reply-To")[:998] or None,
+        "refs": hdr("References")[-4000:] or None,
         "from_addr": from_addr, "from_name": from_name,
         "reply_to": parseaddr(hdr("Reply-To"))[1],
-        "to": hdr("To"), "cc": hdr("Cc"),
-        "subject": hdr("Subject"),
+        "to": hdr("To")[:20000], "cc": hdr("Cc")[:20000],
+        "subject": hdr("Subject")[:998],
         "text": text, "html": body_html,
         "snippet": _clean(text)[:200],
         "attachments": attachments,
@@ -162,6 +228,7 @@ _DROP_TAG = {"html", "head", "body", "meta", "link", "base", "form", "input", "b
 _URL_ATTRS = {"href", "src", "background", "poster", "action", "cite", "longdesc"}
 _VOID = {"br", "hr", "img", "col", "wbr", "area", "source", "track"}
 _REMOTE = re.compile(r"^(https?:)?//", re.I)
+_CSS_RISKY = re.compile(r"(?i)url|image-set|@import|@font-face|expression|\\")
 
 
 class _Sanitizer(HTMLParser):
@@ -209,8 +276,12 @@ class _Sanitizer(HTMLParser):
                 value = self._url(tag, name, value)
                 if value is None:
                     continue
-            if name == "style" and re.search(r"(?i)url\s*\(|expression|@import", value) and not self.allow_remote:
-                value = re.sub(r"(?i)url\s*\([^)]*\)", "none", value)
+            if name == "style" and _CSS_RISKY.search(value):
+                # CSS có thể tải tài nguyên từ xa (url, image-set, mã thoát \75rl…): bỏ cả thuộc tính.
+                if not self.allow_remote or "expression" in value.lower() or "\\" in value:
+                    if not self.allow_remote:
+                        self.blocked = True
+                    continue
             parts.append('%s="%s"' % (name, html.escape(value, quote=True)))
         if tag == "a":
             parts.append('target="_blank" rel="noopener noreferrer"')
@@ -235,8 +306,11 @@ class _Sanitizer(HTMLParser):
         if self.skip:
             return
         if self.in_style:
-            if not self.allow_remote:
-                data = re.sub(r"(?i)@import[^;]*;?", "", data)
+            if _CSS_RISKY.search(data):
+                if not self.allow_remote or "expression" in data.lower() or "\\" in data:
+                    if not self.allow_remote:
+                        self.blocked = True
+                    return  # bỏ cả khối <style> có khả năng tải tài nguyên từ xa
             self.out.append(data.replace("<", ""))
         else:
             self.out.append(html.escape(data, quote=False))
@@ -246,7 +320,7 @@ def sanitize_html(doc, cid_urls=None, allow_remote=False):
     """Trả về (tài liệu HTML an toàn, có nội dung từ xa bị chặn hay không)."""
     s = _Sanitizer(cid_urls or {}, allow_remote)
     try:
-        s.feed(doc)
+        s.feed(doc[:MAX_HTML])
         s.close()
     except Exception:
         return "<pre>%s</pre>" % html.escape(html_to_text(doc)), False

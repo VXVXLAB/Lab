@@ -20,6 +20,9 @@ MAILBOXES = [("INBOX", "inbox", ""), ("Sent", "sent", "\\Sent"), ("Drafts", "dra
 FLAGS = "\\Answered \\Flagged \\Deleted \\Seen \\Draft $Forwarded"
 MAX_LINE = 65536
 MAX_PER_IP = 20
+MAX_CONNS = 400          # tổng số kết nối IMAP/POP3 đồng thời
+PREAUTH_LITERAL = 4096   # trước khi đăng nhập chỉ nhận literal nhỏ (tên, mật khẩu)
+MAX_FETCH_ITEMS = 40
 _conns = {}
 _MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
 
@@ -323,13 +326,21 @@ class Conn:
         if not security.plaintext_login_allowed(self.ip, self.tls):
             return None, "tls"
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, security.authenticate, name, password, self.ip)
+        user, err = await loop.run_in_executor(None, security.authenticate, name, password, self.ip, "mail")
+        if user:
+            self.pw_hash = user["pw_hash"]
+        return user, err
+
+    def still_valid(self):
+        """False nếu tài khoản đã bị xóa hoặc đổi mật khẩu sau khi phiên này đăng nhập."""
+        row = db.get_user(self.user["id"])
+        return bool(row) and row["pw_hash"] == self.pw_hash
 
 
 async def _serve(cls, tls, reader, writer):
     peer = writer.get_extra_info("peername")
     ip = peer[0] if peer else "?"
-    if _conns.get(ip, 0) >= MAX_PER_IP:
+    if _conns.get(ip, 0) >= MAX_PER_IP or sum(_conns.values()) >= MAX_CONNS:
         writer.close()
         return
     _conns[ip] = _conns.get(ip, 0) + 1
@@ -443,6 +454,10 @@ class Imap(Conn):
             chunks = await self.read_command()
             if chunks is None:
                 continue
+            if self.user is not None and not self.still_valid():
+                self.send("* BYE Password changed, please log in again\r\n")
+                await self.w.drain()
+                return
             first = chunks[0].split(None, 2)
             if len(first) < 2:
                 self.send("* BAD Invalid command\r\n")
@@ -493,7 +508,8 @@ class Imap(Conn):
                 return chunks
             size = int(m.group(1))
             total += size
-            if total > config.MAX_SIZE + 65536:
+            # Chưa đăng nhập thì không nhận literal lớn: tránh bị nhồi đầy bộ nhớ bởi người lạ.
+            if total > (config.MAX_SIZE + 65536 if self.user else PREAUTH_LITERAL) or len(chunks) > 64:
                 tag = line.split(None, 1)[0].decode("ascii", "replace") if not chunks else "*"
                 self.send("%s BAD Literal too large\r\n" % tag)
                 await self.w.drain()
@@ -698,6 +714,8 @@ class Imap(Conn):
             raise Bad("APPEND needs a message literal")
         if len(raw) > config.MAX_SIZE:
             raise No("[TOOBIG] Message too large")
+        if db.over_quota(self.user["id"], len(raw)):
+            raise No("[OVERQUOTA] Mailbox is full")
         flags, date = [], None
         for a in args[1:-1]:
             if isinstance(a, list):
@@ -709,8 +727,10 @@ class Imap(Conn):
                     raise Bad("Invalid date")
         low = {f.lower() for f in flags}
         extra = " ".join(f for f in flags if f.lower() in ("\\answered", "$forwarded"))
-        mid = db.insert_message(self.user["id"], folder, mime.parse(raw), raw=raw, is_read=int("\\seen" in low),
-                                date=date, starred=int("\\flagged" in low), imap_flags=extra)
+        def store():   # phân tích và lưu ở luồng phụ để không chặn các kết nối khác
+            return db.insert_message(self.user["id"], folder, mime.parse(raw), raw=raw, is_read=int("\\seen" in low),
+                                     date=date, starred=int("\\flagged" in low), imap_flags=extra)
+        mid = await asyncio.get_running_loop().run_in_executor(None, store)
         uid = db.conn().execute("SELECT uid FROM messages WHERE id=?", (mid,)).fetchone()[0]
         if self.folder:
             self.sync()
@@ -775,7 +795,9 @@ class Imap(Conn):
     async def do_FETCH(self, tag, args, uid):
         idx = self._set(args[0], uid)
         items = args[1] if isinstance(args[1], list) else [args[1]]
-        items = [_text(i) for i in items]
+        items = list(dict.fromkeys(_text(i) for i in items))   # bỏ mục lặp: mỗi mục chỉ trả một lần
+        if len(items) > MAX_FETCH_ITEMS:
+            raise Bad("Too many FETCH items")
         macro = {"ALL": ["FLAGS", "INTERNALDATE", "RFC822.SIZE", "ENVELOPE"],
                  "FAST": ["FLAGS", "INTERNALDATE", "RFC822.SIZE"],
                  "FULL": ["FLAGS", "INTERNALDATE", "RFC822.SIZE", "ENVELOPE", "BODY"]}
@@ -831,14 +853,15 @@ class Imap(Conn):
             if seen and not row["is_read"] and not self.readonly:
                 with db.conn() as c:
                     c.execute("UPDATE messages SET is_read=1 WHERE id=?", (row["id"],))
+                    spam.learn_ham_on_read(c, row)
                 flags_row = dict(row, is_read=1)
                 if None not in out:
                     out.append(None)
             out = [b"FLAGS (" + _flags(flags_row).encode() + b")" if o is None else o for o in out]
             self.send(b"* %d FETCH (" % (i + 1) + b" ".join(out) + b")\r\n")
             count += 1
-            if count % 20 == 0:
-                await self.w.drain()
+            if not light or count % 50 == 0:
+                await self.w.drain()   # chờ máy khách nhận xong rồi mới nạp thư kế tiếp, không dồn vào bộ nhớ
 
     async def do_STORE(self, tag, args, uid):
         if self.readonly:
@@ -1101,6 +1124,10 @@ class Pop3(Conn):
                 else:
                     self.send("-ERR Log in first\r\n")
             else:
+                if not self.still_valid():
+                    self.send("-ERR Password changed, please log in again\r\n")
+                    await self.w.drain()
+                    return
                 live = [i for i in range(len(msgs)) if i not in deleted]
 
                 def pick(text):
@@ -1141,6 +1168,7 @@ class Pop3(Conn):
                     lines = raw.splitlines()
                     data = b"\r\n".join((b"." + ln) if ln.startswith(b".") else ln for ln in lines)
                     self.send(b"+OK %d octets\r\n" % len(raw) + data + b"\r\n.\r\n")
+                    await self.w.drain()
                 elif cmd == "DELE":
                     i = pick(arg)
                     if i is None:

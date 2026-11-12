@@ -5,12 +5,14 @@ import smtplib
 import ssl
 import threading
 import time
-from email.utils import formatdate, parseaddr
+from concurrent.futures import ThreadPoolExecutor
+from email.utils import formatdate
 
 from . import config, db, mime, security, spam
 
 log = logging.getLogger("webmail")
 RETRY_DELAYS = [60, 300, 900, 3600, 3 * 3600]  # giây; hết danh sách thì trả thư về
+_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="outbound")
 MAX_RCPTS = 100
 _wake = threading.Event()
 
@@ -25,21 +27,15 @@ def deliver_local(user, raw, auth=None):
     """Lưu thư vào hộp của người dùng. auth: kết quả spam.check_inbound với thư từ bên ngoài, None với thư nội bộ."""
     p = mime.parse(raw)
     folder = "inbox"
-    toks = spam.tokens(p["subject"], p["text"], p["from_addr"]) if auth is not None else []
     if auth is not None:
         if auth["spam"]:
             folder = "spam"
         else:
+            toks = spam.tokens(p["subject"], p["text"], p["from_addr"], p["html"])
             score = spam.bayes_score(db.conn(), user["id"], toks)
             if score is not None and score >= 0.92:
                 folder = "spam"
-    mid = db.insert_message(user["id"], folder, p, raw=raw)
-    if auth is not None and folder == "inbox":
-        # Coi thư vào hộp đến là thư thường; nếu người dùng báo rác, lần học này được đảo lại.
-        with db.conn() as c:
-            spam.train(c, user["id"], toks, False)
-            c.execute("UPDATE messages SET spam_trained=2 WHERE id=?", (mid,))
-    return mid
+    return db.insert_message(user["id"], folder, p, raw=raw)
 
 
 def bounce(mail_from, rcpt, reason):
@@ -65,10 +61,42 @@ def route(mail_from, rcpt, raw):
         else:
             bounce(mail_from, rcpt, "Hộp thư này không tồn tại.")
         return
+    if "." not in domain.strip(".") or _is_ip_literal(domain):
+        # Không gửi tới tên máy nội bộ (localhost, tên một nhãn) hay địa chỉ IP.
+        bounce(mail_from, rcpt, "Tên miền người nhận không hợp lệ.")
+        return
     with db.conn() as c:
         c.execute("INSERT INTO outbox(mail_from,rcpt,raw,next_try) VALUES(?,?,?,?)",
                   (mail_from, rcpt, raw, time.time()))
     _wake.set()
+
+
+def _is_ip_literal(host):
+    import ipaddress
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+        return True
+    except ValueError:
+        return False
+
+
+def _public_addresses(host):
+    """Các địa chỉ IP công khai của một máy chủ nhận thư.
+
+    Khi gửi thẳng theo MX, tên miền người nhận do người dùng nhập quyết định máy chủ sẽ kết nối tới đâu;
+    lọc bỏ địa chỉ nội bộ để không ai dùng máy chủ thư làm bàn đạp dò mạng trong.
+    """
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except OSError:
+        return []
+    out = []
+    for info in infos:
+        ip = info[4][0]
+        if spam._public_ip(ip) and ip not in out:
+            out.append(ip)
+    return out
 
 
 def _unique(addresses):
@@ -141,7 +169,7 @@ def _mx_hosts(domain):
 
 
 def _smtp_send(host, port, mail_from, rcpt, raw, smarthost):
-    with smtplib.SMTP(host, port, timeout=30, local_hostname=config.HOSTNAME) as s:
+    with smtplib.SMTP(host, port, timeout=20, local_hostname=config.HOSTNAME) as s:
         s.ehlo()
         if s.has_extn("starttls"):
             if smarthost:
@@ -165,9 +193,19 @@ def deliver_remote(mail_from, rcpt, raw):
     else:
         targets, port, smarthost = _mx_hosts(rcpt.rpartition("@")[2]), config.OUT_PORT, False
     last = None
+    deadline = time.time() + 90  # một máy nhận cố tình câu giờ không được giữ luồng gửi quá lâu
     for host in targets[:3]:
+        if time.time() > deadline:
+            break
         try:
-            _smtp_send(host, port, mail_from, rcpt, raw, smarthost)
+            if smarthost:
+                _smtp_send(host, port, mail_from, rcpt, raw, True)
+            else:
+                ips = _public_addresses(host)
+                if not ips:
+                    last = "%s: không có địa chỉ công khai" % host
+                    continue
+                _smtp_send(ips[0], port, mail_from, rcpt, raw, False)
             return
         except smtplib.SMTPRecipientsRefused as e:
             code, msg = next(iter(e.recipients.values()))
@@ -189,27 +227,38 @@ def deliver_remote(mail_from, rcpt, raw):
 def process_outbox():
     rows = db.conn().execute("SELECT * FROM outbox WHERE next_try<=? ORDER BY id LIMIT 50",
                              (time.time(),)).fetchall()
-    for row in rows:
-        try:
-            deliver_remote(row["mail_from"], row["rcpt"], bytes(row["raw"]))
-            failure = None
-        except PermanentError as e:
-            failure, final = str(e), True
-        except Exception as e:  # lỗi tạm thời: thử lại sau
-            failure, final = str(e), row["attempts"] >= len(RETRY_DELAYS)
-        with db.conn() as c:
-            if failure is None:
-                c.execute("DELETE FROM outbox WHERE id=?", (row["id"],))
-                log.info("Đã gửi thư tới %s", row["rcpt"])
-            elif final:
-                c.execute("DELETE FROM outbox WHERE id=?", (row["id"],))
-            else:
-                c.execute("UPDATE outbox SET attempts=attempts+1,next_try=?,last_error=? WHERE id=?",
-                          (time.time() + RETRY_DELAYS[row["attempts"]], failure, row["id"]))
-        if failure is not None:
-            log.warning("Gửi tới %s thất bại (%s): %s", row["rcpt"], "bỏ" if final else "sẽ thử lại", failure)
-            if final:
-                bounce(row["mail_from"], row["rcpt"], failure)
+    if rows:  # gửi song song để một máy nhận chậm không chặn cả hàng đợi
+        list(_pool.map(_process_row, rows))
+
+
+def _process_row(row):
+    try:
+        _process_row_inner(row)
+    except Exception:
+        log.exception("Lỗi khi gửi thư tới %s", row["rcpt"])
+
+
+def _process_row_inner(row):
+    try:
+        deliver_remote(row["mail_from"], row["rcpt"], bytes(row["raw"]))
+        failure = None
+    except PermanentError as e:
+        failure, final = str(e), True
+    except Exception as e:  # lỗi tạm thời: thử lại sau
+        failure, final = str(e), row["attempts"] >= len(RETRY_DELAYS)
+    with db.conn() as c:
+        if failure is None:
+            c.execute("DELETE FROM outbox WHERE id=?", (row["id"],))
+            log.info("Đã gửi thư tới %s", row["rcpt"])
+        elif final:
+            c.execute("DELETE FROM outbox WHERE id=?", (row["id"],))
+        else:
+            c.execute("UPDATE outbox SET attempts=attempts+1,next_try=?,last_error=? WHERE id=?",
+                      (time.time() + RETRY_DELAYS[row["attempts"]], failure, row["id"]))
+    if failure is not None:
+        log.warning("Gửi tới %s thất bại (%s): %s", row["rcpt"], "bỏ" if final else "sẽ thử lại", failure)
+        if final:
+            bounce(row["mail_from"], row["rcpt"], failure)
 
 
 def purge_old():
@@ -231,6 +280,7 @@ def outbox_worker():
             if time.time() - last_purge > 3600:
                 last_purge = time.time()
                 purge_old()
+                security.purge_sessions()
         except Exception:
             log.exception("Lỗi hàng đợi gửi thư")
 
@@ -242,8 +292,9 @@ def _store_inbound(peer, helo, mail_from, rcpts, content):
     content = spam.strip_auth_results(content)
     auth = spam.check_inbound(peer, helo, mail_from, content, from_addr)
     # Thư từ Internet tự nhận là của tên miền nội bộ mà không có chữ ký hợp lệ: nhiều khả năng giả mạo.
-    if (not auth["spam"] and from_addr.rpartition("@")[2].lower() in config.DOMAINS
-            and spam._public_ip(peer) and auth["dkim"] != "pass"):
+    # Chỉ chữ ký DKIM của chính tên miền nội bộ mới được tính; chữ ký hợp lệ của tên miền khác thì không.
+    if (not auth["spam"] and from_addr.rpartition("@")[2].lower() in config.DOMAINS and spam._public_ip(peer)
+            and not any(d in config.DOMAINS for d in auth["dkim_domains"])):
         auth["spam"], auth["reason"] = True, "Giả mạo địa chỉ nội bộ"
     received = "Received: from %s ([%s]) by %s with ESMTP; %s\r\n" % (
         "".join(ch for ch in (helo or "unknown") if ch.isalnum() or ch in ".-_[]:")[:255] or "unknown",
@@ -264,8 +315,11 @@ class InboundHandler:
             return "452 4.5.3 Too many recipients"
         if address.rpartition("@")[2].lower() not in config.DOMAINS:
             return "550 5.7.1 Relaying denied"
-        if not db.find_local_user(address):
+        user = db.find_local_user(address)
+        if not user:
             return "550 5.1.1 User unknown"
+        if db.over_quota(user["id"]):
+            return "452 4.2.2 Mailbox full"
         envelope.rcpt_tos.append(address)
         return "250 OK"
 
@@ -292,7 +346,7 @@ def _smtp_authenticator(server, session, envelope, mechanism, auth_data):
     peer = session.peer[0] if session.peer else "?"
     try:
         user, _ = security.authenticate(auth_data.login.decode("utf-8", "replace"),
-                                        auth_data.password.decode("utf-8", "replace"), peer)
+                                        auth_data.password.decode("utf-8", "replace"), peer, "mail")
     except Exception:
         log.exception("Lỗi xác thực SMTP")
         user = None
@@ -353,7 +407,7 @@ def start_smtp():
         def factory(self):
             return TolerantSMTP(self.handler, **self.SMTP_kwargs)
 
-    logging.getLogger("mail.log").setLevel(logging.WARNING)
+    logging.getLogger("mail.log").setLevel(logging.ERROR)
     tls = security.server_tls_context()
     controllers = []
     if config.SMTP_PORT:

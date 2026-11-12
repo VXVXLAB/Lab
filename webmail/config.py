@@ -50,5 +50,6 @@ DNSBL = [d.strip() for d in os.environ.get("DNSBL", "").split(",") if d.strip()]
 RETENTION_DAYS = _int("RETENTION_DAYS", 30)  # tự xóa thư trong Thư rác/Thùng rác sau số ngày này
 SEND_LIMIT_PER_HOUR = _int("SEND_LIMIT_PER_HOUR", 300)  # số người nhận tối đa mỗi tài khoản mỗi giờ
 
+QUOTA = _int("QUOTA_MB", 5120) * 1024 * 1024  # dung lượng tối đa mỗi hộp thư (0 = không giới hạn)
 MAX_SIZE = _int("MAX_SIZE_MB", 25) * 1024 * 1024
 PAGE_SIZE = 50

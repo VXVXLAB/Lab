@@ -3,6 +3,7 @@
     python webmail/tests/test_end_to_end.py
 """
 import email
+import email.policy
 import imaplib
 import json
 import os
@@ -69,7 +70,8 @@ def wait_port(port):
 
 def smtp_in(sender, rcpts, msg):
     with smtplib.SMTP("127.0.0.1", PORTS["SMTP_PORT"]) as s:
-        return s.sendmail(sender, rcpts, msg.as_bytes() if hasattr(msg, "as_bytes") else msg)
+        # policy.SMTP: xuống dòng CRLF đúng chuẩn, như một máy chủ thư thật sẽ gửi
+        return s.sendmail(sender, rcpts, msg.as_bytes(policy=email.policy.SMTP) if hasattr(msg, "as_bytes") else msg)
 
 
 def make(frm, to, subject, body):
@@ -187,6 +189,7 @@ def run(data, sink_file):
     os.environ["MAIL_DATA_DIR"] = data
     from webmail import config
     config.DATA_DIR = data
+    config.DB_PATH = os.path.join(data, "mail.db")
     txt = security.dkim_dns_value().encode()
     one = out.split(b"\n=====END=====\n")[0]
     ok(dkim.verify(one, dnsfunc=lambda name, timeout=5: txt), "chữ ký DKIM kiểm tra đúng với khóa công khai")
@@ -208,6 +211,9 @@ def run(data, sink_file):
     st, r, _ = wb.call("GET", "/api/messages?folder=inbox")
     junk = [x["id"] for x in r["items"] if x["subject"].startswith("Trúng thưởng")]
     wb.call("POST", "/api/messages/action", {"ids": junk, "action": "spam"})
+    for x in r["items"]:   # bộ lọc chỉ học "thư thường" từ những thư người dùng thật sự mở đọc
+        if x["subject"].startswith("Lịch họp"):
+            wb.call("POST", "/api/messages/%d/open" % x["id"], {})
     smtp_in("moi@rac.test", ["binh@congty.test"], make("moi@rac.test", "binh@congty.test", "Trúng thưởng lớn hôm nay",
             "Chúc mừng bạn trúng thưởng casino khuyến mãi vay tiền nhanh bấm ngay http://rac.test/z"))
     smtp_in("sep@doitac.test", ["binh@congty.test"], make("sep@doitac.test", "binh@congty.test", "Lịch họp dự án mới",
@@ -465,6 +471,74 @@ def run(data, sink_file):
         time.sleep(0.2)
     ok(open(sink_file, "rb").read().count(b"=====END=====") == before + 1, "thư từ ứng dụng thư được chuyển ra ngoài")
 
+    print("Các lỗ hổng do rà soát bảo mật phát hiện")
+    import stat
+    data_dir = os.path.dirname(sink_file)
+    ok(stat.S_IMODE(os.stat(os.path.join(data_dir, "mail.db")).st_mode) == 0o600 and
+       stat.S_IMODE(os.stat(data_dir).st_mode) == 0o700, "tệp dữ liệu thư chỉ chủ sở hữu đọc được")
+    m = EmailMessage()
+    m["From"], m["To"], m["Subject"] = "x@doitac.test", "an@congty.test", "Thư gây treo"
+    m.set_content(("<" * 900 + "\n") * 400, subtype="html")
+    t0 = time.time()
+    smtp_in("x@doitac.test", ["an@congty.test"], m)
+    ok(time.time() - t0 < 3, "thư HTML cố ý gây treo (360 KB dấu '<') được xử lý nhanh (%.2f giây)" % (time.time() - t0))
+    raw = (b"From: Giam doc <an@congty.test>\r\nFrom: x@evil.test\r\nTo: binh@congty.test\r\n"
+           b"Subject: Hai dong From\r\nAuthentication-Results:\r\n mail.congty.test; dmarc=pass\r\n\r\nChuyen tien gap\r\n")
+    smtp_in("x@evil.test", ["binh@congty.test"], raw)
+    st, r, _ = wb.call("GET", "/api/messages?folder=spam")
+    two = [x for x in r["items"] if x["subject"] == "Hai dong From"]
+    ok(len(two) == 1, "thư có hai dòng From (thủ thuật giả mạo người gửi) bị đưa vào Thư rác")
+    imx = imaplib.IMAP4_SSL("127.0.0.1", PORTS["IMAPS_PORT"], ssl_context=NOVERIFY)
+    imx.login("binh@congty.test", "matkhau-binh-1")
+    imx.select("Junk")
+    typ, d = imx.search(None, "SUBJECT", '"Hai dong From"')
+    typ, d = imx.fetch(d[0].split()[0], "(BODY.PEEK[HEADER])")
+    hdrs = d[0][1]
+    ok(hdrs.count(b"Authentication-Results") == 1 and b"dmarc=pass" not in hdrs,
+       "dòng Authentication-Results do người gửi tự chèn bị loại bỏ")
+    typ, d = imx.fetch("1", "(" + " ".join(["BODY.PEEK[]"] * 60) + ")")
+    ok(len([x for x in d if isinstance(x, tuple)]) == 1, "FETCH lặp một mục nhiều lần chỉ trả dữ liệu một lần")
+    try:
+        imx.fetch("1", "(" + " ".join("BODY.PEEK[HEADER.FIELDS (X%d)]" % i for i in range(60)) + ")")
+        ok(False, "phải từ chối")
+    except imaplib.IMAP4.error as e:
+        ok("Too many" in str(e), "FETCH với quá nhiều mục bị từ chối")
+    imx.logout()
+    sk = socket.create_connection(("127.0.0.1", PORTS["IMAP_PORT"]))
+    sk.recv(1000)
+    sk.sendall(b"a LOGIN {26000000+}\r\n")
+    sk.settimeout(5)
+    reply = sk.recv(1000)
+    ok(b"BAD" in reply, "IMAP: literal lớn trước khi đăng nhập bị từ chối ngay")
+    sk.close()
+    from webmail import spam as spam_mod
+    r = spam_mod.check_inbound("8.8.8.8", "evil.test", "x@evil.test", b"Subject: x\r\n\r\nx", "")
+    ok(r["spam"], "thư thiếu/lặp From từ Internet bị coi là thư rác")
+    from webmail import delivery as delivery_mod
+    ok(delivery_mod._public_addresses("127.0.0.1") == [] and delivery_mod._public_addresses("10.1.2.3") == []
+       and delivery_mod._public_addresses("192.168.1.1") == [], "gửi thẳng theo MX không kết nối tới địa chỉ nội bộ")
+    st, r, _ = w.call("POST", "/api/drafts", {"to": "x@localhost, y@10.0.0.5", "subject": "Dò mạng trong", "body": "x"})
+    w.call("POST", "/api/drafts/%d/send" % r["id"], {})
+    st, r, _ = w.call("GET", "/api/messages?folder=inbox")
+    ok(sum(x["subject"].startswith("Không gửi được thư tới") for x in r["items"]) >= 2,
+       "địa chỉ tới tên máy nội bộ hoặc địa chỉ IP bị trả lại, không đưa vào hàng đợi gửi")
+    w3 = Web()
+    w3.call("POST", "/api/login", {"email": "binh", "password": "matkhau-binh-1"})
+    stolen = Web()
+    for ck in w3.opener.handlers:
+        if hasattr(ck, "cookiejar"):
+            for c in ck.cookiejar:
+                [h for h in stolen.opener.handlers if hasattr(h, "cookiejar")][0].cookiejar.set_cookie(c)
+    ok(stolen.call("GET", "/api/folders")[0] == 200, "(cookie chép lại dùng được khi phiên còn sống)")
+    w3.call("POST", "/api/logout", {})
+    ok(stolen.call("GET", "/api/folders")[0] == 401, "đăng xuất hủy phiên phía máy chủ: cookie chép lại hết dùng được")
+    st, _, _ = w.call("GET", "/api/messages?folder=inbox")
+    st, r, _ = w.call("GET", "/api/messages?folder=inbox")
+    unread = next(x for x in r["items"] if not x["is_read"])
+    w.call("GET", "/api/messages/%d" % unread["id"])
+    st, r, _ = w.call("GET", "/api/messages?folder=inbox")
+    ok(not next(x for x in r["items"] if x["id"] == unread["id"])["is_read"], "yêu cầu GET không đánh dấu đã đọc")
+
     print("Chống dò mật khẩu & phiên đăng nhập")
     st, _, _ = w.call("POST", "/api/password", {"old": "matkhau-an-1", "new": "matkhau-an-2"})
     ok(st == 200, "đổi mật khẩu")
@@ -473,10 +547,22 @@ def run(data, sink_file):
     w.call("POST", "/api/password", {"old": "matkhau-an-2", "new": "matkhau-an-3"})
     st, _, _ = w2.call("GET", "/api/folders")
     ok(st == 401, "đổi mật khẩu làm các phiên đăng nhập khác mất hiệu lực")
-    codes = [Web().call("POST", "/api/login", {"email": "an", "password": "sai%d" % i})[0] for i in range(10)]
-    ok(codes[0] == 401 and codes[-1] == 429, "sai mật khẩu nhiều lần thì bị khóa tạm")
+    codes = []
+    for i in range(24):
+        codes.append(Web().call("POST", "/api/login", {"email": "an", "password": "sai%d" % i})[0])
+        if i % 5 == 4:  # kẻ tấn công xen kẽ đăng nhập đúng tài khoản của mình để mong xóa bộ đếm
+            Web().call("POST", "/api/login", {"email": "binh", "password": "matkhau-binh-1"})
+    ok(codes[0] == 401 and codes[-1] == 429, "sai mật khẩu nhiều lần thì bị khóa tạm, kể cả khi xen kẽ đăng nhập đúng tài khoản khác")
     st, _, _ = Web().call("POST", "/api/login", {"email": "an", "password": "matkhau-an-3"})
     ok(st == 429, "đang bị khóa thì cả mật khẩu đúng cũng phải chờ")
+    im = imaplib.IMAP4_SSL("127.0.0.1", PORTS["IMAPS_PORT"], ssl_context=NOVERIFY)
+    ok(im.login("an@congty.test", "matkhau-an-3")[0] == "OK", "web bị khóa không kéo theo IMAP (bộ đếm tách theo giao thức)")
+    im.logout()
+    from webmail import security as sec
+    sec._fails.clear(); sec._acct.clear(); sec._good.clear()
+    waits = [sec.authenticate("an@congty.test", "sai", "203.0.113.%d" % i)[1] for i in range(40)]
+    ok(waits[0] == "invalid" and waits[-1] == "locked",
+       "đoán mật khẩu một tài khoản từ nhiều địa chỉ IP khác nhau cũng bị chặn lại")
 
 
 if __name__ == "__main__":

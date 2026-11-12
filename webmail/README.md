@@ -61,6 +61,7 @@ EOF
 | `RETENTION_DAYS` | `30` | Số ngày giữ thư trong Thư rác/Thùng rác (`0` = không tự xóa) |
 | `SEND_LIMIT_PER_HOUR` | `300` | Số người nhận tối đa mỗi tài khoản mỗi giờ |
 | `MAX_SIZE_MB` | `25` | Dung lượng tối đa một thư |
+| `QUOTA_MB` | `5120` | Dung lượng tối đa mỗi hộp thư (`0` = không giới hạn) |
 
 Đặt cổng bằng `0` để tắt một dịch vụ.
 
@@ -88,6 +89,27 @@ python webmail/tests/test_end_to_end.py
 ```
 
 Bộ kiểm thử chạy một máy chủ thật trên cổng tạm rồi đi qua web API, SMTP, IMAP, POP3, kèm các kiểm tra bảo mật (phân quyền giữa người dùng, chống giả mạo người gửi, làm sạch HTML, khóa khi dò mật khẩu). Nếu có cài `imapclient` và `curl`, bộ kiểm thử dùng thêm hai client này.
+
+## Bảo mật
+
+Các biện pháp đang có:
+
+- **Đăng nhập**: mật khẩu băm bằng scrypt; giới hạn số lần sai theo địa chỉ IP (tách riêng web và các giao thức thư) và làm chậm dần theo từng tài khoản; IMAP/POP3/SMTP chỉ cho đăng nhập qua TLS; phiên web lưu phía máy chủ nên đăng xuất hoặc đổi mật khẩu là các phiên cũ hết hiệu lực ngay (kể cả kết nối IMAP/POP3 đang mở).
+- **Nội dung thư**: thư HTML nhận về được làm sạch và hiển thị trong khung cách ly không cho chạy mã; tệp đính kèm luôn tải về chứ không mở trong trang; HTML do người dùng soạn chỉ giữ một danh sách thẻ định dạng cho phép.
+- **Chống giả mạo**: cổng gửi thư bắt buộc đăng nhập và chỉ gửi được dưới địa chỉ của chính mình; thư từ Internet tự nhận là của tên miền nội bộ mà không có chữ ký DKIM của tên miền đó, hoặc có tiêu đề `From` thiếu/lặp, bị đưa vào Thư rác; dòng `Authentication-Results` do người gửi tự chèn bị loại bỏ.
+- **Chống lạm dụng**: không trung chuyển thư hộ; giới hạn số người nhận mỗi giờ; giới hạn dung lượng hộp thư; khi gửi thẳng theo MX không kết nối tới địa chỉ mạng nội bộ; giới hạn kích thước và số phần của thư, số kết nối và lượng dữ liệu nhận trước khi đăng nhập.
+- **Dữ liệu trên đĩa**: thư mục dữ liệu, cơ sở dữ liệu và các khóa chỉ chủ sở hữu tiến trình đọc được.
+
+Mã nguồn đã qua một lượt rà soát bảo mật độc lập; mỗi lỗ hổng tìm thấy đều có bài kiểm tra tương ứng trong `tests/test_end_to_end.py` (mục "Các lỗ hổng do rà soát bảo mật phát hiện").
+
+Những điểm cần biết khi vận hành:
+
+- Kiểm tra SPF/DKIM/DMARC chỉ áp dụng khi máy gửi có địa chỉ IP công khai. Nếu máy chủ đứng sau NAT hay một proxy làm mọi kết nối đến mang địa chỉ nội bộ, các kiểm tra này không chạy.
+- Kết nối từ chính máy chủ (localhost) được phép đăng nhập không cần TLS. Đừng đặt một proxy TLS (stunnel, haproxy) trên cùng máy trước các cổng không mã hóa; hãy dùng thẳng các cổng TLS của ứng dụng.
+- Đặt sau reverse proxy thì phải bật `TRUST_PROXY=1`, nếu không mọi người dùng chung một địa chỉ IP trong mắt bộ giới hạn đăng nhập.
+- Cổng 25 trả lời khác nhau cho địa chỉ có và không tồn tại (đây là hành vi chuẩn của máy chủ thư), nên người ngoài có thể dò ra tên hộp thư.
+- Mã thiết lập lần đầu được in ra màn hình, nên có thể nằm lại trong nhật ký; mã mất hiệu lực ngay sau khi tạo tài khoản quản trị.
+- Kiểm tra SPF/DKIM/DMARC với DNS thật, danh sách đen DNS và đường gửi thẳng theo MX chưa được chạy thử trong môi trường phát triển (không có DNS); phần này mới được kiểm ở mức hàm.
 
 ## Giới hạn hiện tại
 

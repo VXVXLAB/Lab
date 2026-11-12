@@ -47,6 +47,11 @@ CREATE TABLE IF NOT EXISTS folders (
   name TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_folders_user ON folders(user_id);
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS uidseq (id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE IF NOT EXISTS spam_tokens (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -89,7 +94,7 @@ _local = threading.local()
 def conn():
     c = getattr(_local, "c", None)
     if c is None:
-        os.makedirs(config.DATA_DIR, exist_ok=True)
+        os.makedirs(config.DATA_DIR, mode=0o700, exist_ok=True)
         c = sqlite3.connect(config.DB_PATH, timeout=30)
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA journal_mode=WAL")
@@ -104,8 +109,29 @@ MIGRATIONS = [  # cột thêm sau phiên bản đầu
 ]
 
 
+def secure_files():
+    """Chỉ chủ sở hữu tiến trình được đọc thư mục dữ liệu (thư và mật khẩu đã băm nằm trong đó)."""
+    try:
+        os.chmod(config.DATA_DIR, 0o700)
+        for suffix in ("", "-wal", "-shm"):
+            if os.path.exists(config.DB_PATH + suffix):
+                os.chmod(config.DB_PATH + suffix, 0o600)
+    except OSError:
+        pass
+
+
+def mailbox_size(user_id):
+    return conn().execute("SELECT COALESCE(SUM(size),0) FROM messages WHERE user_id=?", (user_id,)).fetchone()[0]
+
+
+def over_quota(user_id, extra=0):
+    return bool(config.QUOTA) and mailbox_size(user_id) + extra > config.QUOTA
+
+
 def init():
+    os.umask(0o077)
     c = conn()
+    secure_files()
     have = {r["name"] for r in c.execute("PRAGMA table_info(messages)")}
     with c:
         for name, decl in MIGRATIONS:

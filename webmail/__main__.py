@@ -80,6 +80,9 @@ def main():
     print("TLS          : %s" % ("chứng chỉ tự ký (ứng dụng thư sẽ cảnh báo; hãy đặt TLS_CERT/TLS_KEY)"
                                  if security.tls_self_signed() else config.TLS_CERT))
     print("Webmail      : http://%s:%d" % (config.WEB_HOST, config.WEB_PORT))
+    if not config.TRUST_PROXY:
+        print("               (nếu đặt sau reverse proxy, hãy bật TRUST_PROXY=1 để giới hạn đăng nhập tính đúng"
+              " theo từng người dùng)")
     if db.user_count() == 0:
         print("\n>>> Mã thiết lập lần đầu: %s  (nhập mã này trên trang web để tạo tài khoản quản trị)\n"
               % security.setup_token())

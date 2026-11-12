@@ -1,6 +1,4 @@
 """API web và phục vụ giao diện webmail."""
-import hashlib
-import hmac
 import os
 import threading
 import re
@@ -44,16 +42,14 @@ def err(message, code=400):
     return jsonify(error=message), code
 
 
-def pw_stamp(user):
-    """Dấu vết của mật khẩu hiện tại; đổi mật khẩu thì mọi phiên đăng nhập cũ mất hiệu lực."""
-    return hashlib.sha256(("%s|%s" % (app.secret_key, user["pw_hash"])).encode()).hexdigest()[:24]
-
-
 def current_user():
-    user = db.get_user(session.get("uid") or 0)
-    if user and hmac.compare_digest(str(session.get("pw") or ""), pw_stamp(user)):
-        return user
-    return None
+    return security.session_user(session.get("sid"))
+
+
+def start_session(user_id):
+    session.clear()
+    session.permanent = True
+    session["sid"] = security.new_session(user_id)
 
 
 def login_required(f):
@@ -153,7 +149,7 @@ def setup():
         return err("Nhập sai quá nhiều lần. Hãy thử lại sau vài phút.", 429)
     d = request.get_json(silent=True) or {}
     if not security.check_setup_token(str(d.get("token") or "")):
-        security._record(ip, False)
+        security.record_failure(ip)
         return err("Mã thiết lập không đúng. Mã được in ra màn hình khi khởi động máy chủ.", 403)
     local = str(d.get("email") or "").strip().lower().split("@")[0]
     try:
@@ -167,10 +163,7 @@ def setup():
             return err("Hệ thống đã được thiết lập.", 403)
         uid = db.create_user("%s@%s" % (local, config.DOMAIN), str(d.get("name") or local)[:100], d["password"], True)
     security.clear_setup_token()
-    session.clear()
-    session.permanent = True
-    session["uid"] = uid
-    session["pw"] = pw_stamp(db.get_user(uid))
+    start_session(uid)
     welcome = mime.build(
         "Hệ thống thư", "postmaster@" + config.DOMAIN, [("", "%s@%s" % (local, config.DOMAIN))], [],
         "Chào mừng bạn đến với hộp thư mới",
@@ -192,15 +185,13 @@ def login():
         return err("Sai mật khẩu quá nhiều lần. Hãy thử lại sau vài phút.", 429)
     if not user:
         return err("Địa chỉ thư hoặc mật khẩu không đúng.", 401)
-    session.clear()
-    session.permanent = True
-    session["uid"] = user["id"]
-    session["pw"] = pw_stamp(user)
+    start_session(user["id"])
     return jsonify(user=user_json(user))
 
 
 @app.post("/api/logout")
 def logout():
+    security.end_session(session.get("sid"))   # hủy phía máy chủ: cookie cũ bị chép lại cũng vô dụng
     session.clear()
     return jsonify(ok=True)
 
@@ -209,14 +200,18 @@ def logout():
 @login_required
 def change_password():
     d = request.get_json(silent=True) or {}
-    if not db.check_password(str(d.get("old") or ""), g.user["pw_hash"]):
+    # Dùng chung bộ giới hạn với đăng nhập, để phiên bị chiếm không dò được mật khẩu hiện tại.
+    user, why = security.authenticate(g.user["email"], str(d.get("old") or ""), request.remote_addr)
+    if why == "locked":
+        return err("Nhập sai quá nhiều lần. Hãy thử lại sau vài phút.", 429)
+    if not user:
         return err("Mật khẩu hiện tại không đúng.")
     try:
         check_new_password(d.get("new"))
     except ValueError as e:
         return err(str(e))
     db.set_password(g.user["id"], d["new"])
-    session["pw"] = pw_stamp(db.get_user(g.user["id"]))  # giữ phiên này, các phiên khác bị đăng xuất
+    security.end_other_sessions(g.user["id"], session.get("sid"))  # giữ phiên này, các thiết bị khác bị đăng xuất
     return jsonify(ok=True)
 
 
@@ -256,6 +251,7 @@ def admin_reset_password(uid):
     if not db.get_user(uid):
         return err("Không tìm thấy người dùng.", 404)
     db.set_password(uid, d["password"])
+    security.end_other_sessions(uid, session.get("sid") if uid == g.user["id"] else None)
     return jsonify(ok=True)
 
 
@@ -365,18 +361,29 @@ def own_message(mid):
     return db.get_message(g.user["id"], mid)
 
 
+@app.post("/api/messages/<int:mid>/open")
+@login_required
+def open_message(mid):
+    """Người dùng mở đọc thư: đánh dấu đã đọc. Là POST để một địa chỉ nhúng trong thư không kích hoạt được."""
+    r = own_message(mid)
+    if not r:
+        return err("Không tìm thấy thư.", 404)
+    with db.conn() as c:
+        if not r["is_read"]:
+            c.execute("UPDATE messages SET is_read=1 WHERE id=?", (mid,))
+        spam.learn_ham_on_read(c, r)
+    return get_message(mid)
+
+
 @app.get("/api/messages/<int:mid>")
 @login_required
 def get_message(mid):
     r = own_message(mid)
     if not r:
         return err("Không tìm thấy thư.", 404)
-    if not r["is_read"]:
-        with db.conn() as c:
-            c.execute("UPDATE messages SET is_read=1 WHERE id=?", (mid,))
     out = summary(r)
     out.update(
-        is_read=True, cc=r["cc_addrs"], bcc=r["bcc_addrs"], reply_to=r["reply_to"], text=r["body_text"],
+        cc=r["cc_addrs"], bcc=r["bcc_addrs"], reply_to=r["reply_to"], text=r["body_text"],
         has_html=bool(r["body_html"]),
         html=(mime.sanitize_fragment(r["body_html"], draft_images(mid)[1])
               if r["folder"] == "drafts" and r["body_html"] else None),

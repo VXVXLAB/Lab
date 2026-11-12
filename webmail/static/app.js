@@ -388,7 +388,7 @@ function paintStar() {
 
 async function openMessage(m) {
   let d;
-  try { d = await api('GET', '/api/messages/' + m.id); } catch (e) { return fail(e); }
+  try { d = await api('POST', '/api/messages/' + m.id + '/open'); } catch (e) { return fail(e); }
   if (d.folder === 'drafts') return openCompose({
     id: d.id, to: d.to, cc: d.cc, bcc: d.bcc, subject: d.subject, body: d.text, html: d.html, attachments: d.attachments,
   });
