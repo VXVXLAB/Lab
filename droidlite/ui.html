@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DroidLite</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#1c2330;--mute:#667085;--line:#dfe3ea;--acc:#1f6feb;
+  --ok:#1a7f4b;--bad:#c62828;--term:#0f1722;--termink:#d7e0ee;--chip:#eef2f8}
+@media (prefers-color-scheme:dark){:root{--bg:#10141b;--card:#181e28;--ink:#e6eaf2;--mute:#94a0b4;
+  --line:#2a3342;--acc:#5b9dff;--ok:#4cc38a;--bad:#ff7b72;--term:#0a0e14;--termink:#cfd8e6;--chip:#222b39}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,"Segoe UI",sans-serif}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 16px;
+  border-bottom:1px solid var(--line);background:var(--card)}
+h1{font-size:18px;margin:0 8px 0 0}
+h2{font-size:15px;margin:0 0 10px}
+h3{font-size:13px;margin:14px 0 6px;color:var(--mute);font-weight:600}
+main{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,42%);gap:16px;padding:16px}
+@media (max-width:980px){main{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px}
+.side{position:sticky;top:12px;align-self:start}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}
+.chip{background:var(--chip);border-radius:999px;padding:2px 10px;font-size:12px}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.mute{color:var(--mute)}
+button{font:inherit;padding:5px 11px;border-radius:7px;border:1px solid var(--line);
+  background:var(--card);color:var(--ink);cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+button.danger{color:var(--bad)}
+button:disabled{opacity:.5;cursor:default}
+input,select{font:inherit;padding:5px 8px;border-radius:7px;border:1px solid var(--line);
+  background:var(--card);color:var(--ink);min-width:0}
+input[type=number]{width:84px}
+label{font-size:12px;color:var(--mute);display:inline-flex;gap:5px;align-items:center}
+.scroll{overflow-x:auto;max-height:340px;overflow-y:auto}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:12px;color:var(--mute);font-weight:600;position:sticky;top:0;background:var(--card)}
+.term{background:var(--term);color:var(--termink);border-radius:8px;padding:10px;height:340px;
+  overflow:auto;font:12px/1.4 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+.term .cmd{color:#7fb4ff}.term .err{color:#ff8f87}
+.lvE,.lvF{color:#ff8f87}.lvW{color:#f0c674}.lvD,.lvV{color:#8a97ab}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.bar{height:6px;background:var(--chip);border-radius:3px;overflow:hidden;flex:1;min-width:120px}
+.bar i{display:block;height:100%;background:var(--acc)}
+#shot{max-width:220px;max-height:400px;border:1px solid var(--line);border-radius:8px;display:none}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);
+  max-width:min(720px,92vw);padding:16px}
+dialog pre{max-height:50vh;overflow:auto;white-space:pre-wrap;font-size:12px}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--ink);
+  color:var(--bg);padding:8px 14px;border-radius:8px;display:none;max-width:90vw;z-index:9}
+.hint{font-size:12px;color:var(--mute)}
+code{background:var(--chip);padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>DroidLite</h1>
+  <span class="chip" id="c-emu">lõi giả lập: …</span>
+  <span class="chip" id="c-adb">adb: …</span>
+  <button id="b-setup" class="pri">Cài lõi giả lập</button>
+  <button id="b-doctor">Kiểm tra máy</button>
+  <span class="hint" id="home"></span>
+</header>
+
+<main>
+<div>
+  <div class="card" id="jobs" style="display:none"></div>
+
+  <div class="card">
+    <h2>Máy ảo</h2>
+    <div class="scroll"><table id="t-avd"><thead><tr><th>Tên</th><th>Android</th><th>RAM</th>
+      <th>Màn hình</th><th>Trạng thái</th><th></th></tr></thead><tbody></tbody></table></div>
+    <h3>Tùy chọn khi chạy</h3>
+    <div class="row">
+      <label>GPU <select id="o-gpu"><option value="auto">tự động</option>
+        <option value="host">card đồ họa máy thật</option>
+        <option value="swiftshader_indirect">phần mềm</option></select></label>
+      <label><input type="checkbox" id="o-cold"> khởi động nguội</label>
+      <label><input type="checkbox" id="o-wipe"> xóa dữ liệu</label>
+      <label><input type="checkbox" id="o-audio"> bật âm thanh</label>
+      <label><input type="checkbox" id="o-headless"> không hiện cửa sổ</label>
+    </div>
+    <h3>Tạo máy ảo mới</h3>
+    <div class="row">
+      <input id="n-name" placeholder="tên, ví dụ may1" size="14">
+      <select id="n-image"></select>
+      <label>RAM <input type="number" id="n-ram" placeholder="tự chọn" min="512" step="256"> MB</label>
+      <label>nhân <input type="number" id="n-cores" value="2" min="1" max="16"></label>
+      <select id="n-screen"><option value="phone-hd">Điện thoại 720×1280</option>
+        <option value="phone-fhd">Điện thoại 1080×1920</option>
+        <option value="phone-small">Điện thoại 480×800 (nhẹ nhất)</option>
+        <option value="tablet">Máy tính bảng 1280×800</option></select>
+      <button id="b-create" class="pri">Tạo</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Phiên bản Android</h2>
+    <div class="row">
+      <label>Loại <select id="f-tag"><option value="default">AOSP gốc (nhẹ nhất)</option>
+        <option value="google_apis">Có Google APIs</option>
+        <option value="google_apis_playstore">Có Google Play</option>
+        <option value="">Tất cả</option></select></label>
+      <label><input type="checkbox" id="f-inst"> chỉ hiện bản đã cài</label>
+    </div>
+    <div class="scroll"><table id="t-img"><thead><tr><th>Android</th><th>API</th><th>Loại</th>
+      <th>Kiến trúc</th><th>Dung lượng tải</th><th></th></tr></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<div class="side">
+  <div class="card">
+    <div class="row"><h2 style="margin:0">Điều khiển</h2>
+      <select id="dev"></select><span class="hint" id="devinfo"></span></div>
+    <div class="row" id="keys">
+      <button data-key="back">◁ Quay lại</button><button data-key="home">○ Home</button>
+      <button data-key="recents">□ Đa nhiệm</button><button data-key="power">Nguồn</button>
+      <button data-key="volume_up">Âm +</button><button data-key="volume_down">Âm −</button>
+      <button data-act="rotate">Xoay</button><button data-act="fingerprint">Vân tay</button>
+    </div>
+    <div class="row">
+      <button id="b-apk" class="pri">Cài APK…</button><input type="file" id="apkfile" accept=".apk" hidden>
+      <button id="b-shot">Chụp màn hình</button>
+      <label>quay <input type="number" id="rec-s" value="10" min="1" max="180"> giây</label>
+      <button id="b-rec">Quay</button>
+    </div>
+    <img id="shot" alt="Ảnh chụp màn hình máy ảo">
+    <details><summary>Giả lập cảm biến, mạng, cuộc gọi</summary>
+      <div class="row"><input id="g-lat" placeholder="vĩ độ" size="9" value="21.0285">
+        <input id="g-lon" placeholder="kinh độ" size="9" value="105.8542"><button id="b-gps">Đặt GPS</button>
+        <label>pin <input type="number" id="bat" value="50" min="0" max="100">%</label>
+        <button id="b-bat">Đặt pin</button></div>
+      <div class="row"><label>mạng <select id="net-s"><option>full</option><option>lte</option>
+        <option>hsdpa</option><option>umts</option><option>edge</option><option>gprs</option><option>gsm</option></select></label>
+        <label>độ trễ <select id="net-d"><option>none</option><option>umts</option><option>edge</option>
+        <option>gprs</option></select></label><button id="b-net">Áp dụng</button></div>
+      <div class="row"><input id="tel" placeholder="số điện thoại" size="12">
+        <input id="smsmsg" placeholder="nội dung tin nhắn" size="16">
+        <button id="b-sms">Gửi SMS đến</button><button id="b-call">Gọi đến</button></div>
+      <div class="row"><input id="txt" placeholder="văn bản cần gõ" size="18"><button id="b-txt">Gõ</button>
+        <input id="url" placeholder="https://…" size="18"><button id="b-url">Mở liên kết</button></div>
+      <div class="row"><input id="snap" placeholder="tên snapshot" size="14">
+        <button data-snap="save">Lưu</button><button data-snap="load">Khôi phục</button>
+        <button data-snap="delete">Xóa</button><button data-snap="list">Liệt kê</button></div>
+    </details>
+    <details><summary>Công cụ debug: Frida, proxy</summary>
+      <div class="row"><span id="frida-st" class="hint">Frida: chưa kiểm tra</span></div>
+      <div class="row"><input id="frida-v" placeholder="phiên bản (tự chọn)" size="16">
+        <button id="b-frida-on" class="pri">Bật frida-server</button>
+        <button id="b-frida-off">Tắt</button><button id="b-frida-chk">Kiểm tra</button></div>
+      <div class="hint">Sau khi bật: <code>frida-ps -U</code>,
+        <code>frida -U -f tên.gói -l script.js</code>. Cần <code>pip install frida-tools</code>
+        trên máy thật, và ảnh Android loại AOSP hoặc Google APIs (ảnh Google Play không có root).</div>
+      <div class="row"><input id="px-h" placeholder="máy proxy, ví dụ 10.0.2.2" size="20">
+        <input type="number" id="px-p" placeholder="cổng" value="8080">
+        <button id="b-px">Đặt proxy</button><button id="b-px-off">Gỡ proxy</button>
+        <button data-act="root">adb root</button></div>
+      <div class="hint">Trong máy ảo, <code>10.0.2.2</code> là máy thật của bạn.</div>
+    </details>
+  </div>
+
+  <div class="card">
+    <div class="tabs"><button id="tab-adb" class="on">Cửa sổ ADB</button>
+      <button id="tab-log">Logcat</button></div>
+    <div id="p-adb">
+      <div class="row" id="quick">
+        <button data-q="devices">devices</button>
+        <button data-q="shell pm list packages -3">ứng dụng đã cài</button>
+        <button data-q="shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity'">activity đang mở</button>
+        <button data-q="shell getprop ro.build.version.release">phiên bản</button>
+        <button data-q="logcat -c">xóa log</button>
+      </div>
+      <div class="term" id="out" aria-live="polite"></div>
+      <div class="row"><span class="mute">adb</span>
+        <input id="cmd" placeholder="shell ls /sdcard   (Enter để chạy, ↑↓ xem lại lệnh cũ)" style="flex:1"
+          autocomplete="off" spellcheck="false">
+        <button id="b-run" class="pri">Chạy</button><button id="b-clear">Xóa</button></div>
+    </div>
+    <div id="p-log" style="display:none">
+      <div class="row">
+        <input id="lg-pkg" placeholder="tên gói (bỏ trống = tất cả)" size="22">
+        <label>mức <select id="lg-lv"><option value="V">Verbose</option><option value="D">Debug</option>
+          <option value="I">Info</option><option value="W">Warn</option><option value="E">Error</option></select></label>
+        <input id="lg-f" placeholder="lọc theo từ khóa" size="14">
+        <button id="b-lg" class="pri">Bắt đầu</button><button id="b-lg-clear">Xóa</button>
+        <label><input type="checkbox" id="lg-follow" checked> tự cuộn</label>
+      </div>
+      <div class="term" id="log"></div>
+    </div>
+  </div>
+</div>
+</main>
+
+<dialog id="dlg"><h2 id="dlg-t"></h2><pre id="dlg-b"></pre>
+  <div class="row" style="justify-content:flex-end"><button id="dlg-no">Đóng</button>
+  <button id="dlg-yes" class="pri">Tôi chấp nhận</button></div></dialog>
+<div id="toast" role="status"></div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let state = {avds: [], jobs: [], components: {}}, images = [], retry = {}, seenJobs = new Set();
+
+async function api(op, args = {}) {
+  const r = await fetch("/api", {method: "POST", headers: {"Content-Type": "application/json",
+    "X-Token": TOKEN}, body: JSON.stringify({op, args})});
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error);
+  return j.result;
+}
+function toast(msg, bad) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  t.style.background = bad ? "var(--bad)" : "var(--ink)";
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", bad ? 6000 : 2500);
+}
+async function run(fn, done) {
+  try { const r = await fn(); if (done) toast(typeof done === "function" ? done(r) : done); return r; }
+  catch (e) { toast(e.message, true); }
+}
+const target = () => $("dev").value;
+const act = (action, params, done) => run(() => api("act", {target: target(), action, params}), done || "Đã gửi");
+
+function dialog(title, body, onYes) {
+  $("dlg-t").textContent = title; $("dlg-b").textContent = body;
+  $("dlg-yes").style.display = onYes ? "" : "none";
+  $("dlg-yes").onclick = () => { $("dlg").close(); onYes(); };
+  $("dlg").showModal();
+}
+$("dlg-no").onclick = () => $("dlg").close();
+
+function job(op, args) {                      // việc chạy nền, có thể cần chấp nhận giấy phép
+  return run(async () => { const id = await api(op, args); retry[id] = {op, args}; refresh(); });
+}
+
+function renderJobs() {
+  const box = $("jobs"); box.style.display = state.jobs.length ? "" : "none";
+  box.innerHTML = state.jobs.map(j => `<div class="row"><b>${esc(j.title)}</b>
+    <div class="bar"><i style="width:${j.pct}%"></i></div>
+    <span class="${j.error ? "bad" : j.done ? "ok" : "mute"}">${esc(j.error || j.msg)}</span>
+    ${j.done ? `<button data-dismiss="${j.id}">Ẩn</button>` : ""}</div>`).join("");
+  for (const j of state.jobs) {
+    if (!j.done || seenJobs.has(j.id)) continue;
+    seenJobs.add(j.id);
+    const again = retry[j.id];
+    if (j.license && again) {
+      dialog("Giấy phép của Google: " + j.license.id, j.license.text, () => {
+        api("dismiss_job", {id: j.id}); job(again.op, {...again.args, accept: true}); });
+    } else if (!j.error) { loadImages(); if (again && again.op === "frida_start") fridaCheck(); }
+  }
+}
+function renderHead() {
+  const c = state.components, e = c.emulator || {}, a = c["platform-tools"] || {};
+  $("c-emu").innerHTML = "lõi giả lập: " + (e.installed ? `<span class="ok">${esc(e.installed)}</span>` : '<span class="bad">chưa cài</span>');
+  $("c-adb").innerHTML = "adb: " + (a.installed ? `<span class="ok">${esc(a.installed)}</span>` : '<span class="bad">chưa cài</span>');
+  const need = !e.installed || !a.installed, upd = !need && (e.installed !== e.latest || a.installed !== a.latest);
+  $("b-setup").style.display = need || upd ? "" : "none";
+  $("b-setup").textContent = need ? `Cài lõi giả lập (${Math.round(((e.size||0)+(a.size||0))/2**20)} MB)` : "Cập nhật lõi";
+  $("b-setup").dataset.update = upd ? "1" : "";
+  $("home").textContent = "Dữ liệu: " + (state.home || "");
+}
+function renderAvds() {
+  $("t-avd").tBodies[0].innerHTML = state.avds.map(a => {
+    const im = images.find(i => i.path === a.image), on = a.run;
+    return `<tr><td><b>${esc(a.name)}</b></td><td>${im ? esc((im.android || "API " + im.api) + " · " + im.tag) : esc(a.image)}</td>
+      <td>${a.ram} MB</td><td>${esc(a.screen)}</td>
+      <td>${on ? `<span class="ok">đang chạy (${esc(on.serial)}${on.state === "device" ? "" : ", " + esc(on.state)})</span>` : '<span class="mute">đang tắt</span>'}</td>
+      <td>${on ? `<button data-stop="${esc(a.name)}">Tắt</button>` : `<button class="pri" data-start="${esc(a.name)}">Chạy</button>
+        <button class="danger" data-del="${esc(a.name)}">Xóa</button>`}</td></tr>`;
+  }).join("") || '<tr><td colspan="6" class="mute">Chưa có máy ảo. Tải một phiên bản Android bên dưới rồi tạo máy ảo.</td></tr>';
+  const live = state.avds.filter(a => a.run), cur = target();
+  $("dev").innerHTML = live.map(a => `<option value="${esc(a.name)}">${esc(a.name)}</option>`).join("") ||
+    '<option value="">(chưa có máy nào chạy)</option>';
+  if (live.some(a => a.name === cur)) $("dev").value = cur;
+}
+function renderImages() {
+  const tag = $("f-tag").value, only = $("f-inst").checked;
+  $("t-img").tBodies[0].innerHTML = images.filter(i => (!tag || i.tag === tag) && (!only || i.installed)).map(i =>
+    `<tr><td>${esc(i.android || "bản mới")}</td><td>${esc(i.api)}</td><td>${esc(i.tag)}</td><td>${esc(i.abi)}</td>
+     <td>${Math.round(i.size / 2**20)} MB</td>
+     <td>${i.installed ? `<span class="ok">đã cài</span> <button class="danger" data-rm="${esc(i.path)}">Gỡ</button>`
+       : `<button data-get="${esc(i.path)}">Tải về</button>`}</td></tr>`).join("") ||
+    '<tr><td colspan="6" class="mute">Không có mục nào.</td></tr>';
+  const inst = images.filter(i => i.installed), cur = $("n-image").value;
+  $("n-image").innerHTML = inst.map(i => `<option value="${esc(i.path)}">Android ${esc(i.android || i.api)} · ${esc(i.tag)} · ${esc(i.abi)}</option>`).join("") ||
+    '<option value="">(chưa tải phiên bản Android nào)</option>';
+  if (inst.some(i => i.path === cur)) $("n-image").value = cur;
+}
+async function loadImages() { const r = await run(() => api("images")); if (r) { images = r; renderImages(); renderAvds(); } }
+async function refresh() {
+  try { state = await api("state"); renderHead(); renderJobs(); renderAvds(); } catch (e) { /* máy chủ đã đóng */ }
+}
+
+// ---- nút bấm ----
+$("b-setup").onclick = e => job("setup", {update: !!e.target.dataset.update});
+$("b-doctor").onclick = () => run(async () => { const d = await api("doctor");
+  dialog("Kiểm tra máy", Object.entries(d).map(([k, v]) => k.padEnd(16) + v).join("\n")); });
+$("f-tag").onchange = $("f-inst").onchange = renderImages;
+$("b-create").onclick = () => run(() => api("create_avd", {name: $("n-name").value.trim(), image: $("n-image").value,
+  ram: +$("n-ram").value || 0, cores: +$("n-cores").value || 2, screen: $("n-screen").value}).then(refresh), "Đã tạo máy ảo");
+document.body.addEventListener("click", e => {
+  const d = e.target.dataset; if (!d) return;
+  if (d.get) job("install_image", {path: d.get});
+  if (d.rm && confirm("Gỡ " + d.rm + "?")) run(() => api("remove_image", {path: d.rm}).then(loadImages), "Đã gỡ");
+  if (d.dismiss) api("dismiss_job", {id: +d.dismiss}).then(refresh);
+  if (d.start) run(() => api("start", {name: d.start, gpu: $("o-gpu").value, cold_boot: $("o-cold").checked,
+    wipe: $("o-wipe").checked, audio: $("o-audio").checked, headless: $("o-headless").checked}).then(refresh), "Đang khởi động…");
+  if (d.stop) run(() => api("stop", {target: d.stop}).then(refresh), "Đã gửi lệnh tắt");
+  if (d.del && confirm("Xóa máy ảo " + d.del + " cùng toàn bộ dữ liệu của nó?")) run(() => api("delete_avd", {name: d.del}).then(refresh), "Đã xóa");
+  if (d.key) act("key", {name: d.key});
+  if (d.act) act(d.act, {}, r => r || "Đã gửi");
+  if (d.snap) act("snapshot", {op: d.snap, name: $("snap").value.trim()}, r => r || "Xong");
+  if (d.q) adb(d.q);
+});
+$("b-apk").onclick = () => $("apkfile").click();
+$("apkfile").onchange = () => run(async () => {
+  const f = $("apkfile").files[0]; if (!f) return; toast("Đang tải file lên…");
+  const r = await fetch("/upload?name=" + encodeURIComponent(f.name), {method: "POST", headers: {"X-Token": TOKEN}, body: f});
+  const j = await r.json(); if (!j.ok) throw new Error(j.error);
+  $("apkfile").value = ""; return api("act", {target: target(), action: "install_apk", params: {path: j.result}});
+}, r => "Cài APK: " + (r || "xong"));
+$("b-shot").onclick = () => run(async () => { const p = await api("screenshot", {target: target()});
+  $("shot").src = `/shot?t=${encodeURIComponent(TOKEN)}&target=${encodeURIComponent(target())}&_=${Date.now()}`;
+  $("shot").style.display = "block"; return p; }, p => "Đã lưu " + p);
+$("b-rec").onclick = () => { toast("Đang quay…"); run(() => api("record", {target: target(), seconds: +$("rec-s").value}), p => "Đã lưu " + p); };
+$("b-gps").onclick = () => act("gps", {lat: $("g-lat").value, lon: $("g-lon").value});
+$("b-bat").onclick = () => act("battery", {percent: $("bat").value});
+$("b-net").onclick = () => act("network", {speed: $("net-s").value, delay: $("net-d").value});
+$("b-sms").onclick = () => act("sms", {number: $("tel").value, message: $("smsmsg").value});
+$("b-call").onclick = () => act("call", {number: $("tel").value});
+$("b-txt").onclick = () => act("text", {value: $("txt").value});
+$("b-url").onclick = () => act("open_url", {url: $("url").value});
+$("b-px").onclick = () => act("proxy", {host: $("px-h").value.trim(), port: +$("px-p").value}, "Đã đặt proxy");
+$("b-px-off").onclick = () => act("proxy", {}, "Đã gỡ proxy");
+async function fridaCheck() {
+  const s = await run(() => api("frida_status", {target: target()})); if (!s) return;
+  $("frida-st").innerHTML = `Frida trên máy ảo: ${s.running ? '<span class="ok">đang chạy</span>' : '<span class="mute">đang tắt</span>'}
+    · kiến trúc ${esc(s.abi)} · frida trên máy thật: ${s.client ? esc(s.client) : '<span class="bad">chưa cài frida-tools</span>'}`;
+}
+$("b-frida-chk").onclick = fridaCheck;
+$("b-frida-on").onclick = () => job("frida_start", {target: target(), version: $("frida-v").value.trim()});
+$("b-frida-off").onclick = () => run(() => api("frida_stop", {target: target()}).then(fridaCheck), "Đã tắt Frida");
+
+// ---- cửa sổ ADB ----
+const hist = []; let hi = 0;
+function print(el, html) { el.insertAdjacentHTML("beforeend", html); el.scrollTop = el.scrollHeight; }
+async function adb(line) {
+  line = line.trim(); if (!line) return;
+  hist.push(line); hi = hist.length;
+  print($("out"), `<div class="cmd">$ adb ${esc(line)}</div>`);
+  try {
+    const r = await api("adb", {target: target(), line});
+    print($("out"), `<div class="${r.code ? "err" : ""}">${esc(r.out || "(không có kết quả)")}${r.code ? `\n[mã thoát ${r.code}]` : ""}</div>`);
+  } catch (e) { print($("out"), `<div class="err">${esc(e.message)}</div>`); }
+}
+$("b-run").onclick = () => { adb($("cmd").value); $("cmd").value = ""; };
+$("b-clear").onclick = () => $("out").innerHTML = "";
+$("cmd").onkeydown = e => {
+  if (e.key === "Enter") $("b-run").click();
+  else if (e.key === "ArrowUp" && hi > 0) { $("cmd").value = hist[--hi]; e.preventDefault(); }
+  else if (e.key === "ArrowDown") { hi = Math.min(hi + 1, hist.length); $("cmd").value = hist[hi] || ""; }
+};
+function tab(which) {
+  $("p-adb").style.display = which === "adb" ? "" : "none"; $("p-log").style.display = which === "log" ? "" : "none";
+  $("tab-adb").className = which === "adb" ? "on" : ""; $("tab-log").className = which === "log" ? "on" : "";
+}
+$("tab-adb").onclick = () => tab("adb"); $("tab-log").onclick = () => tab("log");
+
+// ---- logcat ----
+let logOn = false, cursor = 0; const LV = "VDIWEF";
+function logLine(l) {
+  const m = l.match(/^\S+\s+\S+\s+\d+\s+\d+\s+([VDIWEF])\s/), lv = m ? m[1] : "I";
+  if (LV.indexOf(lv) < LV.indexOf($("lg-lv").value)) return "";
+  const f = $("lg-f").value.toLowerCase(); if (f && !l.toLowerCase().includes(f)) return "";
+  return `<div class="lv${lv}">${esc(l)}</div>`;
+}
+async function logPoll() {
+  if (!logOn) return;
+  try {
+    const r = await api("logcat_poll", {cursor}); cursor = r.cursor;
+    const el = $("log"); el.insertAdjacentHTML("beforeend", r.lines.map(logLine).join(""));
+    while (el.childElementCount > 3000) el.firstChild.remove();
+    if ($("lg-follow").checked) el.scrollTop = el.scrollHeight;
+    if (!r.running) { logOn = false; $("b-lg").textContent = "Bắt đầu"; return; }
+  } catch (e) { /* thử lại ở lượt sau */ }
+  setTimeout(logPoll, 1000);
+}
+$("b-lg").onclick = () => run(async () => {
+  if (logOn) { logOn = false; await api("logcat_stop"); $("b-lg").textContent = "Bắt đầu"; return; }
+  await api("logcat_start", {target: target(), package: $("lg-pkg").value.trim()});
+  logOn = true; cursor = 0; $("b-lg").textContent = "Dừng"; logPoll();
+});
+$("b-lg-clear").onclick = () => $("log").innerHTML = "";
+
+loadImages(); refresh(); setInterval(refresh, 3000);
+</script>
+</body>
+</html>
