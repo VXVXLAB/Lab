@@ -71,12 +71,83 @@ Các phần cần người duyệt kỹ trước khi gộp: mọi thay đổi l�
 1. **Sửa thứ tự ghi trong `monitor.py`**: ghi CSV và báo cáo xong mới lưu state, và ghi state kiểu nguyên tử (ghi file tạm rồi `os.replace`). Đây là lỗi mất dữ liệu.
 2. **Phân biệt "quét sạch" với "quét hỏng"**: nếu mọi nguồn đều lỗi thì thoát bằng mã khác `0` để cron cảnh báo được.
 3. **Tách logic lọc phát hiện mới thành hàm thuần** rồi viết test cho 5 tình huống ở bảng trên, dùng nguồn giả thay cho gọi mạng.
-4. **Vô hiệu hóa công thức khi ghi CSV** (thêm `'` trước ô bắt đầu bằng `=`, `+`, `-`, `@`).
-5. **Thêm `AGENTS.md`** ghi các ràng buộc ở lớp 4 và lệnh kiểm tra phải chạy trước khi xong việc.
+4. **Vô hiệu hóa công thức khi ghi CSV**: thêm ký tự tab vào đầu ô bắt đầu bằng ký tự kích hoạt công thức và bọc mọi ô trong dấu nháy kép (chi tiết ở mục "Bổ sung sau khi tra cứu").
+5. **Thêm `AGENTS.md` thật ngắn**, chỉ ghi những ràng buộc không suy ra được từ code và lệnh kiểm tra phải chạy trước khi xong việc. Ràng buộc nào ép được bằng code hoặc test thì ép bằng code hoặc test trước.
 6. **Bật ruff và chạy test trong CI**, ghim phiên bản trong `requirements.txt`.
 
 Mục 1-4 là sửa hành vi; mục 5-6 là dựng hàng rào để lỗi tương tự không quay lại.
 
+## Bổ sung sau khi tra cứu
+
+Bản đầu của tài liệu này chỉ dựa trên bài viết tiếng Việt. Tra lại nguồn gốc thì thấy bài đó bỏ sót ý quan trọng nhất và có vài chỗ cần chỉnh. Lưu ý: bài đăng gốc trên X không tải được từ môi trường này, nên phần dưới dựa trên trích dẫn của công cụ tìm kiếm và hai bài tổng hợp của bên thứ ba; hình sơ đồ trong bài gốc chưa được xem trực tiếp.
+
+### Ý bị bỏ sót: "càng xác định càng tốt"
+
+Câu gốc (6/11/2026) kết thúc bằng: *"the more deterministic the better (and token efficient)"*. Năm lớp không phải là năm hạng mục ngang hàng mà là một **thang xếp từ xác định nhất đến kém xác định nhất**, kèm một quy tắc vận hành:
+
+> Mỗi vấn đề nên được đẩy lên lớp xác định nhất có thể giữ được nó.
+
+Thứ tự sửa lỗi mà các bài tổng hợp ghi lại: trước hết hỏi kiến trúc hoặc kiểu dữ liệu có loại bỏ được lỗi không; nếu không thì thêm lint hoặc test để CI chặn; nếu vẫn không thì mới viết thành rule hoặc skill; cuối cùng mới trông vào người duyệt. Một lời nhắc phải viết đến lần thứ hai thì nên được mã hóa thành lint, kiểm tra lúc chạy hoặc script thay vì thêm chữ.
+
+Hệ quả là hai chỗ trong bài tiếng Việt cần hiểu lại:
+
+- **Human review** nằm cuối vì nó đắt và kém nhất quán nhất, không phải vì nó là "chốt chặn cuối cùng". Một nhận xét review lặp đi lặp lại là dấu hiệu vấn đề đó chưa được đẩy lên lớp trên. Người vẫn chịu trách nhiệm, nhưng nên dành sức cho những gì các lớp trên không kiểm được.
+- **Verification** theo nghĩa của tác giả là agent tự chạy sản phẩm thật và thu bằng chứng thực nghiệm (bà gọi đây là "hands and eyes"), rộng hơn unit test. Giới hạn bà nêu rõ: kiểm chứng chỉ cho biết code khớp đặc tả; đặc tả có đúng hay không thì chỉ người phán đoán được.
+
+Luận điểm đi kèm trong bài nói của bà: năng suất đến từ độ tin cậy, không đến từ việc mở thêm agent. Chạy song song nhiều agent trước khi tin được từng agent chỉ tạo ra, theo lời bà, "a pile of garbage pull requests".
+
+Các nguồn không thống nhất về vị trí của verification trong thang (một bài xếp nó sau static analysis, một bài xếp nó cuối như một kỹ năng riêng). Thứ tự của ba lớp còn lại thì nhất quán: codebase, static analysis, rồi mới đến văn bản và người duyệt.
+
+### Áp quy tắc "đẩy lên lớp trên" vào repo này
+
+Các ràng buộc của repo hiện phần lớn nằm ở lớp văn bản (README, docstring). Mỗi cái có thể đẩy lên:
+
+| Ràng buộc hoặc lỗi | Đang nằm ở | Có thể đẩy lên |
+|--------------------|-----------|----------------|
+| Không tải nội dung trang tìm thấy | README, docstring | Test: chạy `monitor` với `requests` giả, khẳng định chỉ gọi tới các máy tìm kiếm đã liệt kê |
+| Watchlist không đưa vào git | `.gitignore` | Đã ở lớp xác định, giữ nguyên |
+| `--sources` gõ sai bị bỏ qua im lặng | Không ở đâu | Codebase: dùng `choices` của argparse hoặc báo lỗi và dừng ngay |
+| Lưu state trước khi ghi kết quả | Không ở đâu | Codebase: gom "ghi CSV, ghi báo cáo, lưu state" vào một hàm để thứ tự sai không viết ra được; thêm test giả lập ghi lỗi |
+| Quét hỏng trông như quét sạch | Không ở đâu | Codebase: đếm số nguồn thành công, bằng 0 thì thoát mã lỗi; thêm test |
+| Chỉ gửi thư qua SMTP nội bộ | README | Khó ép bằng code; giữ ở `AGENTS.md` và người duyệt |
+
+Chỉ dòng cuối thật sự cần văn bản. Điều này thay đổi cách đọc danh sách ưu tiên ở trên: `AGENTS.md` là chỗ chứa phần còn lại sau khi đã ép hết những gì ép được.
+
+### `AGENTS.md`: bằng chứng cho thấy nên viết ít
+
+Bài tiếng Việt nói một file hướng dẫn tốt có thể tiết kiệm đáng kể thời gian và token. Nghiên cứu của nhóm ETH Zurich (Gloaguen và cộng sự, arXiv:2602.11988) cho kết quả dè dặt hơn: file ngữ cảnh nhìn chung không làm tăng tỷ lệ hoàn thành nhiệm vụ và làm chi phí suy luận tăng trung bình hơn 20%. Agent tuân theo chỉ dẫn trong file khá tốt, nhưng phần tổng quan về repo thì không giúp ích. Kết luận của nhóm tác giả: file ngữ cảnh hữu ích để nêu các quy ước không theo chuẩn thông thường.
+
+Áp vào đây: `AGENTS.md` của repo này không nên mô tả lại cấu trúc hai file (agent đọc code là thấy). Nó chỉ nên có vài dòng mà code không tự nói ra: không thêm tính năng tải nội dung, không mở rộng dữ liệu gửi ra ngoài khi chưa được duyệt, chỉ dùng SMTP nội bộ, và lệnh test phải chạy.
+
+### CSV injection: sửa lại cách khắc phục
+
+Bản đầu đề xuất thêm dấu `'` trước ô nguy hiểm. Theo trang CSV Injection của OWASP thì cách này chưa đủ:
+
+- Danh sách ký tự kích hoạt rộng hơn: `=`, `+`, `-`, `@`, tab (`0x09`), xuống dòng (`0x0D`, `0x0A`) và các biến thể toàn chiều rộng như `＝`, `＋`, `－`, `＠`.
+- Với Excel, OWASP khuyến nghị thêm ký tự **tab** vào đầu ô, bên trong trường đã bọc nháy kép. Excel có thể bỏ dấu nháy hoặc ký tự thoát khi lưu và mở lại file, làm công thức hoạt động trở lại.
+- Chỉ lọc ký tự đầu là chưa đủ, vì dấu phân cách và dấu nháy có thể dùng để mở ô mới. Với module `csv` của Python nên ghi bằng `quoting=csv.QUOTE_ALL`.
+- Đánh đổi: ký tự tab trở thành một phần dữ liệu. `phat_hien.csv` là hồ sơ bằng chứng, nên cần ghi rõ quy ước này để ai xử lý tiếp biết mà bỏ tab đi. File JSON không bị ảnh hưởng và có thể dùng làm bản gốc.
+
+### Bối cảnh và ý kiến trái chiều
+
+- Về tác giả: theo một bài tổng hợp của bên thứ ba, Lauren Tan làm khoảng sáu năm ở Meta trong nhóm React (React Compiler), chuyển sang Cursor tháng 4/2026, và gắn với SpaceX, Grok là do Cursor sau đó sáp nhập. Trang nhóm của React vẫn ghi bà là kỹ sư tại Meta, nên thông tin này chưa được kiểm chứng từ nguồn chính thức. Cách giật tít "kỹ sư từng làm tại SpaceX" vì vậy dễ gây hiểu lầm về nền tảng chuyên môn của bà, vốn là công cụ lập trình và trình biên dịch.
+- Bà cũng không bác bỏ việc chạy nhiều agent: cũng theo bài tổng hợp đó, nhóm của bà gộp khoảng 2.000 PR một tháng. Điều bà phản đối là cái tên và thứ tự đầu tư.
+- Matt Pocock bảo vệ thuật ngữ "Software Factory": ông thừa nhận nó bị thổi phồng nhưng cho rằng nó chỉ một thay đổi có thật.
+- Một bản tin tổng hợp thuật lại rằng Zach Lloyd đo trên hệ thống của Warp thấy duyệt code đối kháng bằng AI làm chi phí tăng 140% trong khi chất lượng tăng 7,5%. Số liệu này chưa đối chiếu được với nguồn gốc; ý đáng giữ là nên tự đo trước khi thêm tầng tự động.
+
+### Nguồn
+
+- Bài đăng gốc của Lauren Tan: https://x.com/poteto/status/2118613050462728659
+- "Trust First, Then Parallel" (tổng hợp bài nói): https://redreamality.com/blog/lauren-tan-poteto-trust-before-parallel/
+- "On pstack" (Barnaby Robson): https://barnabyrobson.org/on-pstack/
+- Matt Pocock về thuật ngữ Software Factory: https://x.com/mattpocockuk/status/2119748545691402733
+- Bản tin X Digest ngày 6/11/2026: https://jazzy-fjord-25sc.here.now/
+- Trang nhóm React: https://react.dev/community/team
+- Gloaguen và cộng sự, "Evaluating AGENTS.md": https://arxiv.org/abs/2602.11988
+- OWASP, CSV Injection: https://community.owasp.org/attacks/CSV_Injection
+
 ## Kết luận
 
 Repo này không cần thêm agent. Nó cần khoảng một chục test và hai chỗ sửa thứ tự ghi file. Đó cũng chính là luận điểm của bài viết: câu hỏi nên đặt ra là *làm sao biết code này đúng*, trước khi hỏi *làm sao sinh ra nhiều code hơn*.
+
+Sau khi tra nguồn gốc, bài học sắc hơn một bậc: với mỗi quy tắc đang nằm trong README hay trong đầu người duyệt, hãy hỏi nó có thể được ép bằng code, lint hoặc test hay không, và chỉ để lại ở dạng văn bản những gì thật sự không ép được.
