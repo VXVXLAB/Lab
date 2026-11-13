@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cổng Chỉ Vừa Một Đứa</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;500;700;800&display=swap">
+<style>
+  /* Layout: one letterboxed 16:9 stage; HUD, subtitles and menus are DOM layers over the canvas. */
+  :root {
+    color-scheme: dark;
+    --night: #0b0f26; --ink: #f6efdc; --dim: rgba(246, 239, 220, .62);
+    --moon: #ffe9a8; --lantern: #ff7a3d; --danger: #ff4d5e;
+    --font: "Be Vietnam Pro", "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--night); color: var(--ink); font-family: var(--font); overflow: hidden;
+    user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; touch-action: none; }
+  #stage { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); overflow: hidden; background: var(--night); }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .layer { position: absolute; inset: 0; pointer-events: none; }
+
+  #hud { font-size: clamp(11px, 1.5vw, 15px); letter-spacing: .04em; text-shadow: 0 1px 4px rgba(0, 0, 0, .7); opacity: 0; transition: opacity .4s; }
+  #hud.on { opacity: 1; }
+  #lvl { position: absolute; left: 3%; top: 4.5%; }
+  #lvl b { display: block; font-weight: 800; font-size: 1.5em; letter-spacing: .01em; }
+  #lvl span { color: var(--dim); }
+  #falls { position: absolute; right: 3%; top: 4.5%; text-align: right; color: var(--dim); font-weight: 700; letter-spacing: .08em; }
+  #falls b { color: var(--ink); font-size: 1.9em; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.05; }
+  #mute { position: absolute; left: 3%; top: 17%; pointer-events: auto; background: none; border: 1px solid rgba(246, 239, 220, .35); color: var(--dim);
+    font: inherit; font-size: .85em; padding: .25em .7em; border-radius: 99px; cursor: pointer; }
+  #mute:focus-visible, .pad:focus-visible { outline: 2px solid var(--moon); outline-offset: 2px; }
+
+  #sub { position: absolute; top: auto; left: 50%; bottom: 7%; transform: translateX(-50%); width: min(74%, 720px); text-align: center; opacity: 0; transition: opacity .25s; }
+  #sub.on { opacity: 1; }
+  #sub .who { display: inline-block; font-size: clamp(9px, 1.15vw, 12px); font-weight: 700; letter-spacing: .28em; color: var(--night); background: var(--moon);
+    padding: .15em .8em .15em 1.05em; border-radius: 99px; margin-bottom: .5em; }
+  #sub .txt { font-size: clamp(13px, 2.15vw, 22px); font-weight: 500; line-height: 1.4; text-wrap: balance; text-shadow: 0 2px 10px rgba(0, 0, 0, .9), 0 0 2px rgba(0, 0, 0, .9); min-height: 1.4em; }
+  #sub.red .who { background: var(--danger); color: #fff; }
+
+  #card { display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; background: rgba(8, 10, 26, .0); opacity: 0; transition: opacity .35s, background .35s; }
+  #card.on { opacity: 1; background: rgba(8, 10, 26, .82); }
+  #card small { letter-spacing: .4em; color: var(--dim); font-size: clamp(10px, 1.4vw, 14px); }
+  #card b { font-size: clamp(22px, 5vw, 52px); font-weight: 800; margin-top: .15em; }
+
+  #menu, #end { display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; pointer-events: auto; cursor: pointer;
+    background: radial-gradient(ellipse at 50% 40%, rgba(8, 10, 26, .25), rgba(8, 10, 26, .86)); transition: opacity .5s; padding: 0 6%; }
+  #menu.off, #end.off { opacity: 0; pointer-events: none; }
+  h1 { margin: 0; font-size: clamp(30px, 8vw, 86px); font-weight: 800; letter-spacing: -.02em; line-height: .98; text-wrap: balance; text-shadow: 0 4px 30px rgba(255, 190, 90, .35); }
+  h1 em { font-style: normal; color: var(--moon); }
+  .tag { margin: 1.1em 0 0; max-width: 34em; color: var(--dim); font-size: clamp(11px, 1.7vw, 17px); line-height: 1.55; font-weight: 300; text-wrap: balance; }
+  .go { margin-top: 2em; font-weight: 700; letter-spacing: .22em; font-size: clamp(11px, 1.6vw, 16px); animation: pulse 1.7s ease-in-out infinite; }
+  .keys { margin-top: 1.4em; color: var(--dim); font-size: clamp(10px, 1.3vw, 13px); letter-spacing: .05em; }
+  .keys kbd { font: inherit; color: var(--ink); border: 1px solid rgba(246, 239, 220, .35); border-radius: 4px; padding: 0 .45em; margin: 0 .15em; }
+  #end h2 { margin: 0; font-size: clamp(20px, 4.4vw, 46px); font-weight: 800; text-wrap: balance; }
+  #end .stats { margin-top: 1.4em; display: flex; gap: clamp(14px, 4vw, 48px); flex-wrap: wrap; justify-content: center; }
+  #end .stats div { font-size: clamp(10px, 1.3vw, 13px); color: var(--dim); letter-spacing: .08em; }
+  #end .stats b { display: block; font-size: clamp(22px, 4.4vw, 44px); color: var(--moon); font-variant-numeric: tabular-nums; }
+  @keyframes pulse { 50% { opacity: .4; } }
+  @media (prefers-reduced-motion: reduce) { .go { animation: none; } }
+
+  #story { display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; pointer-events: auto; cursor: pointer; padding: 0 9%;
+    background: radial-gradient(ellipse at 50% 45%, rgba(26, 20, 44, .93), rgba(6, 7, 20, .98)); transition: opacity .45s; }
+  #story.off { opacity: 0; pointer-events: none; }
+  #story small { letter-spacing: .5em; color: var(--moon); font-size: clamp(9px, 1.25vw, 13px); font-weight: 700; margin-right: -.5em; }
+  #story h3 { margin: .25em 0 .7em; font-size: clamp(20px, 4.6vw, 48px); font-weight: 800; letter-spacing: -.01em; text-wrap: balance; }
+  #story h3::after { content: ""; display: block; width: 2.2em; height: 2px; background: var(--lantern); margin: .5em auto 0; }
+  #stb { max-width: 38em; }
+  #stb p { margin: 0 0 .75em; font-size: clamp(11px, 1.72vw, 18px); line-height: 1.62; font-weight: 300; color: rgba(246, 239, 220, .9); text-wrap: pretty; }
+  #story .go { margin-top: 1em; font-size: clamp(9px, 1.2vw, 12px); }
+  #story.in small, #story.in h3, #story.in #stb { animation: rise .7s ease both; }
+  #story.in h3 { animation-delay: .08s; } #story.in #stb { animation-delay: .18s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+  @media (prefers-reduced-motion: reduce) { #story.in small, #story.in h3, #story.in #stb { animation: none; } }
+  #roots { position: absolute; left: 3%; top: 26%; color: var(--dim); font-size: .78em; letter-spacing: .14em; }
+  #pads { display: none; }
+  .touch #pads { display: block; }
+  .pad { position: absolute; bottom: 5%; width: 13%; aspect-ratio: 1; border-radius: 50%; pointer-events: auto; border: 2px solid rgba(246, 239, 220, .4);
+    background: rgba(12, 16, 40, .35); color: var(--ink); font-size: clamp(16px, 4vw, 30px); font-family: inherit; display: flex; align-items: center; justify-content: center; }
+  .pad.down { background: rgba(255, 233, 168, .32); }
+  #pl { left: 3%; } #pr { left: 19%; } #pj { right: 3%; width: 15%; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="hud" class="layer">
+    <div id="lvl"><span id="lvln">MÀN 1</span><b id="lvlt"></b></div>
+    <div id="falls"><span style="color:#ffd76a">BÉ SAO</span> &nbsp; <b id="s0" style="display:inline;color:#ffd76a">0</b> <b style="display:inline;opacity:.4">:</b> <b id="s1" style="display:inline;color:#9fd0ff">0</b> &nbsp; <span style="color:#9fd0ff">BÉ TRĂNG</span></div>
+    <button id="mute" type="button">âm thanh: bật</button>
+    <div id="roots"></div>
+  </div>
+  <div id="sub" class="layer"><div class="who">CUỘI</div><div class="txt" id="subt"></div></div>
+  <div id="story" class="layer off"><small id="stk"></small><h3 id="stt"></h3><div id="stb"></div><div class="go">ENTER ĐỂ ĐỌC TIẾP</div></div>
+  <div id="card" class="layer"><small id="cardn"></small><b id="cardt"></b></div>
+  <div id="end" class="layer off">
+    <h2 id="endw">Cổng cuối vừa cả hai.</h2>
+    <p class="tag">Hết truyện. Trẻ con làng Đoài từ đó rước đèn đi từng đôi.</p>
+    <div class="stats">
+      <div><b id="e0">0 : 0</b>LẦN VÀO HỘI</div><div><b id="e1">0 : 0</b>LẦN PHẢN SỚM</div><div><b id="e2">0 : 0</b>LẦN NGÃ</div>
+    </div>
+    <div class="keys" style="margin-top:2.2em"><span style="color:#ffd76a">Bé Sao</span> : <span style="color:#9fd0ff">Bé Trăng</span></div>
+    <div class="go">ENTER ĐỂ CHƠI LẠI</div>
+  </div>
+  <div id="menu" class="layer">
+    <h1>Cổng chỉ vừa<br><em>một đứa</em></h1>
+    <p class="tag">Một sự tích cho hai người chơi chung bàn phím. Bé Sao cần lá đa cứu mẹ, Bé Trăng cần lối về nhà, và cả hai chỉ có một cánh cổng mà Cuội bảo là chỉ vừa một đứa.</p>
+    <div class="go">ENTER ĐỂ BẮT ĐẦU</div>
+    <div class="keys"><span style="color:#ffd76a">Bé Sao</span> <kbd>A</kbd><kbd>D</kbd> đi <kbd>W</kbd> nhảy &nbsp;·&nbsp; <span style="color:#9fd0ff">Bé Trăng</span> <kbd>←</kbd><kbd>→</kbd> đi <kbd>↑</kbd> nhảy &nbsp;·&nbsp; <kbd>R</kbd> làm lại màn · <kbd>M</kbd> tắt tiếng</div>
+    <div class="keys">Đứng lên đầu nhau để nhảy cao hơn. Đạp phiến đá vàng để giữ cửa và cầu cho bạn.</div>
+  </div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>

@@ -53,3 +53,19 @@ Chạy tự động mỗi giờ bằng cron:
 ```
 0 * * * * cd /duong/dan/Lab && python3 monitor.py watchlist.txt >> monitor.log 2>&1
 ```
+
+## fps/: BRICKYARD, a small browser FPS
+
+A tiny first-person shooter (three.js, photoscanned CC0 assets, no build step). See [fps/README.md](fps/README.md).
+
+```bash
+cd fps && python3 -m http.server 8000   # then open http://localhost:8000
+```
+
+## cuoi/: Nói Dối Như Cuội, game ức chế nhỏ
+
+Game đi cảnh 2D chạy trên trình duyệt, mở `cuoi/index.html` là chơi. Xem [cuoi/README.md](cuoi/README.md).
+
+## doi/: Cổng Chỉ Vừa Một Đứa, game ức chế hai người
+
+Hai người chung một bàn phím: phải giúp nhau qua màn, nhưng cổng chỉ nhận một đứa. Mở `doi/index.html` là chơi. Xem [doi/README.md](doi/README.md).
