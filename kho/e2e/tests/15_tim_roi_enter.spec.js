@@ -371,6 +371,8 @@ test.describe('Câu chuyện 15: tìm rồi Enter trên mọi ô tìm', () => {
     for (let i = 0; i < 3; i++) {
       await freshPage('/chung-tu/moi?loai=sale');
       await ui.pickPartner(page, 'an phu', 'Cơ khí An Phú');
+      // chọn xong con trỏ tự sang ô Kho (sau một nhịp) — chờ như người dùng thấy rồi mới quay lại ô Khách
+      await expect(page.locator('#warehouse')).toBeFocused();
       await page.locator('#partner').focus();
       await page.keyboard.type('thanh cong', { delay: 60 });
       await expect(page.locator('[data-search-pending]')).toHaveCount(0);
@@ -383,6 +385,7 @@ test.describe('Câu chuyện 15: tìm rồi Enter trên mọi ô tìm', () => {
     // ↓ dời mục sáng xuống mục thứ hai rồi Enter ⇒ nhận đúng mục thứ hai
     await freshPage('/chung-tu/moi?loai=sale');
     await ui.pickPartner(page, 'an phu', 'Cơ khí An Phú');
+    await expect(page.locator('#warehouse')).toBeFocused();
     await page.locator('#partner').focus();
     await page.keyboard.type('thanh cong', { delay: 60 });
     await expect(page.locator('[data-search-pending]')).toHaveCount(0);

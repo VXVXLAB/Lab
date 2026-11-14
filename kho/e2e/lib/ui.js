@@ -85,7 +85,9 @@ async function selectByTyping(page, combo, text, optionRe) {
   await expect(page.locator('[data-search-pending]')).toHaveCount(0);
   await expect(dd.locator('.ant-select-item-option').first()).toContainText(optionRe ?? text);
   // (đọc trước khi Enter: sau khi chọn, ô có thể không còn khớp bộ định vị — vd. lọc theo chữ "Mặt hàng…")
-  const inForm = await combo.evaluate((el) => !!el.closest('[data-enter-scope]'));
+  // F-17 chỉ ở ô tìm có "chặn Enter" (.search-guard: khách, mặt hàng) nằm ngoài biểu mẫu có ô kế tiếp. Ô chọn thường (Nhóm,
+  // Kho…) tự đóng khi Enter — KHÔNG bấm Esc ở đó (Esc khi danh sách đang đóng dần sẽ đóng luôn hộp thoại).
+  const inForm = await combo.evaluate((el) => !el.closest('.search-guard') || !!el.closest('[data-enter-scope]'));
   const input = await combo.elementHandle();
   // F-11 (b) đã sửa ở vòng 3: Enter chọn kết quả đầu tiên kể cả khi không mục nào sáng — không bấm ↓ hộ người dùng nữa.
   await combo.press('Enter');

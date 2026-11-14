@@ -275,6 +275,14 @@ test.describe('Câu chuyện 14: bàn phím, chặn rời trang, phiên hết h�
     await expect(p.locator('.ant-message-notice').filter({ hasText: RESTORED })).toHaveCount(0);
     expect(await ui.readLines(p)).toEqual([]);
     await expect(p.getByLabel('Ghi chú', { exact: true })).toHaveValue('');
+    // PHÁT HIỆN F-19 (BAO_CAO_E2E.md, chập chờn ~1/10–1/20, KHÔNG gắn test.fail vì không tái hiện chắc chắn): đôi khi phiếu
+    // mới TRỐNG của hoa (chưa gõ gì) hiện "Đã khôi phục … từ lần mở trước", báo "Có thay đổi chưa lưu", bấm menu thì hỏi "Phiếu chưa lưu". Kiểm thẳng ở đây (sau khi kho mặc định đã điền) để lỗi tự nói rõ.
+    await expect(p.locator('#warehouse').locator('xpath=ancestor::div[contains(@class,"ant-select")][1]')).toContainText('Kho');
+    await p.waitForTimeout(500); // để mọi giá trị tự điền chạy xong rồi mới đọc
+    if (await p.getByText('Có thay đổi chưa lưu').count()) await ui.shot(p, 'F19-phieu-trong-bao-chua-luu');
+    // (khi lỗi xảy ra, hoa còn thấy "Đã khôi phục các dòng đang gõ dở từ lần mở trước" trên phiếu trống)
+    await expect(p.locator('.ant-message-notice').filter({ hasText: RESTORED })).toHaveCount(0);
+    await expect(p.getByText('Có thay đổi chưa lưu')).toHaveCount(0);
     // phiếu thu mới của hoa cũng trống
     await ui.menu(p, 'Quỹ & Ngân hàng', 'Thu tiền').catch(async (e) => {
       await ui.shot(p, 'loi-F04-hoa-khong-roi-phieu'); // ảnh chẩn đoán của chính cửa sổ này

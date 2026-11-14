@@ -2,9 +2,87 @@
 
 Người kiểm thử độc lập, đóng vai kế toán của khách, thao tác trên trình duyệt thật (Chromium, 1366×768) bằng nhãn tiếng Việt, vai trò và bàn phím. API chỉ dùng để chuẩn bị dữ liệu nền (danh mục, tồn đầu, phiếu nền cho báo cáo) và đối chiếu số đã thấy trên màn hình.
 
-Báo cáo có hai vòng: **Vòng 2 (kiểm lại sau khi đội phát triển sửa F-01…F-08)** ở mục 1–4; **Vòng 1** (lần kiểm đầu) giữ nguyên ở mục 5 làm lịch sử.
+Báo cáo có ba vòng: **Vòng 3 (kiểm lại sau khi đội phát triển sửa F-09…F-16)** ở mục 1–4; **Vòng 2** giữ nguyên ở mục 5 và **Vòng 1** ở mục 6 làm lịch sử.
 
-## 1. Cách chạy và kết quả (vòng 2)
+## 1. Cách chạy và kết quả (vòng 3)
+
+```bash
+cd kho/e2e
+./run.sh                                   # CSDL mới kho_e2e → khoserver cổng 18091 → toàn bộ test → dừng máy chủ
+./run.sh tests/08_hai_may.spec.js          # chạy riêng một câu chuyện
+```
+- Cần PostgreSQL 16 (role `kho`/`kho`), `backend/bin/khoserver`, `frontend/dist` đã build. Lần đầu `run.sh` tự `npm install` (exceljs, jszip; Playwright 1.63 dùng bản cài sẵn qua liên kết `file:`). Không dùng cổng 8080 / CSDL kho_dev. Biến tùy chọn: `E2E_PORT`, `E2E_DB`, `PGHOST/PGUSER/PGPASSWORD`, `E2E_CHROMIUM`.
+- Mã thoát = kết quả Playwright. Đầu ra trong `e2e/out/` (không commit): `screenshots/`, `files/`, `ket-qua.json`, `server.log`, `browser-issues.jsonl`.
+
+**Kết quả hai lần chạy đầy đủ liên tiếp trên mã nguồn cuối cùng (frontend `f27ce0a`, backend `edb163d`):**
+
+| Lần | Kết quả Playwright | Thời gian | Mã thoát |
+|---|---|---|---|
+| A | `167 passed (9.4m)` — expected 167, unexpected 0, flaky 0 | 9 phút 25 giây | 0 |
+| B | `167 passed (9.4m)` — expected 167, unexpected 0, flaky 0 | 9 phút 28 giây | 0 |
+
+167 test = **165 đạt** + **2 "lỗi đã biết"** (`test.fail`: F-17, F-18 — mỗi test có chú thích trỏ tới phát hiện; đã kiểm là hỏng đúng lý do). Lỗi chập chờn **F-19** không gắn `test.fail` (mục 3) nên thỉnh thoảng một lần chạy đầy đủ hỏng ở `14` — lỗi của ứng dụng, không phải của test. Vòng 2 có 155 test (144 + 11 lỗi đã biết).
+
+Lần chạy cơ sở (bộ test vòng 2 trên mã vòng 3, trước khi sửa test): `5 failed, 15 did not run, 135 passed` — 4 test "lỗi đã biết" báo **"Expected to fail, but passed"** (F-10 phiếu bán khác ô, F-09, F-15, F-16) và 1 hỏng thật ở `12` "Lịch sử bán theo mặt hàng" ⇒ phát hiện mới **F-17**.
+
+Các lần chạy đầy đủ trước khi chốt (ghi đúng nguyên văn): (1) `1 failed, 6 did not run, 160 passed` — hỏng ở `01` do helper của test (xem dưới); (2) `1 failed, 5 did not run, 161 passed` — hỏng ở `14` do **F-19** (lỗi chập chờn của ứng dụng); (3) `167 passed`; (4) `1 failed, 4 did not run, 162 passed` — hỏng ở `15` F-11 do test gõ lại ô Khách trước khi con trỏ tự sang ô Kho xong (một nhịp sau khi chọn) ⇒ sửa test chờ con trỏ vào ô Kho như người dùng thấy, lặp 5/5 đạt; (5)–(6) = A, B ở bảng trên.
+
+Trong quá trình chốt, một lần chạy đầy đủ hỏng ở `01` (thêm mặt hàng) do chính helper của bộ test: bấm Esc để đóng danh sách F-17 cả ở ô chọn thường (Nhóm hàng) đang đóng dần ⇒ Esc đóng luôn hộp thoại. Đã giới hạn bước Esc chỉ cho ô tìm có "chặn Enter" ngoài biểu mẫu (đúng nơi F-17 xảy ra), rồi chạy lại.
+
+Thay đổi bộ test ở vòng 3:
+- `08` viết lại phần xung đột theo quy tắc gộp ba chiều đã chốt: 11 vòng xung đột liên tiếp trên CÙNG một phiếu tạm, rồi ghi sổ, rồi xung đột trên phiếu ĐÃ GHI SỔ, rồi cùng mặt hàng trên BA dòng (3 vòng), rồi 6 vòng phiếu thu. **Sau mỗi vòng** kiểm: các dòng trên máy 1 sau gộp, **phiếu đã lưu trên máy chủ** (mã:SL@giá theo thứ tự), tổng tiền máy chủ, máy 2 tự hiện đúng như vậy, chân phiếu "Cộng" của cả hai máy, tồn kho và công nợ (phiếu tạm: không đổi; ghi sổ / sửa phiếu đã ghi sổ: đổi đúng phần chênh; phiếu thu: công nợ = trước − tổng phiếu).
+- `15`: bỏ `test.fail` F-11/12/13/14/15 và siết thêm (xem mục 2); thêm F-17 (`test.fail`) và test ngày gõ ngay khi mở phiếu.
+- `lib/ui.js`: `selectByTyping` không bấm ↓ hộ người dùng nữa (F-11 b đã sửa); `enterVoucher` không chờ con trỏ vào ô đối tác nữa (ngày gõ ngay phải được giữ).
+- `13`: F-09 thành test thường, kiểm cả "ĐT" vẫn có. `14`: thông báo khôi phục khi phiên hết phải đúng nguyên câu "Phiên đăng nhập đã hết. Đã khôi phục các dòng đang gõ dở — kiểm tra rồi bấm Lưu.". `99`: bỏ ngoại lệ 404 cho tra mã — **không còn được phép có 404 nào**.
+- Thời gian chạy giữ ~9,5–10 phút: không cắt ma trận câu chuyện 15 (giữ nguyên độ phủ); phần thêm của `08` chỉ ~35 giây.
+
+## 2. Phát hiện vòng 2: đã sửa hay chưa, kiểm thế nào
+
+| Mã | Kết luận vòng 3 | Bằng chứng |
+|---|---|---|
+| **F-10** gộp hai máy sửa cùng dòng | **Đã sửa** (phiếu tạm, phiếu đã ghi sổ, phiếu thu). Còn một điểm khả dụng ở phiếu đã ghi sổ ⇒ **F-18** | `08`, 20 vòng xung đột, đều kiểm bản lưu trên máy chủ + máy 2 + tổng + tồn + nợ: (1) mỗi máy thêm/sửa/xóa dòng khác nhau ⇒ MATNA 3, GANGTAY 12, XITHAN 1, KINHBH 4; (2) cùng dòng khác ô: SL 15 (tôi) + giá 44.000 (máy kia) ⇒ GANGTAY 15 × 44.000, khung vàng chỉ "Đã sửa GANGTAY"; (3) cùng ô: "Cùng sửa: SL — máy kia: 5, bạn: 6", mặc định ⇒ 5; (4) cùng ô giá, chọn "Dùng của tôi" ⇒ 55.000; (5) tôi sửa, máy kia xóa ⇒ "Máy kia đã xóa dòng này, bạn đã sửa", mặc định ⇒ dòng mất; (6) như trên, chọn của tôi ⇒ dòng còn với SL của tôi (đứng cuối phiếu — chấp nhận); (7) tôi xóa, máy kia sửa ⇒ "Máy kia đã sửa dòng này, bạn đã xóa", mặc định ⇒ dòng còn, SL máy kia; (8) tôi dời dòng, máy kia sửa SL ⇒ thứ tự của tôi + số máy kia, có mục "Đổi thứ tự"; (9) cả hai dời ⇒ "Cùng đổi thứ tự", mặc định thứ tự máy kia; (10) tôi xóa rồi thêm lại y hệt, máy kia sửa dòng khác ⇒ chỉ một KINHBH; (11) tôi xóa+thêm lại, máy kia sửa chính dòng cũ, chọn của tôi ⇒ chỉ một KINHBH. Ghi sổ ⇒ tồn MATNA −8, GANGTAY −16, KINHBH −9, nợ +3.999.000. Phiếu đã ghi sổ: máy 2 sửa giá MATNA 340.000, máy 1 sửa SL GANGTAY 20 ⇒ gộp đúng, tồn GANGTAY −4, nợ +96.000. BA dòng BUAGO: mỗi máy sửa một dòng ⇒ đúng dòng; cùng sửa dòng 2 ⇒ mặc định của máy kia; cùng sửa dòng 3, chọn của tôi ⇒ đúng dòng 3. Phiếu thu: thêm vs sửa (3.650.000); diễn giải vs số tiền cùng dòng ⇒ **một** dòng, 4.150.000 (vòng 2 nhân đôi); cùng số tiền mặc định / chọn của tôi; xóa vs sửa hai chiều — công nợ khách khớp sau từng vòng. |
+| **F-11** Enter không chọn mục mới | **Đã sửa** | `15`: đã chọn An Phú, gõ "thanh cong", đợi danh sách, Enter ⇒ Thành Công (3/3), và danh sách khi đang gõ **không** có An Phú; ↓ rồi Enter ⇒ đúng mục thứ hai (TC2); gõ chữ không có kết quả rồi Enter ⇒ chữ gõ còn nguyên, khách không đổi; thẻ kho đổi KT40 → GL26 được; danh mục một khách ⇒ Enter chọn Minh Tâm và sang ô Kho. Mọi test khác chọn bằng gõ + Enter, không còn ↓. |
+| **F-12** "minh phu" chọn "Minh Phước" | **Đã sửa** | `15`: gõ và dán "minh phu" ⇒ DLMP đứng đầu và được chọn. |
+| **F-13** tìm mặt hàng nhiều từ | **Đã sửa** | `15`: "que 3.2", "3.2 que", "cap 35", "35 cap", "kim tin 4.0" ở Danh mục hàng hóa, Tồn kho, Thẻ kho: mặt hàng mong đợi có mặt và **mọi** dòng chứa đủ các từ; thẻ kho "kim tin 4.0" + Enter ⇒ KT40. |
+| **F-14** thông báo khôi phục sai lý do | **Đã sửa** | `15`: tải lại trang ⇒ đúng một thông báo "Đã khôi phục các dòng đang gõ dở từ lần mở trước — kiểm tra rồi bấm Lưu.", dòng và khách còn đúng; `14`: phiên hết thật ⇒ đúng câu "Phiên đăng nhập đã hết. …" (3 test). |
+| **F-15** Enter, Enter ở danh sách phiếu bị mất | **Đã sửa** | `15`: 42/42 lần mở đúng phiếu (5 tốc độ, dán + mạng trễ 0,6 s lặp 3 lần), không lần nào trượt hay mở nhầm. |
+| **F-16** 404 khi gõ mã | **Đã sửa** | `99`: cả lần chạy (hàng trăm lần gõ mã) **không có 404 nào**; ngoại lệ đã bỏ. |
+| **F-09** "Địa chỉ:  · ĐT" | **Đã sửa** | `13`: bản in, xlsx, docx của khách không địa chỉ: không có nhãn "Địa chỉ:" trống hay "·" treo, "0918 777 888" vẫn có. |
+| Ghi nhận vòng 2: ngày phiếu thu gõ quá sớm bị đặt lại | **Đã sửa** | `15`: mở phiếu thu, phiếu chi, phiếu bán rồi gõ ngày **ngay** (không chờ gì), 3 lần mỗi loại ⇒ 9/9 giữ đúng ngày; `enterVoucher` (dùng ở 10, 11, 14, 08) không còn chờ. |
+
+## 3. Phát hiện mới vòng 3 (nặng nhất trước)
+
+**F-17 — Ô chọn mặt hàng ở bộ lọc (Thẻ kho, Lịch sử bán theo mặt hàng): Enter chọn xong nhưng danh sách không đóng; Enter lần nữa đổi lựa chọn.** *Lỗi (khả dụng, có thể xem nhầm số liệu). Hồi quy so với vòng 2.* REQ-012, 021, UX.
+- Bước: Báo cáo → Lịch sử bán theo mặt hàng → ô "Mặt hàng…" gõ `E6013-25` → Enter.
+- Mong đợi: chọn E6013-25, danh sách đóng (mã nguồn `searchGuard` cũng ghi ý định "đóng danh sách").
+- Thực tế: chọn đúng, bảng lọc đúng, nhưng sau ~0,5 s danh sách hiện lại **toàn bộ** danh mục, che bảng kết quả, mục đầu ("DV – Dịch vụ") sáng. Bấm Enter lần nữa (thói quen "Enter, Enter") ⇒ lựa chọn đổi sang **DV**, bảng thành "Không có số liệu". Cùng lỗi ở Thẻ kho. Esc thì đóng và giữ lựa chọn. Vòng 2 test `12` bấm được dòng báo cáo; vòng 3 bị danh sách che (đây là lỗi duy nhất của lần chạy cơ sở).
+- Test: `15` "F-17 …" (`test.fail`); helper `selectByTyping` bấm Esc như người dùng khi thấy danh sách còn mở (chú thích trỏ F-17). Ảnh `F17-the-kho-danh-sach-con-mo.png`, `F17-lich-su-ban-danh-sach-con-mo.png`.
+
+**F-19 — Phiên của người này hết, NGƯỜI KHÁC đăng nhập trên cùng cửa sổ: thỉnh thoảng phiếu mới trống của người sau báo "Đã khôi phục…" và "Có thay đổi chưa lưu".** *Lỗi chập chờn (khả dụng; cơ chế đáng ngại về tách dữ liệu giữa người dùng).* REQ-UX, F-04.
+- Bước: lan gõ dở phiếu bán (khách, ghi chú, dòng) → phiên lan bị ngắt → Ctrl+S → màn đăng nhập → **hoa** đăng nhập trên cùng cửa sổ → mở phiếu bán mới.
+- Mong đợi: phiếu trống, không thông báo khôi phục, không "thay đổi chưa lưu" (đúng như phần lớn các lần).
+- Thực tế (khoảng 1/10–1/20 lần): phiếu trống (không khách, không dòng, không ghi chú — **chưa thấy lộ dữ liệu của lan**) nhưng hiện "Đã khôi phục các dòng đang gõ dở từ lần mở trước — kiểm tra rồi bấm Lưu.", chân phiếu "Có thay đổi chưa lưu", bấm menu thì hỏi "Phiếu chưa lưu". Nghĩa là đã có một bản gõ dở được ghi dưới tên **hoa** dù hoa chưa gõ gì — nhiều khả năng màn phiếu còn mở từ phiên lan ghi lại sau khi hoa đăng nhập.
+- Tần suất: 1 lần chạy đầy đủ ở vòng 2 và 1/3 lần chạy đầy đủ ở vòng 3 (hỏng ở bước bấm menu); lặp riêng 4 test F-04: 1/12 và 1/20. Không tái hiện chắc chắn ⇒ **không gắn `test.fail`**; test `14` "F-04: … người KHÁC (hoa) …" giữ nghiêm và nay kiểm thẳng (không thông báo khôi phục, không "thay đổi chưa lưu") nên khi lỗi xảy ra, test hỏng với đúng thông điệp này. Ảnh `F19-phieu-trong-bao-chua-luu.png`.
+
+**F-18 — Đang sửa phiếu ĐÃ GHI SỔ, máy khác lưu trước: sau "Tải bản mới" phiếu thoát chế độ sửa, khung vàng không có nút gộp.** *Khả dụng (thấp).* REQ-038, 082.
+- Bước: hai máy mở cùng phiếu đã ghi sổ, cùng F8; máy 2 sửa giá MATNA, Ctrl+S; máy 1 (đã sửa SL GANGTAY) Ctrl+S ⇒ "Máy khác vừa sửa phiếu này" ⇒ "Tải bản mới".
+- Mong đợi: như phiếu tạm — vẫn đang sửa, khung vàng có "Thêm các dòng này vào phiếu".
+- Thực tế: phiếu về trạng thái "ĐÃ GHI SỔ" (không sửa), khung vàng "1 thay đổi của máy này, chưa lưu" chỉ có "Chép" / "Ẩn", không nói phải bấm F8. Bấm F8 lại thì nút gộp hiện và gộp đúng (đã kiểm số, tồn, nợ).
+- Test: `08` "F-18 …" (`test.fail`). Ảnh `F18-phieu-ghi-so-sau-tai-ban-moi.png`.
+
+**Ghi nhận (không thành lỗi):** F-10 vòng 6 — chọn "Dùng của tôi" cho dòng máy kia đã xóa thì dòng được giữ nhưng chuyển xuống **cuối** phiếu (thứ tự theo máy kia, nơi dòng đã mất). Hợp với quy tắc "mặc định thứ tự của máy kia"; màn hình = bản lưu = máy kia. Có thể hỏi khách có muốn dòng giữ chỗ cũ không.
+
+**Các ghi nhận cũ còn nguyên:** "Nợ cũ" không ghi ngày như mẫu khách (câu hỏi cho khách, từ vòng 1).
+
+## 4. REQ không kiểm được trên trình duyệt / giới hạn
+
+- **REQ-001…008**: phân tích, chốt quy tắc — kiểm gián tiếp qua hành vi.
+- **REQ-088** UAT (cần khách), **REQ-089** sửa lỗi, **REQ-091** bàn giao: ngoài phạm vi tự động. **REQ-090** hướng dẫn: đối chiếu ở các vòng trước (mục 5, 6); vòng 3 không đối chiếu lại toàn bộ HDSD.
+- Không in ra giấy (kiểm bản xem trước và giả lập `@media print`); không mở file bằng Excel/Word thật (exceljs/jszip); "hai máy" là hai ngữ cảnh trình duyệt; độ trễ mạng giả lập bằng `page.route`; không kiểm hiệu năng dữ liệu lớn.
+
+## 5. Lịch sử — Vòng 2
+
+### 5.1 Cách chạy và kết quả (vòng 2)
 
 ```bash
 cd kho/e2e
@@ -33,7 +111,7 @@ Câu chuyện mới / viết lại ở vòng 2:
 - `12`: nút In trong ngăn kéo thẻ kho và lịch sử bán (chỉ in ngăn kéo).
 - `99`: siết lại — không còn được phép có 404 nào; 401 chỉ ở test cố ý sai mật khẩu và test cố ý làm hết phiên; màn đăng nhập của trình duyệt mới không gọi `/api/auth/me`.
 
-## 2. Phát hiện vòng 1: đã sửa hay chưa, kiểm thế nào
+### 5.2 Phát hiện vòng 1: đã sửa hay chưa (vòng 2)
 
 | Mã | Kết luận vòng 2 | Bằng chứng |
 |---|---|---|
@@ -48,7 +126,7 @@ Câu chuyện mới / viết lại ở vòng 2:
 
 Các thay đổi đã thống nhất (không phải lỗi) đã được đưa vào kiểm tra: đọc số dùng "bốn" (24 = "Hai mươi bốn"); file xuất theo bản in (DICHVU, nhãn kho theo loại, ô ký như bản in, "Số: …", "Tên (MÃ)", "Tổng số tiền" là công thức SUM, "Kèm theo…", 5 ô ký phiếu thu chi); tìm đối tác nhiều từ có xếp hạng; nút In trong ngăn kéo; "Thêm ▾" ở màn ≤1100 px; ô đầu phiếu có nhãn thật.
 
-## 3. Phát hiện còn lại / mới (nặng nhất trước)
+### 5.3 Phát hiện còn lại / mới ở vòng 2
 
 **F-10 — Gộp thay đổi khi hai máy sửa CÙNG một dòng: mất phần của máy kia, sửa nhầm dòng, nhân đôi tiền.** *Lỗi (sai số liệu).* REQ-044, 060, 082. Ba trường hợp, mỗi trường hợp một test (`08`):
 - Phiếu bán: máy 2 sửa giá GANGTAY 45.000→44.000 và lưu; máy 1 sửa SL 12→15 ⇒ "Thêm các dòng này vào phiếu" cho **GANGTAY 15 × 45.000** — giá máy 2 vừa sửa bị trả về cũ, không báo. HDSD: "phần máy kia đã sửa vẫn giữ". Ảnh `F10-gop-mat-gia-may-2.png`.
@@ -78,13 +156,13 @@ Các thay đổi đã thống nhất (không phải lỗi) đã được đưa v
 - Một lần trong 3 lần chạy đầy đủ giữa chừng (trước khi chốt mã test), test F-04 "người khác đăng nhập cùng cửa sổ" hỏng ở bước bấm menu (không chuyển trang); không tái hiện được khi chạy riêng (3/3 đạt) hay khi dò riêng (25/25). Đã gắn ảnh chẩn đoán vào bước đó (`out/screenshots/loi-F04-hoa-khong-roi-phieu.png` nếu tái diễn). Hai lần chạy cuối không gặp.
 - Mẫu khách ghi "Nợ cũ : 10/8/26 2.000.000" (có ngày); phần mềm in "Nợ cũ:" không ngày — câu hỏi cho khách (từ vòng 1, vẫn vậy).
 
-## 4. REQ không kiểm được trên trình duyệt / giới hạn
+### 5.4 REQ không kiểm được (vòng 2)
 
 - **REQ-001…008**: phân tích, chốt quy tắc — kiểm gián tiếp qua hành vi.
 - **REQ-088** UAT (cần khách), **REQ-089** sửa lỗi, **REQ-091** bàn giao: ngoài phạm vi tự động. **REQ-090** hướng dẫn: đã đối chiếu nhiều câu trong HDSD (cả các câu mới về tìm nhiều chữ, khung vàng, khôi phục phiếu gõ dở); lệch ở F-10, F-11, F-15.
 - Không in ra giấy (kiểm bản xem trước, và "chỉ in ngăn kéo" bằng giả lập `@media print`); không mở file bằng Excel/Word thật (exceljs/jszip); "hai máy" là hai ngữ cảnh trình duyệt; độ trễ mạng là giả lập bằng `page.route`; không kiểm hiệu năng dữ liệu lớn.
 
-## 5. Lịch sử — Vòng 1
+## 6. Lịch sử — Vòng 1
 
 Kết quả vòng 1: 117 test (108 đạt + 9 lỗi đã biết), 2 lần chạy liên tiếp xanh, ~3,3 phút. Phát hiện vòng 1 (xem kết luận vòng 2 ở mục 2):
 
