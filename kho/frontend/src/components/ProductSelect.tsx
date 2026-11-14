@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { productsApi } from '../api/catalog';
 import { qk } from '../api/queryKeys';
 import { useDebounced } from '../lib/useDebounced';
+import { useSearchEnterGuard } from '../lib/searchGuard';
 
 export interface ProductPick {
   id: number;
@@ -37,8 +38,16 @@ export function ProductSelect({
   const params = useMemo(() => ({ q: dq || undefined, page_size: 30, is_service: goodsOnly ? false : undefined }), [dq, goodsOnly]);
   const q = useQuery({ queryKey: qk.catalogList('product', params), queryFn: () => productsApi.list(params), staleTime: 30_000 });
   const items: ProductPick[] = q.data?.items ?? [];
+  const stale = s.trim() !== dq || q.isFetching || !q.data;
+  const guard = useSearchEnterGuard(stale && s.trim() !== '', () => {
+    const first = items[0];
+    if (!first) return false;
+    onChange(first);
+    return true;
+  });
   const merged = value && !items.some((p) => p.id === value.id) ? [value, ...items] : items;
   return (
+    <div ref={guard.wrapRef} className="search-guard" data-search-pending={guard.pendingAttr} onKeyDownCapture={guard.onKeyDownCapture} style={{ display: 'inline-block', width }}>
     <Select<number>
       id={id}
       allowClear={allowClear}
@@ -49,11 +58,13 @@ export function ProductSelect({
       value={value?.id}
       onChange={(v) => onChange(merged.find((p) => p.id === v) ?? null)}
       placeholder={placeholder}
-      style={{ width }}
+      style={{ width: '100%' }}
       popupMatchSelectWidth={460}
       loading={q.isFetching}
       notFoundContent={q.isFetching ? 'Đang tìm…' : 'Không có mặt hàng nào'}
       options={merged.map((p) => ({ value: p.id, label: `${p.code} – ${p.name}` }))}
+      defaultActiveFirstOption={!stale}
     />
+    </div>
   );
 }

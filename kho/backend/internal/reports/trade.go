@@ -180,9 +180,11 @@ func (s *Service) DebtSummary(ctx context.Context, p DebtParams) (*DebtSummary, 
 	}
 	args := []any{dateArg(p.From), dateArg(p.To)}
 	qf := ""
-	if p.Q != "" {
-		args = append(args, util.LikePattern(p.Q))
-		qf = ` AND pa.search_key LIKE $3`
+	if tokens := util.SearchTokens(p.Q); len(tokens) > 0 {
+		// Tìm đối tác: mọi từ có mặt, thứ tự bất kỳ, không dấu (như ô tìm đối tác).
+		w := util.Where{Args: args}
+		qf = ` AND ` + util.PartnerMatchSQL(&w, "pa", tokens)
+		args = w.Args
 	}
 	rows, err := s.Pool.Query(ctx, `
 WITH e AS (`+debt.EntriesSQL(p.Side)+`)

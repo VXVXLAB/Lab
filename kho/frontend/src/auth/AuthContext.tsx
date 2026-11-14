@@ -1,6 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, setUnauthorizedHandler } from '../api/client';
+import { storage } from '../lib/storage';
+import { unsavedStore } from '../lib/unsavedStore';
+
+const HAD_SESSION = 'kho.hadSession';
 import type { User } from '../api/types';
 
 type AuthState =
@@ -24,10 +28,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Kiểm tra phiên hiện có (cookie 30 ngày).
   useEffect(() => {
     let cancelled = false;
+    // Trình duyệt này chưa từng đăng nhập (hoặc đã đăng xuất) ⇒ chắc chắn không có phiên: vào thẳng màn đăng nhập,
+    // không gọi /auth/me (tránh lỗi 401 đỏ trong console).
+    if (storage.get(HAD_SESSION) !== '1') {
+      setState({ status: 'anonymous' });
+      return undefined;
+    }
     api
       .get<{ user: User }>('/auth/me')
       .then((r) => !cancelled && setState({ status: 'authenticated', user: r.user }))
-      .catch(() => !cancelled && setState({ status: 'anonymous' }));
+      .catch(() => {
+        if (cancelled) return;
+        storage.set(HAD_SESSION, '0');
+        setState({ status: 'anonymous' });
+      });
     return () => {
       cancelled = true;
     };
@@ -37,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setUnauthorizedHandler(() => {
       setState((s) => (s.status === 'authenticated' ? { status: 'anonymous', reason: 'expired' } : s));
+      storage.set(HAD_SESSION, '0');
       queryClient.clear();
     });
     return () => setUnauthorizedHandler(null);
@@ -46,12 +61,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (username: string, password: string) => {
       const r = await api.post<{ user: User }>('/auth/login', { username, password }, { skipAuthRedirect: true });
       queryClient.clear();
+      storage.set(HAD_SESSION, '1');
       setState({ status: 'authenticated', user: r.user });
     },
     [queryClient],
   );
 
   const logout = useCallback(async () => {
+    if (state.status === 'authenticated') unsavedStore.clearUser(state.user.id);
+    storage.set(HAD_SESSION, '0');
     try {
       await api.post('/auth/logout');
     } catch (e) {
@@ -60,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     queryClient.clear();
     setState({ status: 'anonymous', reason: 'logout' });
-  }, [queryClient]);
+  }, [queryClient, state]);
 
   const value = useMemo<AuthContextValue>(
     () => ({ state, user: state.status === 'authenticated' ? state.user : null, login, logout }),

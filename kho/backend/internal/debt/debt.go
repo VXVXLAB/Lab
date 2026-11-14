@@ -101,3 +101,25 @@ func Total(ctx context.Context, q db.Q, side string) (decimal.Decimal, error) {
 		+ COALESCE((SELECT sum(e.increase - e.decrease) FROM (`+EntriesSQL(side)+`) e),0)`).Scan(&t)
 	return t, err
 }
+
+// BalanceExcluding trả số dư một phía của đối tác đến hết ngày asOf (nil = mọi ngày), bỏ qua một chứng từ và/hoặc
+// một phiếu thu chi (dùng cho "nợ trước phiếu này" khi đang lập/sửa phiếu).
+func BalanceExcluding(ctx context.Context, q db.Q, side string, partnerID int64, asOf *util.Date, exDoc, exVoucher *int64) (decimal.Decimal, error) {
+	var bal decimal.Decimal
+	var d, xd, xv any
+	if asOf != nil {
+		d = *asOf
+	}
+	if exDoc != nil {
+		xd = *exDoc
+	}
+	if exVoucher != nil {
+		xv = *exVoucher
+	}
+	err := q.QueryRow(ctx, `SELECT p.`+openingCol(side)+` + COALESCE((SELECT sum(e.increase - e.decrease) FROM (`+EntriesSQL(side)+`) e
+		WHERE e.partner_id=$1 AND ($2::date IS NULL OR e.date <= $2::date)
+		  AND NOT (e.kind='document' AND e.ref_id IS NOT DISTINCT FROM $3::bigint)
+		  AND NOT (e.kind='voucher' AND e.ref_id IS NOT DISTINCT FROM $4::bigint)), 0)
+		FROM partners p WHERE p.id=$1`, partnerID, d, xd, xv).Scan(&bal)
+	return bal, err
+}

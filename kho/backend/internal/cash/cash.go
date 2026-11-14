@@ -449,9 +449,12 @@ func (s *Service) List(ctx context.Context, f Filter) (ListResult, error) {
 		w.Add(`v.voucher_date <= ?`, *f.To)
 	}
 	if q := strings.TrimSpace(f.Q); q != "" {
-		w.Add(`(upper(v.voucher_no) LIKE upper(?) OR COALESCE(p.search_key,'') LIKE ? OR kho_fold(v.note) LIKE ?
-			OR EXISTS (SELECT 1 FROM cash_voucher_lines l WHERE l.voucher_id=v.id AND kho_fold(l.description) LIKE ?))`,
-			"%"+q+"%", util.LikePattern(q), util.LikePattern(q), util.LikePattern(q))
+		cond := `(upper(v.voucher_no) LIKE upper(` + w.Arg("%"+q+"%") + `) OR kho_fold(v.note) LIKE ` + w.Arg(util.LikePattern(q)) + `
+			OR EXISTS (SELECT 1 FROM cash_voucher_lines l WHERE l.voucher_id=v.id AND kho_fold(l.description) LIKE ` + w.Arg(util.LikePattern(q)) + `)`
+		if pm := util.PartnerMatchSQL(&w, "p", util.SearchTokens(q)); pm != "" {
+			cond += ` OR COALESCE(` + pm + `, FALSE)`
+		}
+		w.Add(cond + `)`)
 	}
 	res := ListResult{Page: util.Page[Summary]{Page: f.Page, PageSize: f.PageSize, Items: []Summary{}}, SumTotalAmount: decimal.Zero}
 	out := &res.Page

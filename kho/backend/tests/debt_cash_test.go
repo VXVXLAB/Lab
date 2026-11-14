@@ -263,7 +263,7 @@ func TestREQ056_061_085_ThuChiNhieuDong(t *testing.T) {
 	e.Admin.Expect(400, "VALIDATION", "POST", "/api/vouchers", map[string]any{"voucher_type": "receipt", "account_id": e.TM, "partner_id": ncc, "lines": []any{map[string]any{"amount": 5, "document_id": s.ID}}})
 	// Xuất phiếu thu/chi.
 	rows := xlsxRows(t, e.Admin.OK("GET", fmt.Sprintf("/api/vouchers/%d/export?format=xlsx", pc.ID), nil, nil).Body)
-	if rows[0][0] != "PHIẾU CHI" || findRow(rows, 1, "Trả tiền hàng đợt 2") == nil || findRow(rows, 0, "Cộng")[3] != "3000000" {
+	if rows[0][0] != "PHIẾU CHI" || findRow(rows, 1, "Trả tiền hàng đợt 2") == nil || findRow(rows, 0, "Tổng số tiền")[3] != "3000000" {
 		t.Fatalf("xuất phiếu chi: %v", rows)
 	}
 	x := docxXML(t, e.Admin.OK("GET", fmt.Sprintf("/api/vouchers/%d/export?format=docx", pc.ID), nil, nil).Body)

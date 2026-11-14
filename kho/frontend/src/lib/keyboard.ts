@@ -92,6 +92,8 @@ export function enterToNext(onLastEnter?: () => void) {
     if (e.key !== 'Enter' || e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return;
     if (e.nativeEvent.isComposing) return;
     const t = e.target as HTMLElement;
+    // Ô tìm đang chờ kết quả của chữ vừa gõ: để chính ô đó xử lý Enter (chờ kết quả đúng rồi mới chọn)
+    if (t.closest('[data-search-pending="true"]')) return;
     if (t.tagName === 'TEXTAREA') return;
     if (t.tagName === 'BUTTON' && !t.classList.contains('ant-switch')) return; // công tắc: Enter đi tiếp, Space bật/tắt
     if (t.getAttribute('aria-expanded') === 'true') {
@@ -124,4 +126,17 @@ export function enterToNext(onLastEnter?: () => void) {
       onLastEnter?.();
     }
   };
+}
+
+/** Đưa con trỏ sang ô kế tiếp trong vùng biểu mẫu chứa `from` (vùng có thuộc tính data-enter-scope). */
+export function focusNextField(from: HTMLElement | null): void {
+  const scope = from?.closest<HTMLElement>('[data-enter-scope]');
+  if (!scope || !from) return;
+  const list = focusables(scope);
+  const cur = list.findIndex((el) => el === from || from.contains(el));
+  const next = cur >= 0 ? list[cur + 1] : undefined;
+  if (next) {
+    next.focus();
+    if (next instanceof HTMLInputElement && next.type !== 'checkbox') next.select();
+  }
 }

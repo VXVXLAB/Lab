@@ -51,7 +51,17 @@ type Table struct {
 	// và {s0}, {s1}… = ô số của dòng Summary thứ 0, 1…; giá trị lưu sẵn (cached) = Value.
 	Summary    []SummaryRow
 	After      []string // các dòng văn bản sau bảng
+	SignDate   string   // dòng "Ngày … tháng … năm …" ngay trên ô ký (tùy chọn)
 	Signatures []string // tiêu đề các ô ký tên
+	SignHint   string   // chữ nhỏ dưới ô ký; mặc định "(Ký, ghi rõ họ tên)"
+	FootNote   string   // dòng cuối (thời điểm xuất, người ghi sổ…)
+}
+
+func (t Table) signHint() string {
+	if t.SignHint == "" {
+		return "(Ký, ghi rõ họ tên)"
+	}
+	return t.SignHint
 }
 
 // SummaryRow là một dòng "nhãn: số" sau bảng.
@@ -322,20 +332,38 @@ func XLSX(t Table) ([]byte, error) {
 		_ = f.SetCellStyle(sheet, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), infoStyle)
 		row++
 	}
+	if t.SignDate != "" {
+		row++
+		cell := fmt.Sprintf("%s%d", colName(ncol-1), row)
+		_ = set(cell, t.SignDate)
+		dateStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Italic: true, Family: "Times New Roman"}, Alignment: &excelize.Alignment{Horizontal: "right"}})
+		_ = f.SetCellStyle(sheet, cell, cell, dateStyle)
+	}
 	if len(t.Signatures) > 0 {
 		row++
-		sigStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Family: "Times New Roman"}, Alignment: &excelize.Alignment{Horizontal: "center"}})
-		step := ncol / len(t.Signatures)
-		if step < 1 {
-			step = 1
-		}
+		sigStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Family: "Times New Roman"}, Alignment: &excelize.Alignment{Horizontal: "center", WrapText: true}})
+		hintStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Italic: true, Family: "Times New Roman", Size: 9}, Alignment: &excelize.Alignment{Horizontal: "center", WrapText: true}})
+		// Mỗi người ký một cột riêng (nhiều người ký hơn số cột thì dùng thêm cột bên phải).
 		for i, sig := range t.Signatures {
-			cell := fmt.Sprintf("%s%d", colName(i*step), row)
+			col := i
+			if len(t.Signatures) <= ncol {
+				col = i * ncol / len(t.Signatures)
+			}
+			cell := fmt.Sprintf("%s%d", colName(col), row)
 			_ = set(cell, sig)
 			_ = f.SetCellStyle(sheet, cell, cell, sigStyle)
-			cell2 := fmt.Sprintf("%s%d", colName(i*step), row+1)
-			_ = set(cell2, "(Ký, ghi rõ họ tên)")
+			cell2 := fmt.Sprintf("%s%d", colName(col), row+1)
+			_ = set(cell2, t.signHint())
+			_ = f.SetCellStyle(sheet, cell2, cell2, hintStyle)
 		}
+		row += 2
+	}
+	if t.FootNote != "" {
+		row += 3
+		cell := fmt.Sprintf("A%d", row)
+		_ = set(cell, t.FootNote)
+		footStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Italic: true, Family: "Times New Roman", Size: 9}})
+		_ = f.SetCellStyle(sheet, cell, cell, footStyle)
 	}
 	_ = f.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: headRow, TopLeftCell: fmt.Sprintf("A%d", headRow+1), ActivePane: "bottomLeft"})
 	buf, err := f.WriteToBuffer()
@@ -578,6 +606,9 @@ func DOCX(t Table) ([]byte, error) {
 	for _, line := range t.After {
 		body.WriteString(para(line, true, false, "", 0))
 	}
+	if t.SignDate != "" {
+		body.WriteString(para(t.SignDate, false, true, "right", 0))
+	}
 	if len(t.Signatures) > 0 {
 		body.WriteString(para("", false, false, "", 0))
 		w := int(pageW) / len(t.Signatures)
@@ -591,9 +622,14 @@ func DOCX(t Table) ([]byte, error) {
 		}
 		body.WriteString(`</w:tr><w:tr>`)
 		for range t.Signatures {
-			body.WriteString(tcell("(Ký, ghi rõ họ tên)", w, false, "center", false))
+			body.WriteString(tcell(t.signHint(), w, false, "center", false))
 		}
 		body.WriteString(`</w:tr></w:tbl>`)
+	}
+	if t.FootNote != "" {
+		body.WriteString(para("", false, false, "", 0))
+		body.WriteString(para("", false, false, "", 0))
+		body.WriteString(para(t.FootNote, false, true, "", 18))
 	}
 	sect := `<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>`
 	if landscape {

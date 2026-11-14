@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { productsApi } from '../../api/catalog';
 import { ApiError } from '../../api/client';
 import type { Product, ProductWithStock } from '../../api/types';
-import { foldVietnamese } from '../../components/CatalogList';
+import { foldVietnamese, matchText, searchWords } from '../../lib/text';
 import { formatMoney, formatQty } from '../../lib/format';
 
 interface Props {
@@ -41,13 +41,13 @@ function rank(p: Product, text: string): number {
 async function search(text: string, allowService: boolean, warehouseId: number | null | undefined): Promise<ProductWithStock[]> {
   const t = text.trim();
   // Nhiều từ ("que 3.2", "kiswel 3.2"): máy chủ tìm theo chuỗi liền ⇒ hỏi theo từ dài nhất rồi lọc đủ mọi từ tại máy.
-  const words = foldVietnamese(t).split(/\s+/).filter(Boolean);
+  const words = searchWords(t);
   const longest = [...words].sort((a, b) => b.length - a.length)[0] ?? t;
   const multi = words.length > 1;
   const listP = productsApi
     .listWithStock({ q: multi ? longest : t, active: true, page_size: multi ? 200 : 20, is_service: allowService ? undefined : false, warehouse_id: warehouseId })
     .then((r) =>
-      multi ? { ...r, items: r.items.filter((p) => words.every((w) => foldVietnamese(`${p.code} ${p.name}`).includes(w))).slice(0, 20) } : r,
+      multi ? { ...r, items: r.items.filter((p) => matchText(t, `${p.code} ${p.name}`)).slice(0, 20) } : r,
     );
   // Tra chính xác theo mã (hiểu cả DICHVU ⇒ DV) chạy song song — người gõ đủ mã + Enter luôn trúng.
   const exactP = /\s/.test(t)

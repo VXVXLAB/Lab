@@ -9,6 +9,7 @@ import { errorMessage } from '../../api/client';
 import { qk } from '../../api/queryKeys';
 import type { PriceInfo, Product, ProductBody, ProductGroup, ProductWithStock } from '../../api/types';
 import { activeColumn, CatalogList, foldVietnamese } from '../../components/CatalogList';
+import { filterByLabel } from '../../lib/text';
 import { EntityFormModal } from '../../components/EntityFormModal';
 import { NumberInput } from '../../components/NumberInput';
 import { formatDate, formatMoney, formatQty } from '../../lib/format';
@@ -177,7 +178,7 @@ export function ProductsPage() {
               onChange={(v) => setGroupId(v)}
               options={groupOptions}
               showSearch
-              filterOption={(input, opt) => foldVietnamese(String(opt?.label ?? '')).includes(foldVietnamese(input))}
+              filterOption={filterByLabel}
             />
             <Segmented<Kind>
               value={kind}
@@ -252,7 +253,7 @@ export function ProductsPage() {
             placeholder="Chọn nhóm"
             options={groupOptions}
             showSearch
-            filterOption={(input, opt) => foldVietnamese(String(opt?.label ?? '')).includes(foldVietnamese(input))}
+            filterOption={filterByLabel}
           />
         </Form.Item>
         <Form.Item label="Giá bán" name="sale_price" extra="Tự điền vào phiếu bán; vẫn sửa được khi bán.">

@@ -14,7 +14,8 @@ import { Kbd } from '../../components/Kbd';
 import { PageHeader } from '../../components/PageHeader';
 import { formatDate, formatDateTime, formatMoney, toApiDate } from '../../lib/format';
 import { isTypingTarget, useHotkeys } from '../../lib/keyboard';
-import { useDebounced, useElementHeight } from '../../lib/useDebounced';
+import { useDebouncedFlush, useElementHeight } from '../../lib/useDebounced';
+import { useListSearchEnter } from '../../lib/searchGuard';
 import { paths } from '../../paths';
 import { PartnerSelect, type PartnerLite } from '../documents/PartnerSelect';
 
@@ -28,7 +29,7 @@ export function VoucherListPage({ type }: { type: VoucherType }) {
   const [accountId, setAccountId] = useState<number | undefined>();
   const [partner, setPartner] = useState<PartnerLite | null>(null);
   const [q, setQ] = useState('');
-  const dq = useDebounced(q.trim(), 250);
+  const [dq, flushQ] = useDebouncedFlush(q.trim(), 250);
   const [page, setPage] = useState(1);
   const [active, setActive] = useState(-1);
   const searchRef = useRef<InputRef>(null);
@@ -49,6 +50,19 @@ export function VoucherListPage({ type }: { type: VoucherType }) {
   const total = query.data?.total ?? 0;
   const cur = active >= 0 ? rows[active] : undefined;
   const open = (r: VoucherSummary) => navigate(paths.voucher(r.id));
+  const onSearchEnter = useListSearchEnter({
+    text: q,
+    committed: dq,
+    flush: flushQ,
+    fresh: !query.isPlaceholderData && !query.isFetching,
+    rows,
+    focusFirst: () => {
+      setActive(0);
+      tableRef.current?.focus();
+    },
+    openFirst: (r) => open(r),
+  });
+
   const focusSearch = () => {
     searchRef.current?.focus();
     searchRef.current?.select();
@@ -106,7 +120,8 @@ export function VoucherListPage({ type }: { type: VoucherType }) {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
-            if ((e.key === 'ArrowDown' || e.key === 'Enter') && rows.length) {
+            if (e.key === 'Enter') onSearchEnter(e);
+            else if (e.key === 'ArrowDown' && rows.length && dq === q.trim()) {
               e.preventDefault();
               setActive(0);
               tableRef.current?.focus();

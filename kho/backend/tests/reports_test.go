@@ -111,7 +111,7 @@ func TestREQ071_074_087_XuatPhieuExcelWordChinhSuaDuoc(t *testing.T) {
 		t.Fatalf("tiêu đề phiếu nhập: %q", rows[0])
 	}
 	all := fmt.Sprint(rows)
-	if !strings.Contains(all, "Nhà cung cấp: Công ty Kiswel <&> \"VN\"") || !strings.Contains(all, "Số phiếu: NK00001") {
+	if !strings.Contains(all, "Nhà cung cấp: Công ty Kiswel <&> \"VN\"") || !strings.Contains(all, "Số: NK00001") {
 		t.Fatalf("thông tin phiếu: %v", rows)
 	}
 	r1 := findRow(rows, 1, "K701832")

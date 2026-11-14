@@ -310,7 +310,7 @@ func TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu(t *testing.T) {
 		t.Fatalf("tiêu đề: %v", rows[0])
 	}
 	r6 := findRow(rows, 0, "6")
-	if r6 == nil || r6[1] != "DV" || r6[2] != "TRẢ 01 ĐỒNG HỒ" || r6[4] != "1" || (len(r6) > 5 && r6[5] != "") || (len(r6) > 6 && r6[6] != "") {
+	if r6 == nil || r6[1] != "DICHVU" || r6[2] != "TRẢ 01 ĐỒNG HỒ" || r6[4] != "1" || (len(r6) > 5 && r6[5] != "") || (len(r6) > 6 && r6[6] != "") {
 		t.Fatalf("dòng 6 ghi chú dịch vụ trong Excel: %q", r6)
 	}
 	r7 := findRow(rows, 0, "7")

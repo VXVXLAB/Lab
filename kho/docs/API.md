@@ -147,7 +147,19 @@ Dùng khi nhập dòng phiếu: tự điền giá bán (REQ-026), cảnh báo l�
 Bản hàng loạt: → `{"items": [PriceInfo…]}`, mỗi phần tử **giống hệt** object của endpoint đơn lẻ (có `product_id`, và `warehouse_qty` khi có `warehouse_id`), theo thứ tự `ids` (id trùng bị bỏ). Tối đa **500** id (vượt ⇒ 400). Thiếu `ids` / id không phải số nguyên dương ⇒ 400; có id không tồn tại ⇒ `404 NOT_FOUND` với `details.missing_ids`; `warehouse_id` không tồn tại ⇒ 400.
 
 ### 2.3 Đối tác — `/api/partners`
-Lọc thêm: `type=customer|supplier`. `q` tìm theo mã, tên, điện thoại, MST (không dấu).
+Lọc thêm: `type=customer|supplier`.
+`q` — tìm **theo từ**: chuỗi được bỏ dấu, chữ thường, bỏ dấu câu (`–`, `,`, `.`…) rồi tách thành các từ; **mọi từ** phải có mặt (thứ tự bất kỳ) trong mã, tên, điện thoại hoặc MST (`viet han` và `han viet` đều ra "Thiết bị hàn Việt – Hàn"). Khi có `q`, kết quả **xếp theo mức khớp** rồi theo tên:
+0 mã trùng chuỗi gõ (bỏ khoảng trắng/dấu câu) · 1 tên bắt đầu bằng cụm từ · 2 tên chứa cụm từ ở đầu một từ · 3 mọi từ là từ nguyên trong tên · 4 mã bắt đầu bằng chuỗi gõ · 5 mọi từ nằm trong tên (một phần từ) · 6 còn lại (khớp qua mã/ĐT/MST).
+Ví dụ `thanh cong`: "Xưởng cơ khí Thành Công" (mức 2) đứng trước "TANTHANH – Công ty TNHH Thép Tân Thành" (mức 3, khớp rời "công ty"/"thành"). Không có `q` ⇒ sắp theo mã như cũ.
+Cùng cách khớp đối tác được dùng cho phần tên đối tác trong `q` của `/api/documents`, `/api/vouchers` và `/api/reports/debt-summary`.
+
+#### `GET /api/partners/{id}/balance?date=&exclude_document_id=&exclude_voucher_id=`
+Số dư công nợ hiện tại của một đối tác, nhẹ hơn sổ chi tiết:
+```json
+{"partner_id": 5, "partner_code": "THANHCONG", "partner_name": "Xưởng cơ khí Thành Công", "date": "2026-09-25",
+ "exclude_document_id": 20, "exclude_voucher_id": null, "receivable": 2000000, "payable": 0}
+```
+`date` (tùy chọn) = tính đến hết ngày đó (bỏ trống ⇒ mọi ngày); `exclude_document_id` / `exclude_voucher_id` (tùy chọn) bỏ qua một chứng từ / phiếu thu chi — dùng để hiện "Nợ cũ" trước phiếu đang lập/sửa (`date` = ngày phiếu, `exclude_document_id` = id phiếu). Lưu ý: khác `old_debt` của Document ở chỗ không xét thứ tự các phiếu **cùng ngày** (mọi phiếu cùng ngày đều được tính). `receivable` = phải thu, `payable` = phải trả (cùng quy tắc R8/`debt_side`). Đối tác không tồn tại ⇒ 404; tham số sai ⇒ 400.
 ```json
 {
   "id": 1, "code": "VINHPHONG", "name": "CTY TNHH TM DV VĨNH PHONG",
@@ -307,6 +319,7 @@ Body như `POST`/`PUT /api/documents` (không cần `version`), thêm `"id"` (t�
 ### 3.9 `GET /api/documents/{id}/export?format=xlsx|docx`
 File phiếu (mặc định `xlsx`). Phiếu tạm: tiêu đề **"PHIẾU TẠM (chưa ghi sổ)"**, tên file `PHIEU_TAM_TAM000025.xlsx`. Đã ghi sổ: tiêu đề theo loại (`PHIẾU XUẤT KHO BÁN HÀNG`, `PHIẾU NHẬP KHO MUA HÀNG`, `PHIẾU NHẬP HÀNG BÁN BỊ TRẢ LẠI`, `PHIẾU XUẤT TRẢ HÀNG NHÀ CUNG CẤP`, `PHIẾU CHUYỂN KHO NỘI BỘ`, `PHIẾU NHẬP TỒN ĐẦU KỲ`), tên file `XK00008.xlsx`.
 Nội dung: (thông tin công ty nếu có), thông tin phiếu, bảng `STT | Mã hàng | Tên hàng | ĐVT | Số lượng | Đơn giá | Thành tiền` — thêm cột thứ 8 `Ghi chú` (ghi chú từng dòng) **chỉ khi** ít nhất một dòng có `note` —, dòng `Cộng`, rồi (phiếu bán/mua) "Nợ cũ:" và "Tổng nợ (đến ngày dd/mm/yyyy):", ô ký tên.
+**Khớp bản in** (`PrintSheet`, theo mẫu khách): dòng "Số: <số phiếu> &nbsp; Ngày: dd/mm/yyyy" (phiếu tạm dùng số tạm); "<Khách hàng|Nhà cung cấp>: <tên> (<mã>)"; "Địa chỉ: … · ĐT: …"; nhãn kho theo loại phiếu — bán, trả NCC: "Xuất từ kho:"; mua, khách trả, tồn đầu: "Nhập vào kho:"; chuyển kho: "Kho xuất: X → Kho nhận: Y"; phụ đề phiếu tạm "<tên phiếu> — chưa ghi sổ, chưa trừ/cộng kho, chưa vào công nợ". Cột Mã hàng của dòng dịch vụ ghi **`DICHVU`** (mã trong API vẫn là `DV`); cột Tên hàng = diễn giải dòng nếu có, ngược lại tên hàng. Phiếu **chuyển kho không có cột Đơn giá/Thành tiền**, dòng Cộng là tổng SL. "Nợ cũ/Tổng nợ" chỉ ở phiếu bán và phiếu mua. Dòng "Ngày …… tháng …… năm ………", rồi ô ký theo loại phiếu — bán: Người lập phiếu, Người giao hàng, Khách hàng, Thủ kho; khách trả: Người lập phiếu, Khách hàng, Thủ kho; mua: Người lập phiếu, Người giao hàng, Thủ kho; trả NCC: Người lập phiếu, Người nhận hàng, Thủ kho; chuyển kho: Người lập phiếu, Thủ kho xuất, Thủ kho nhận; tồn đầu: Người lập phiếu, Thủ kho — mỗi ô kèm "(Ký, ghi rõ họ tên)"; dòng cuối "Xuất file lúc HH:MM dd/mm/yyyy · Ghi sổ bởi <tên>" (phiếu tạm: "· Phiếu tạm").
 Excel: số là ô số thật; ô Cộng = công thức `SUM(...)`; "Nợ cũ:" và "Tổng nợ …:" là ô nhãn (cột C) + **ô số riêng** (cột Thành tiền); ô Tổng nợ = công thức `Nợ cũ + Cộng`. Mọi ô công thức có **kết quả lưu sẵn dạng số** (trình xem không tính lại vẫn hiện đúng). Đơn giá/tiền có số lẻ hiển thị số lẻ (`#,##0.0#`), số chẵn hiển thị `#,##0`. Word: "Nợ cũ: 2.000.000", "Tổng nợ (đến ngày …): 5.990.000". Dòng dịch vụ: cột Tên hàng = diễn giải. File không khóa, không ảnh ⇒ người dùng thêm/bớt dòng cột được.
 Phiếu chính thức chỉ in được khi đã ghi sổ ⇒ hết tồn thì không ghi sổ ⇒ không có phiếu chính thức (REQ-031/032).
 
@@ -366,7 +379,7 @@ Bỏ trống `debt_side` (khi tạo **và** khi sửa) ⇒ mặc định: `recei
 - `GET /api/vouchers/{id}` → `Voucher`.
 - `PUT /api/vouchers/{id}` body như POST + `version` (bắt buộc) → `Voucher`; version cũ ⇒ `409 VERSION_CONFLICT`.
 - `DELETE /api/vouchers/{id}?version=` → `{"ok":true,"id":…}`.
-- `GET /api/vouchers/{id}/export?format=xlsx|docx` → "PHIẾU THU" / "PHIẾU CHI" / "GIẤY BÁO CÓ (THU QUA NGÂN HÀNG)" / "GIẤY BÁO NỢ (CHI QUA NGÂN HÀNG)", bảng `STT | Diễn giải | Chứng từ liên quan | Số tiền`, dòng Cộng (`SUM`), "Tổng số tiền (đồng):" + ô số (công thức = ô Cộng).
+- `GET /api/vouchers/{id}/export?format=xlsx|docx` → khớp bản in `VoucherPrint`: tiêu đề "PHIẾU THU" / "PHIẾU CHI" / "GIẤY BÁO CÓ (THU QUA NGÂN HÀNG)" / "GIẤY BÁO NỢ (CHI QUA NGÂN HÀNG)"; "Số: … &nbsp; Ngày: … &nbsp; <tài khoản>"; "Họ tên người nộp tiền:" / "Họ tên người nhận tiền:" (không có đối tác ⇒ dòng chấm); "Địa chỉ:"; "Lý do nộp:" / "Lý do chi:" (ghi chú, hoặc diễn giải nếu phiếu một dòng); bảng `STT | Diễn giải | Chứng từ liên quan | Số tiền` với dòng **"Tổng số tiền"** (công thức `SUM`, kết quả số); **"Bằng chữ: <số tiền bằng chữ> đồng"** (vd. "Tám triệu bốn trăm năm mươi lăm nghìn đồng"; quy tắc: linh, mười/mươi, mốt, lăm, "bốn" sau mươi — 34 = "ba mươi bốn", "không trăm" ở nhóm giữa, viết hoa chữ đầu, số âm "Âm …", làm tròn về đồng); "Kèm theo: ……… chứng từ gốc."; ô ký — phiếu thu: Giám đốc, Kế toán trưởng, Người nộp tiền, Người lập phiếu, Thủ quỹ; phiếu chi: Giám đốc, Kế toán trưởng, Thủ quỹ, Người lập phiếu, Người nhận tiền — kèm "(Ký, họ tên)"; dòng cuối "Xuất file lúc … · Lập bởi <tên>".
 - `GET /api/vouchers/{id}/history` → như §3.10.
 
 ---
@@ -562,6 +575,7 @@ Gợi ý frontend: nhận sự kiện ⇒ invalidate query liên quan (TanStack 
 | 33–34 | GET | `/api/products/lookup?code=`, `/api/products/{id}/price-info` |
 | 66 | GET | `/api/products/price-info?ids=` (hàng loạt) |
 | 67 | POST | `/api/documents/check` (phiếu chưa lưu) |
+| 68 | GET | `/api/partners/{id}/balance` |
 | 35–44 | GET, POST, GET, PUT, DELETE, POST, POST, GET, GET, GET | `/api/documents`, `/api/documents`, `/api/documents/{id}` (GET/PUT/DELETE), `/{id}/post`, `/{id}/unpost`, `/{id}/check`, `/{id}/export`, `/{id}/history` |
 | 45–51 | GET, POST, GET, PUT, DELETE, GET, GET | `/api/vouchers`, `/api/vouchers`, `/api/vouchers/{id}` (GET/PUT/DELETE), `/{id}/export`, `/{id}/history` |
 | 52–60 | GET | `/api/reports/stock-summary`, `stock-nxt`, `stock-ledger`, `sales`, `purchases`, `debt-summary`, `debt-ledger`, `cash-book`, `draft-demand` |

@@ -907,8 +907,13 @@ func (s *Service) List(ctx context.Context, f Filter) (ListResult, error) {
 		w.Add(`d.doc_date <= ?`, *f.To)
 	}
 	if q := strings.TrimSpace(f.Q); q != "" {
-		w.Add(`(upper(COALESCE(d.doc_no,'')) LIKE upper(?) OR upper(d.draft_no) LIKE upper(?) OR COALESCE(p.search_key,'') LIKE ? OR kho_fold(d.note) LIKE ?)`,
-			"%"+q+"%", "%"+q+"%", util.LikePattern(q), util.LikePattern(q))
+		// Đối tác: mọi từ có mặt (thứ tự bất kỳ, không dấu, bỏ dấu câu) — như ô tìm đối tác.
+		cond := `(upper(COALESCE(d.doc_no,'')) LIKE upper(` + w.Arg("%"+q+"%") + `) OR upper(d.draft_no) LIKE upper(` + w.Arg("%"+q+"%") + `)
+			OR kho_fold(d.note) LIKE ` + w.Arg(util.LikePattern(q))
+		if pm := util.PartnerMatchSQL(&w, "p", util.SearchTokens(q)); pm != "" {
+			cond += ` OR COALESCE(` + pm + `, FALSE)`
+		}
+		w.Add(cond + `)`)
 	}
 	res := ListResult{Page: util.Page[Summary]{Page: f.Page, PageSize: f.PageSize, Items: []Summary{}}, SumTotalAmount: decimal.Zero}
 	out := &res.Page

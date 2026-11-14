@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { filterByLabel } from '../../lib/text';
 import { createPortal } from 'react-dom';
 import { useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -46,6 +47,42 @@ const withBlank = (ls: VLine[]): VLine[] => {
   return !t.length || !isBlank(t[t.length - 1]!) ? [...t, blankLine()] : t;
 };
 const LAST_ACC = 'kho.lastAccount';
+
+// Thay đổi của máy này so với bản đã nạp (xung đột hai máy): chỉ giữ dòng thêm / sửa / xóa, đưa lại không lặp dòng.
+type VChange = { kind: 'added' | 'edited' | 'removed'; line: VLine; before?: VLine };
+const vsig = (l: VLine) => JSON.stringify([l.description.trim(), l.amount, l.document_id]);
+function diffV(base: VLine[], cur: VLine[]): VChange[] {
+  const byKey = new Map(base.filter((l) => !isBlank(l)).map((l) => [l.key, l]));
+  const out: VChange[] = [];
+  const seen = new Set<string>();
+  for (const l of cur.filter((x) => !isBlank(x))) {
+    const b = byKey.get(l.key);
+    seen.add(l.key);
+    if (!b) out.push({ kind: 'added', line: l });
+    else if (vsig(b) !== vsig(l)) out.push({ kind: 'edited', line: l, before: b });
+  }
+  for (const b of byKey.values()) if (!seen.has(b.key)) out.push({ kind: 'removed', line: b, before: b });
+  return out;
+}
+function applyV(server: VLine[], changes: VChange[]): VLine[] {
+  let out = server.filter((l) => !isBlank(l)).map((l) => ({ ...l }));
+  for (const c of changes) {
+    if (c.kind === 'added') {
+      if (!out.some((l) => vsig(l) === vsig(c.line))) out.push({ ...c.line, key: nk() });
+    } else if (c.kind === 'edited' && c.before) {
+      const b = c.before;
+      const j = out.findIndex((l) => vsig(l) === vsig(b));
+      if (j >= 0) out[j] = { ...c.line, key: out[j]!.key };
+      else out.push({ ...c.line, key: nk() });
+    } else if (c.kind === 'removed' && c.before) {
+      const b = c.before;
+      const j = out.findIndex((l) => vsig(l) === vsig(b));
+      if (j >= 0) out = out.filter((_, i) => i !== j);
+    }
+  }
+  return withBlank(out);
+}
+const VCHANGE = { added: 'Thêm mới', edited: 'Đã sửa', removed: 'Đã xóa' } as const;
 
 /** /phieu-thu-chi/:id và /phieu-thu-chi/moi?loai=receipt&partner_id=&document_id= */
 export function VoucherRoute() {
@@ -104,7 +141,8 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   const [headErr, setHeadErr] = useState<Record<string, string>>({});
   const [remote, setRemote] = useState<{ by: string; at: string } | null>(null);
   const [deletedBy, setDeletedBy] = useState<string | null>(null);
-  const [stash, setStash] = useState<VLine[] | null>(null);
+  const [stash, setStash] = useState<VChange[] | null>(null);
+  const baseLinesRef = useRef<VLine[]>([]);
   const [printOpen, setPrintOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
   const [pending, setPending] = useState<{ key: string; col: 'desc' | 'amount' } | null>(null);
@@ -142,6 +180,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
       setNote(v.note);
       const ls = withBlank(v.lines.map((l) => ({ key: nk(), description: l.description, amount: l.amount, document_id: l.document_id, document_no: l.document_no })));
       setLines(ls);
+      baseLinesRef.current = ls;
       setBaseline(
         JSON.stringify({
           voucher_type: v.voucher_type,
@@ -322,7 +361,8 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
 
   // ---------- lưu / xóa ----------
   const reloadKeepingMine = async () => {
-    if (sent.length) setStash(sent);
+    const mine = diffV(baseLinesRef.current, lines);
+    setStash(mine.length ? mine : null);
     if (!loaded) return;
     load(await vouchersApi.get(loaded.id));
   };
@@ -501,16 +541,25 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
         <Alert
           className="doc-alert"
           type="warning"
-          message={`Các dòng bạn đã nhập trước khi tải bản mới (${stash.length} dòng, chưa lưu)`}
+          message={`Các dòng bạn đã nhập trước khi tải bản mới (${stash.length} thay đổi của máy này, chưa lưu)`}
           description={
             <div>
-              {stash.map((l) => (
-                <div key={l.key}>
-                  {l.description} — <b>{formatMoney(l.amount)}</b> {l.document_no && <span className="muted">({l.document_no})</span>}
+              {stash.map((c) => (
+                <div key={c.line.key}>
+                  <Tag color={c.kind === 'added' ? 'blue' : c.kind === 'edited' ? 'orange' : 'red'}>{VCHANGE[c.kind]}</Tag>
+                  {c.line.description} —{' '}
+                  {c.kind === 'edited' && c.before && c.before.amount !== c.line.amount ? (
+                    <>
+                      {formatMoney(c.before.amount)} → <b>{formatMoney(c.line.amount)}</b>
+                    </>
+                  ) : (
+                    <b>{formatMoney(c.line.amount)}</b>
+                  )}{' '}
+                  {c.line.document_no && <span className="muted">({c.line.document_no})</span>}
                 </div>
               ))}
               <Space style={{ marginTop: 6 }}>
-                <Button size="small" onClick={() => (setLines((ls) => withBlank([...ls.filter((x) => !isBlank(x)), ...stash.map((l) => ({ ...l, key: nk() }))])), setStash(null))}>
+                <Button size="small" onClick={() => (setLines((ls) => applyV(ls, stash)), setStash(null))}>
                   Thêm các dòng này vào phiếu
                 </Button>
                 <Button size="small" onClick={() => setStash(null)}>
@@ -524,6 +573,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
 
       <div
         className="voucher-header"
+        data-enter-scope
         onKeyDownCapture={enterToNext(() => {
           const first = lines.find(isBlank) ?? lines[0];
           if (first) setPending({ key: first.key, col: 'desc' });
@@ -662,7 +712,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
                         variant="borderless"
                         allowClear
                         showSearch
-                        optionFilterProp="label"
+                        filterOption={filterByLabel}
                         disabled={!partner}
                         placeholder={partner ? 'chọn phiếu (tùy chọn)' : ''}
                         value={l.document_id ?? undefined}

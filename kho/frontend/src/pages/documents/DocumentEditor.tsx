@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { filterByLabel } from '../../lib/text';
 import { createPortal } from 'react-dom';
 import { useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, App, Button, Dropdown, Input, Modal, Result, Segmented, Select, Skeleton, Space, Tooltip, type InputRef } from 'antd';
+import { Alert, App, Button, Dropdown, Input, Modal, Result, Segmented, Select, Skeleton, Space, Tag, Tooltip, type InputRef } from 'antd';
 import {
   ArrowLeftOutlined,
   CopyOutlined,
@@ -37,18 +38,22 @@ import { paths } from '../../paths';
 import { DOC_TYPES, isDocType } from './docTypes';
 import {
   draftFromDoc,
+  applyChanges,
+  diffLines,
   emptyLine,
   fingerprint,
   isBlank,
   lineAmount,
-  newKey,
   sentLines,
   toBody,
   withTrailingBlank,
   type HeaderDraft,
+  type LineChange,
   type LineDraft,
 } from './draft';
 import { HistoryDrawer } from './HistoryDrawer';
+
+const CHANGE_LABEL = { added: 'Thêm mới', edited: 'Đã sửa', removed: 'Đã xóa' } as const;
 import { useDrawers } from '../reports/drawers';
 import { LineGrid, type Col, type LineHint } from './LineGrid';
 import { PartnerSelect } from './PartnerSelect';
@@ -126,7 +131,8 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const [headerErrors, setHeaderErrors] = useState<Record<string, string>>({});
   const [remote, setRemote] = useState<{ by: string; at: string } | null>(null);
   const [deletedBy, setDeletedBy] = useState<string | null>(null);
-  const [stash, setStash] = useState<LineDraft[] | null>(null);
+  const [stash, setStash] = useState<LineChange[] | null>(null);
+  const baseLinesRef = useRef<LineDraft[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [printSize, setPrintSize] = useState<'A4' | 'A5'>('A4');
@@ -150,6 +156,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       const dr = draftFromDoc(d);
       setHeader(dr.header);
       setLines(dr.lines);
+      baseLinesRef.current = dr.lines;
       setLoaded(d);
       setBaseline(fingerprint(d.doc_type, dr.header, dr.lines));
       setEditing(d.status === 'draft');
@@ -410,8 +417,9 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   };
 
   const reloadKeepingMine = async () => {
-    const mine = sentLines(lines).filter((l) => l.product);
-    if (mine.length) setStash(mine);
+    // chỉ giữ phần máy này đã thêm / sửa / xóa kể từ lúc nạp (F-01) — dòng không đổi thì không lặp lại
+    const mine = diffLines(baseLinesRef.current, lines);
+    setStash(mine.length ? mine : null);
     if (!loaded) return;
     try {
       const fresh = await documentsApi.get(loaded.id);
@@ -709,7 +717,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   );
 
   const stashText = (stash ?? [])
-    .map((l) => [l.product?.code ?? '', l.product?.is_service ? l.description : (l.product?.name ?? ''), l.qty ?? '', l.unit_price ?? ''].join('\t'))
+    .map((c) => [CHANGE_LABEL[c.kind], c.line.product?.code ?? '', c.line.product?.is_service ? c.line.description : (c.line.product?.name ?? ''), c.line.qty ?? '', c.line.unit_price ?? ''].join('\t'))
     .join('\n');
 
   return (
@@ -828,17 +836,38 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
         <Alert
           className="doc-alert"
           type="warning"
-          message={`Các dòng bạn đã nhập trước khi tải bản mới (${stash.length} dòng, chưa lưu)`}
+          message={`Các dòng bạn đã nhập trước khi tải bản mới (${stash.length} thay đổi của máy này, chưa lưu)`}
           description={
             <div>
               <table className="stash-table">
                 <tbody>
-                  {stash.map((l) => (
-                    <tr key={l.key}>
-                      <td>{l.product?.code}</td>
-                      <td>{l.product?.is_service ? l.description : l.product?.name}</td>
-                      <td className="num">{formatQty(l.qty)}</td>
-                      <td className="num">{l.unit_price === null ? '' : formatMoney(l.unit_price)}</td>
+                  {stash.map((c) => (
+                    <tr key={c.line.key}>
+                      <td>
+                        <Tag color={c.kind === 'added' ? 'blue' : c.kind === 'edited' ? 'orange' : 'red'}>{CHANGE_LABEL[c.kind]}</Tag>
+                      </td>
+                      <td>{c.line.product?.code}</td>
+                      <td>{c.line.product?.is_service ? c.line.description : c.line.product?.name}</td>
+                      <td className="num">
+                        {c.kind === 'edited' && c.before && c.before.qty !== c.line.qty ? (
+                          <>
+                            SL {formatQty(c.before.qty)} → <b>{formatQty(c.line.qty)}</b>
+                          </>
+                        ) : (
+                          formatQty(c.line.qty)
+                        )}
+                      </td>
+                      <td className="num">
+                        {c.kind === 'edited' && c.before && c.before.unit_price !== c.line.unit_price ? (
+                          <>
+                            giá {formatMoney(c.before.unit_price)} → <b>{formatMoney(c.line.unit_price)}</b>
+                          </>
+                        ) : c.line.unit_price === null ? (
+                          ''
+                        ) : (
+                          formatMoney(c.line.unit_price)
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -848,7 +877,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                   <Button
                     size="small"
                     onClick={() => {
-                      setLines((ls) => withTrailingBlank([...ls.filter((x) => !isBlank(x)), ...stash.map((l) => ({ ...l, key: newKey() }))]));
+                      setLines((ls) => applyChanges(ls, stash));
                       setStash(null);
                     }}
                   >
@@ -872,7 +901,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       )}
 
       {/* ---------- đầu phiếu ---------- */}
-      <div className="doc-header" ref={headerRef} onKeyDownCapture={readOnly ? undefined : enterToNext(() => {
+      <div className="doc-header" data-enter-scope ref={headerRef} onKeyDownCapture={readOnly ? undefined : enterToNext(() => {
         const first = lines.find((l) => isBlank(l)) ?? lines[0];
         if (first) setFocusReq({ key: first.key, col: 'code', n: Date.now() });
       })}>
@@ -927,7 +956,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                 value={header.warehouse_id ?? undefined}
                 options={whOptions}
                 showSearch
-                optionFilterProp="label"
+                filterOption={filterByLabel}
                 onChange={(v) => setHeader((h) => ({ ...h, warehouse_id: v }))}
                 status={headerErrors.warehouse_id ? 'error' : undefined}
               />,
@@ -942,7 +971,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                   value={header.to_warehouse_id ?? undefined}
                   options={whOptions.map((o) => ({ ...o, disabled: o.disabled || o.value === header.warehouse_id }))}
                   showSearch
-                  optionFilterProp="label"
+                  filterOption={filterByLabel}
                   placeholder="Chọn kho nhận"
                   onChange={(v) => setHeader((h) => ({ ...h, to_warehouse_id: v }))}
                   status={headerErrors.to_warehouse_id ? 'error' : undefined}

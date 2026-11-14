@@ -7,6 +7,7 @@ import { qk } from '../../api/queryKeys';
 import type { Partner, PartnerType } from '../../api/types';
 import { useDebounced } from '../../lib/useDebounced';
 import { PartnerFormModal } from '../catalog/PartnersPage';
+import { useSearchEnterGuard } from '../../lib/searchGuard';
 
 export interface PartnerLite {
   id: number;
@@ -50,11 +51,21 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
     staleTime: 30_000,
   });
   const items: PartnerLite[] = q.data?.items ?? [];
+  // Kết quả đang hiện có phải của đúng chữ đang gõ không (F-05): chờ gõ xong / đang hỏi máy chủ ⇒ chưa được chọn.
+  const stale = search.trim() !== dq || q.isFetching || !q.data;
+  const guard = useSearchEnterGuard(stale && search.trim() !== '', () => {
+    const first = items[0];
+    if (!first) return false;
+    onChange?.(first);
+    setSearch('');
+    return true;
+  });
   const merged = current && !items.some((p) => p.id === current.id) ? [current, ...items] : items;
   const label = type === 'customer' ? 'khách hàng' : type === 'supplier' ? 'nhà cung cấp' : 'đối tác';
 
   return (
-    <Space.Compact style={style ?? { width: '100%' }}>
+    <div ref={guard.wrapRef} className="search-guard" data-search-pending={guard.pendingAttr} onKeyDownCapture={guard.onKeyDownCapture} style={style ?? { width: '100%' }}>
+    <Space.Compact style={{ width: '100%' }}>
       <Select<number>
         ref={ref}
         id={id}
@@ -74,6 +85,7 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
           }
         }}
         loading={q.isFetching}
+        defaultActiveFirstOption={!stale}
         onChange={(v) => {
           const p = merged.find((x) => x.id === v) ?? null;
           onChange?.(p);
@@ -125,5 +137,6 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
       />
       )}
     </Space.Compact>
+    </div>
   );
 });

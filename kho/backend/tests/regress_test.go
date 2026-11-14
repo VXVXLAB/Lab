@@ -181,7 +181,8 @@ func TestREQ071_087_ExcelCongThucSoVaDonGiaLe(t *testing.T) {
 	v := e.Admin.Voucher(map[string]any{"voucher_type": "receipt", "account_id": e.TM, "partner_id": cus, "lines": []any{map[string]any{"amount": 1000}, map[string]any{"amount": 2500}}})
 	vb := e.Admin.OK("GET", fmt.Sprintf("/api/vouchers/%d/export?format=xlsx", v.ID), nil, nil).Body
 	checkNumericFormulas(t, vb, map[string]string{"SUM(D": "3500"})
-	if r := findRow(xlsxRows(t, vb), 2, "Tổng số tiền (đồng):"); r == nil || r[3] != "3500" {
+	// Dòng tổng ghi "Tổng số tiền" như bản in (F-03), kèm "Bằng chữ" (F-02).
+	if r := findRow(xlsxRows(t, vb), 0, "Tổng số tiền"); r == nil || r[3] != "3500" {
 		t.Fatalf("phiếu thu tổng số tiền: %q", r)
 	}
 	// Báo cáo: dòng Cộng là công thức SUM ra số.

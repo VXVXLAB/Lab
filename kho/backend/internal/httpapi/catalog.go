@@ -10,6 +10,7 @@ import (
 
 	"kho/internal/apperr"
 	"kho/internal/catalog"
+	"kho/internal/debt"
 	"kho/internal/stock"
 	"kho/internal/util"
 )
@@ -139,6 +140,7 @@ func (s *Server) catalogRoutes(r chi.Router) {
 	// Các route đặc biệt của mặt hàng phải đăng ký trước /{id}.
 	r.Get("/products/lookup", s.lookupProduct)
 	r.Get("/products/price-info", s.priceInfoBatch)
+	r.Get("/partners/{id}/balance", s.partnerBalance)
 	r.Get("/products/{id}/price-info", s.priceInfo)
 	mount(s, r, "/products", crud[*catalog.Product, catalog.ProductInput]{
 		entity: "product",
@@ -294,4 +296,41 @@ func (s *Server) priceInfoBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+// partnerBalance: GET /partners/{id}/balance?date=&exclude_document_id=&exclude_voucher_id=
+// Số dư phải thu và phải trả hiện tại của một đối tác (nhẹ hơn sổ chi tiết công nợ).
+func (s *Server) partnerBalance(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	date, e1 := qDate(r, "date")
+	xd, e2 := qInt64(r, "exclude_document_id")
+	xv, e3 := qInt64(r, "exclude_voucher_id")
+	if err := firstErr(e1, e2, e3); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	p, err := s.Catalog.GetPartner(r.Context(), s.Pool, id)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	rec, err := debt.BalanceExcluding(r.Context(), s.Pool, debt.Receivable, id, date, xd, xv)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	pay, err := debt.BalanceExcluding(r.Context(), s.Pool, debt.Payable, id, date, xd, xv)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"partner_id": p.ID, "partner_code": p.Code, "partner_name": p.Name,
+		"date": date, "exclude_document_id": xd, "exclude_voucher_id": xv,
+		"receivable": rec, "payable": pay,
+	})
 }

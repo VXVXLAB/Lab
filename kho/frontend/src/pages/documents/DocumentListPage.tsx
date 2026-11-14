@@ -5,17 +5,18 @@ import { Button, Dropdown, Input, Segmented, Select, Table, Tag, Tooltip, type I
 import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import type { Dayjs } from 'dayjs';
-import { productsApi } from '../../api/catalog';
 import { errorMessage } from '../../api/client';
 import { documentsApi } from '../../api/documents';
 import { qk } from '../../api/queryKeys';
 import type { DocStatus, DocType, DocumentSummary, DocumentListParams } from '../../api/types';
 import { DateInput } from '../../components/DateInput';
+import { ProductSelect, type ProductPick } from '../../components/ProductSelect';
 import { Kbd } from '../../components/Kbd';
 import { PageHeader } from '../../components/PageHeader';
 import { formatDate, formatDateTime, formatMoney, toApiDate, todayVn } from '../../lib/format';
 import { isTypingTarget, useHotkeys } from '../../lib/keyboard';
-import { useDebounced, useElementHeight } from '../../lib/useDebounced';
+import { useDebouncedFlush, useElementHeight } from '../../lib/useDebounced';
+import { useListSearchEnter } from '../../lib/searchGuard';
 import { paths } from '../../paths';
 import { DOC_TYPES, DOC_TYPE_LIST } from './docTypes';
 import { PartnerSelect, type PartnerLite } from './PartnerSelect';
@@ -54,27 +55,6 @@ function presetRange(p: Preset): [Dayjs | null, Dayjs | null] {
   }
 }
 
-function ProductFilter({ value, onChange }: { value: number | undefined; onChange: (v: number | undefined) => void }) {
-  const [s, setS] = useState('');
-  const dq = useDebounced(s.trim(), 150);
-  const params = useMemo(() => ({ q: dq || undefined, page_size: 30 }), [dq]);
-  const q = useQuery({ queryKey: qk.catalogList('product', params), queryFn: () => productsApi.list(params), staleTime: 30_000 });
-  return (
-    <Select<number>
-      allowClear
-      showSearch
-      filterOption={false}
-      onSearch={setS}
-      value={value}
-      onChange={(v) => onChange(v)}
-      placeholder="Có mặt hàng…"
-      style={{ width: 200 }}
-      popupMatchSelectWidth={420}
-      options={(q.data?.items ?? []).map((p) => ({ value: p.id, label: `${p.code} – ${p.name}` }))}
-    />
-  );
-}
-
 function ago(iso: string): string {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
   if (m < 1) return 'vừa xong';
@@ -100,11 +80,12 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
   const [range, setRange] = useState<[Dayjs | null, Dayjs | null]>([null, null]);
   const [status, setStatus] = useState<'all' | DocStatus>(draftsOnly ? 'draft' : 'all');
   const [partner, setPartner] = useState<PartnerLite | null>(null);
-  const [productId, setProductId] = useState<number | undefined>(undefined);
+  const [productPick, setProductPick] = useState<ProductPick | null>(null);
+  const productId = productPick?.id;
   const [typeFilter, setTypeFilter] = useState<DocType | undefined>(undefined);
   const [warehouseId, setWarehouseId] = useState<number | undefined>(undefined);
   const [q, setQ] = useState('');
-  const dq = useDebounced(q.trim(), 250);
+  const [dq, flushQ] = useDebouncedFlush(q.trim(), 250);
   const [page, setPage] = useState(1);
   const [activeIdx, setActiveIdx] = useState(-1);
   const searchRef = useRef<InputRef>(null);
@@ -152,6 +133,19 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
 
   const open = (r: DocumentSummary) => navigate(paths.document(r.id));
   const newDoc = (t: DocType) => navigate(paths.newDocument(t));
+  const onSearchEnter = useListSearchEnter({
+    text: q,
+    committed: dq,
+    flush: flushQ,
+    fresh: !query.isPlaceholderData && !query.isFetching,
+    rows,
+    focusFirst: () => {
+      setActiveIdx(0);
+      tableRef.current?.focus();
+    },
+    openFirst: (r) => open(r),
+  });
+
   const focusSearch = () => {
     searchRef.current?.focus();
     searchRef.current?.select();
@@ -297,7 +291,8 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
-            if ((e.key === 'ArrowDown' || e.key === 'Enter') && rows.length) {
+            if (e.key === 'Enter') onSearchEnter(e);
+            else if (e.key === 'ArrowDown' && rows.length && dq === q.trim()) {
               e.preventDefault();
               setActiveIdx(0);
               tableRef.current?.focus();
@@ -350,7 +345,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
             style={{ width: 220 }}
           />
         )}
-        <ProductFilter value={productId} onChange={setProductId} />
+        <ProductSelect value={productPick} onChange={(p) => setProductPick(p)} placeholder="Có mặt hàng…" width={200} />
         <WarehouseSelect value={warehouseId} onChange={setWarehouseId} width={150} />
       </div>
       <div className="table-wrap" ref={tableRef} tabIndex={0} onKeyDown={onTableKey} aria-label={`Danh sách ${title}`}>

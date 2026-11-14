@@ -4,7 +4,8 @@ import { usersApi } from '../../api/catalog';
 import { qk } from '../../api/queryKeys';
 import type { User, UserBody } from '../../api/types';
 import { useCurrentUser } from '../../auth/AuthContext';
-import { CatalogList, foldVietnamese, StatusText } from '../../components/CatalogList';
+import { CatalogList, StatusText } from '../../components/CatalogList';
+import { matchText } from '../../lib/text';
 import { EntityFormModal } from '../../components/EntityFormModal';
 import { formatDateTime } from '../../lib/format';
 import { ROLE_LABEL } from '../../lib/labels';
@@ -25,7 +26,7 @@ export function UsersPage() {
         title="Người dùng"
         noun="người dùng"
         fetchList={() => usersApi.list()}
-        clientFilter={(r, q) => foldVietnamese(`${r.username} ${r.full_name}`).includes(q)}
+        clientFilter={(r, q) => matchText(q, `${r.username} ${r.full_name}`)}
         searchPlaceholder="Tìm tên đăng nhập, họ tên…"
         describe={(r) => `${r.username} – ${r.full_name}`}
         createLabel="Thêm người dùng"

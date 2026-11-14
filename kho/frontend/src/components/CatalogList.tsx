@@ -7,7 +7,8 @@ import { ApiError, errorMessage } from '../api/client';
 import { qk } from '../api/queryKeys';
 import type { CatalogEntity, ListParams, Paged } from '../api/types';
 import { isTypingTarget, useHotkeys } from '../lib/keyboard';
-import { useDebounced, useElementHeight } from '../lib/useDebounced';
+import { useDebouncedFlush, useElementHeight } from '../lib/useDebounced';
+import { useListSearchEnter } from '../lib/searchGuard';
 import { Kbd } from './Kbd';
 import { PageHeader } from './PageHeader';
 
@@ -45,15 +46,7 @@ export interface CatalogListProps<T extends { id: number; active: boolean }> {
 
 const PAGE_SIZE = 50;
 
-function fold(s: string): string {
-  return s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/Đ/g, 'D')
-    .toLowerCase();
-}
-export { fold as foldVietnamese };
+export { foldVietnamese } from '../lib/text';
 
 /**
  * Màn danh sách danh mục dùng chung: tìm kiếm (máy chủ, không dấu), lọc Đang dùng/Ngừng dùng,
@@ -84,7 +77,7 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
   const { modal, message } = App.useApp();
   const qc = useQueryClient();
   const [q, setQ] = useState('');
-  const dq = useDebounced(q.trim(), 250);
+  const [dq, flushQ] = useDebouncedFlush(q.trim(), 250);
   const [active, setActive] = useState<ActiveFilter>('true');
   const [page, setPage] = useState(1);
   const [activeIdx, setActiveIdx] = useState(-1);
@@ -119,7 +112,7 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
     let items = query.data?.items ?? [];
     if (clientFilter) {
       if (active !== 'all') items = items.filter((r) => r.active === (active === 'true'));
-      if (dq) items = items.filter((r) => clientFilter(r, fold(dq)));
+      if (dq) items = items.filter((r) => clientFilter(r, dq));
     }
     return items;
   }, [query.data, clientFilter, dq, active]);
@@ -184,6 +177,19 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
       },
     });
   };
+
+  const onSearchEnter = useListSearchEnter({
+    text: clientFilter ? dq : q,
+    committed: dq,
+    flush: flushQ,
+    fresh: !query.isPlaceholderData && !query.isFetching,
+    rows,
+    focusFirst: () => {
+      setActiveIdx(0);
+      tableRef.current?.focus();
+    },
+    openFirst: (r) => onEdit(r),
+  });
 
   const focusSearch = () => {
     searchRef.current?.focus();
@@ -296,7 +302,8 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
-            if ((e.key === 'ArrowDown' || e.key === 'Enter') && rows.length) {
+            if (e.key === 'Enter') onSearchEnter(e);
+            else if (e.key === 'ArrowDown' && rows.length && dq === q.trim()) {
               e.preventDefault();
               setActiveIdx(0);
               tableRef.current?.focus();

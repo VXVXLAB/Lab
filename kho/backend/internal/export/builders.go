@@ -3,6 +3,7 @@ package export
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -31,124 +32,175 @@ func str(p *string) string {
 	return *p
 }
 
-// DocumentTable dựng bảng xuất file cho một chứng từ.
+// docPrint là cấu hình hiển thị theo loại phiếu — khớp bản in trên màn hình
+// (frontend/src/pages/documents/docTypes.ts + PrintSheet.tsx, theo mẫu phiếu của khách).
+type docPrint struct {
+	name           string   // tên phiếu (phụ đề phiếu tạm)
+	partnerLabel   string   // "" = không có đối tác
+	warehouseLabel string   // nhãn dòng kho
+	hasPrice       bool     // có cột Đơn giá / Thành tiền
+	hasDebt        bool     // in Nợ cũ / Tổng nợ
+	signers        []string // ô ký
+}
+
+var docPrints = map[string]docPrint{
+	docs.TypeSale:           {"Phiếu bán hàng", "Khách hàng", "Xuất từ kho", true, true, []string{"Người lập phiếu", "Người giao hàng", "Khách hàng", "Thủ kho"}},
+	docs.TypeSaleReturn:     {"Phiếu khách trả hàng", "Khách hàng", "Nhập vào kho", true, false, []string{"Người lập phiếu", "Khách hàng", "Thủ kho"}},
+	docs.TypePurchase:       {"Phiếu nhập mua hàng", "Nhà cung cấp", "Nhập vào kho", true, true, []string{"Người lập phiếu", "Người giao hàng", "Thủ kho"}},
+	docs.TypePurchaseReturn: {"Phiếu trả hàng nhà cung cấp", "Nhà cung cấp", "Xuất từ kho", true, false, []string{"Người lập phiếu", "Người nhận hàng", "Thủ kho"}},
+	docs.TypeTransfer:       {"Phiếu chuyển kho", "", "Kho xuất", false, false, []string{"Người lập phiếu", "Thủ kho xuất", "Thủ kho nhận"}},
+	docs.TypeOpening:        {"Phiếu nhập tồn đầu kỳ", "", "Nhập vào kho", true, false, []string{"Người lập phiếu", "Thủ kho"}},
+}
+
+// ServiceCodeOnPrint là mã hiển thị của dòng dịch vụ trên bản in / file xuất (đúng mẫu khách: "DICHVU").
+const ServiceCodeOnPrint = "DICHVU"
+
+const signDateLine = "Ngày …… tháng …… năm ………"
+
+func exportStamp() string {
+	return "Xuất file lúc " + time.Now().In(util.VNZone).Format("15:04 02/01/2006")
+}
+
+// DocumentTable dựng bảng xuất file cho một chứng từ — cùng nội dung, nhãn, ô ký với bản in.
 func DocumentTable(d *docs.Document) Table {
+	cfg := docPrints[d.DocType]
+	draft := d.Status != docs.StatusPosted
 	t := Table{SheetName: d.DisplayNo}
-	if d.Status == docs.StatusPosted {
-		t.Title = docTitles[d.DocType]
-	} else {
+	no := d.DisplayNo
+	if draft {
 		t.Title = DraftTitle
-		t.Subtitle = d.DocTypeName + " — chưa ghi sổ, chỉ để khách hàng xem / đặt hàng"
-	}
-	no := "Số phiếu: " + d.DisplayNo
-	if d.Status != docs.StatusPosted {
-		no = "Số phiếu tạm: " + d.DraftNo
-	}
-	t.Info = append(t.Info, no+"    Ngày: "+d.DocDate.VN())
-	switch d.DocType {
-	case docs.TypeSale, docs.TypeSaleReturn:
-		t.Info = append(t.Info, "Khách hàng: "+str(d.PartnerName))
-	case docs.TypePurchase, docs.TypePurchaseReturn:
-		t.Info = append(t.Info, "Nhà cung cấp: "+str(d.PartnerName))
-	}
-	if d.PartnerID != nil {
-		if str(d.PartnerAddress) != "" {
-			t.Info = append(t.Info, "Địa chỉ: "+str(d.PartnerAddress))
-		}
-		if str(d.PartnerPhone) != "" {
-			t.Info = append(t.Info, "Điện thoại: "+str(d.PartnerPhone))
-		}
-	}
-	if d.DocType == docs.TypeTransfer {
-		t.Info = append(t.Info, "Kho xuất: "+d.WarehouseName+"    Kho nhận: "+str(d.ToWarehouseName))
+		t.Subtitle = cfg.name + " — chưa ghi sổ, chưa trừ/cộng kho, chưa vào công nợ"
+		no = d.DraftNo
 	} else {
-		t.Info = append(t.Info, "Kho: "+d.WarehouseName)
+		t.Title = docTitles[d.DocType]
+		if d.DocNo != nil {
+			no = *d.DocNo
+		}
 	}
+	t.Info = append(t.Info, "Số: "+no+"    Ngày: "+d.DocDate.VN())
+	if cfg.partnerLabel != "" {
+		line := cfg.partnerLabel + ": " + str(d.PartnerName)
+		if str(d.PartnerCode) != "" {
+			line += " (" + str(d.PartnerCode) + ")"
+		}
+		t.Info = append(t.Info, line)
+		if str(d.PartnerAddress) != "" || str(d.PartnerPhone) != "" {
+			line := "Địa chỉ: " + str(d.PartnerAddress)
+			if str(d.PartnerPhone) != "" {
+				line += " · ĐT: " + str(d.PartnerPhone)
+			}
+			t.Info = append(t.Info, line)
+		}
+	}
+	wh := cfg.warehouseLabel + ": " + d.WarehouseName
+	if d.DocType == docs.TypeTransfer {
+		wh += " → Kho nhận: " + str(d.ToWarehouseName)
+	}
+	t.Info = append(t.Info, wh)
 	if d.Note != "" {
 		t.Info = append(t.Info, "Ghi chú: "+d.Note)
 	}
-	// Cột "Ghi chú" chỉ có khi ít nhất một dòng có ghi chú.
+	// Cột "Ghi chú" chỉ có khi ít nhất một dòng có ghi chú; phiếu chuyển kho không có cột giá.
 	hasNote := false
 	for _, l := range d.Lines {
 		if l.Note != "" {
 			hasNote = true
 		}
 	}
-	t.Columns = []Column{{"STT", 6, Text}, {"Mã hàng", 14, Text}, {"Tên hàng", 34, Text}, {"ĐVT", 8, Text},
-		{"Số lượng", 11, Qty}, {"Đơn giá", 13, Money}, {"Thành tiền", 15, Money}}
+	t.Columns = []Column{{"STT", 6, Text}, {"Mã hàng", 14, Text}, {"Tên hàng", 34, Text}, {"ĐVT", 8, Text}, {"Số lượng", 11, Qty}}
+	if cfg.hasPrice {
+		t.Columns = append(t.Columns, Column{"Đơn giá", 13, Money}, Column{"Thành tiền", 15, Money})
+	}
 	if hasNote {
 		t.Columns = append(t.Columns, Column{"Ghi chú", 20, Text})
 	}
+	goodsQty := decimal.Zero
 	for i, l := range d.Lines {
-		name := l.ProductName
+		code, name := l.ProductCode, l.ProductName
 		if l.IsService {
+			code, name = ServiceCodeOnPrint, l.Description
+		} else {
+			goodsQty = goodsQty.Add(l.Qty)
 			if l.Description != "" {
 				name = l.Description
 			}
-		} else if l.Description != "" && l.Description != l.ProductName {
-			name = l.ProductName + " - " + l.Description
 		}
-		var amount any = l.Amount
-		if l.UnitPrice == nil {
-			amount = nil
+		row := []any{i + 1, code, name, l.Unit, l.Qty}
+		if cfg.hasPrice {
+			var amount any = l.Amount
+			if l.UnitPrice == nil {
+				amount = nil
+			}
+			row = append(row, l.UnitPrice, amount)
 		}
-		row := []any{i + 1, l.ProductCode, name, l.Unit, l.Qty, l.UnitPrice, amount}
 		if hasNote {
 			row = append(row, l.Note)
 		}
 		t.Rows = append(t.Rows, row)
 	}
-	t.Footer = [][]any{{"Cộng", nil, nil, nil, nil, nil, d.TotalAmount}}
-	t.SumColumns = []int{6}
-	if d.OldDebt != nil && d.TotalDebt != nil {
+	if cfg.hasPrice {
+		t.Footer = [][]any{{"Cộng", nil, nil, nil, nil, nil, d.TotalAmount}}
+		t.SumColumns = []int{6}
+	} else {
+		t.Footer = [][]any{{"Cộng", nil, nil, nil, goodsQty}}
+		t.SumColumns = []int{4}
+	}
+	if cfg.hasDebt && d.OldDebt != nil && d.TotalDebt != nil {
 		// Nhãn và số ở hai ô; Tổng nợ = công thức (Nợ cũ + Cộng) để thêm dòng sau khi xuất vẫn tự đúng.
 		t.Summary = []SummaryRow{
 			{Label: "Nợ cũ:", Value: *d.OldDebt},
 			{Label: "Tổng nợ (đến ngày " + d.DocDate.VN() + "):", Value: *d.TotalDebt, Formula: "{s0}+{total}"},
 		}
 	}
-	switch d.DocType {
-	case docs.TypeSale:
-		t.Signatures = []string{"Người lập phiếu", "Thủ kho", "Khách hàng"}
-	case docs.TypePurchase:
-		t.Signatures = []string{"Người lập phiếu", "Thủ kho", "Người giao hàng"}
-	default:
-		t.Signatures = []string{"Người lập phiếu", "Thủ kho"}
+	t.SignDate = signDateLine
+	t.Signatures = cfg.signers
+	t.SignHint = "(Ký, ghi rõ họ tên)"
+	if draft {
+		t.FootNote = exportStamp() + " · Phiếu tạm"
+	} else {
+		t.FootNote = exportStamp() + " · Ghi sổ bởi " + str(d.PostedByName)
 	}
 	return t
 }
 
-// VoucherTable dựng bảng xuất file cho phiếu thu/chi.
+// VoucherTable dựng bảng xuất file cho phiếu thu/chi — cùng nội dung với bản in (có dòng "Bằng chữ").
 func VoucherTable(v *cash.Voucher) Table {
 	title := map[string]string{"PT": "PHIẾU THU", "PC": "PHIẾU CHI", "BC": "GIẤY BÁO CÓ (THU QUA NGÂN HÀNG)", "BN": "GIẤY BÁO NỢ (CHI QUA NGÂN HÀNG)"}[cash.Prefix(v.VoucherType, v.AccountKind)]
+	receipt := v.VoucherType == cash.TypeReceipt
 	t := Table{SheetName: v.VoucherNo, Title: title}
-	t.Info = append(t.Info, "Số: "+v.VoucherNo+"    Ngày: "+v.VoucherDate.VN())
-	t.Info = append(t.Info, "Tài khoản: "+v.AccountName)
-	label := "Người nộp tiền / đối tượng: "
-	if v.VoucherType == cash.TypePayment {
-		label = "Người nhận tiền / đối tượng: "
+	t.Info = append(t.Info, "Số: "+v.VoucherNo+"    Ngày: "+v.VoucherDate.VN()+"    "+v.AccountName)
+	who, why := "Họ tên người nhận tiền: ", "Lý do chi: "
+	if receipt {
+		who, why = "Họ tên người nộp tiền: ", "Lý do nộp: "
 	}
 	if v.PartnerName != nil {
-		t.Info = append(t.Info, label+*v.PartnerName)
-		if str(v.PartnerAddress) != "" {
-			t.Info = append(t.Info, "Địa chỉ: "+str(v.PartnerAddress))
-		}
+		t.Info = append(t.Info, who+*v.PartnerName)
+	} else {
+		t.Info = append(t.Info, who+"……………………………………")
 	}
-	if v.Note != "" {
-		t.Info = append(t.Info, "Lý do: "+v.Note)
+	if str(v.PartnerAddress) != "" {
+		t.Info = append(t.Info, "Địa chỉ: "+str(v.PartnerAddress))
 	}
+	reason := v.Note
+	if reason == "" && len(v.Lines) == 1 {
+		reason = v.Lines[0].Description
+	}
+	t.Info = append(t.Info, why+reason)
 	t.Columns = []Column{{"STT", 6, Text}, {"Diễn giải", 50, Text}, {"Chứng từ liên quan", 18, Text}, {"Số tiền", 18, Money}}
 	for i, l := range v.Lines {
 		t.Rows = append(t.Rows, []any{i + 1, l.Description, str(l.DocumentNo), l.Amount})
 	}
-	t.Footer = [][]any{{"Cộng", nil, nil, v.TotalAmount}}
+	t.Footer = [][]any{{"Tổng số tiền", nil, nil, v.TotalAmount}}
 	t.SumColumns = []int{3}
-	t.Summary = []SummaryRow{{Label: "Tổng số tiền (đồng):", Value: v.TotalAmount, Formula: "{total}"}}
-	if v.VoucherType == cash.TypeReceipt {
-		t.Signatures = []string{"Người lập phiếu", "Người nộp tiền", "Thủ quỹ"}
+	t.After = []string{"Bằng chữ: " + util.MoneyInWords(v.TotalAmount), "Kèm theo: ……… chứng từ gốc."}
+	t.SignDate = signDateLine
+	if receipt {
+		t.Signatures = []string{"Giám đốc", "Kế toán trưởng", "Người nộp tiền", "Người lập phiếu", "Thủ quỹ"}
 	} else {
-		t.Signatures = []string{"Người lập phiếu", "Người nhận tiền", "Thủ quỹ"}
+		t.Signatures = []string{"Giám đốc", "Kế toán trưởng", "Thủ quỹ", "Người lập phiếu", "Người nhận tiền"}
 	}
+	t.SignHint = "(Ký, họ tên)"
+	t.FootNote = exportStamp() + " · Lập bởi " + str(v.CreatedByName)
 	return t
 }
 

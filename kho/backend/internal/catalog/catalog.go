@@ -494,8 +494,9 @@ type PartnerFilter struct {
 // ListPartners liệt kê đối tác.
 func (s *Service) ListPartners(ctx context.Context, f PartnerFilter) (util.Page[Partner], error) {
 	var w util.Where
-	if f.Q != "" {
-		w.Add(`search_key LIKE ?`, util.LikePattern(f.Q))
+	tokens := util.SearchTokens(f.Q)
+	if c := util.PartnerMatchSQL(&w, "partners", tokens); c != "" {
+		w.Add(c)
 	}
 	if f.Active != nil {
 		w.Add(`active = ?`, *f.Active)
@@ -513,7 +514,12 @@ func (s *Service) ListPartners(ctx context.Context, f PartnerFilter) (util.Page[
 	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM partners`+w.SQL(), w.Args...).Scan(&out.Total); err != nil {
 		return out, err
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT `+partnerCols+` FROM partners`+w.SQL()+` ORDER BY code LIMIT `+w.Arg(f.PageSize)+` OFFSET `+w.Arg(f.Offset()), w.Args...)
+	// Có từ khóa ⇒ xếp theo mức khớp (trùng mã, tên bắt đầu bằng cụm từ, …) rồi theo tên; không có ⇒ theo mã.
+	order := ` ORDER BY code`
+	if len(tokens) > 0 {
+		order = ` ORDER BY ` + util.PartnerRankSQL(&w, "partners", tokens) + `, name, code`
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT `+partnerCols+` FROM partners`+w.SQL()+order+` LIMIT `+w.Arg(f.PageSize)+` OFFSET `+w.Arg(f.Offset()), w.Args...)
 	if err != nil {
 		return out, err
 	}

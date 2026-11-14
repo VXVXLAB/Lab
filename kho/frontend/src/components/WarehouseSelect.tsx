@@ -1,4 +1,5 @@
 import { Select } from 'antd';
+import { filterByLabel } from '../lib/text';
 import { useAllGroups, useWarehouses } from '../api/hooks';
 
 /** Lọc theo kho: bỏ trống = tất cả kho. */
@@ -8,7 +9,7 @@ export function WarehouseSelect({ value, onChange, width = 170, allLabel = 'Tấ
     <Select<number>
       allowClear
       showSearch
-      optionFilterProp="label"
+      filterOption={filterByLabel}
       aria-label="Kho"
       placeholder={allLabel}
       value={value}
@@ -26,7 +27,7 @@ export function GroupSelect({ value, onChange, width = 190 }: { value: number | 
     <Select<number>
       allowClear
       showSearch
-      optionFilterProp="label"
+      filterOption={filterByLabel}
       aria-label="Nhóm hàng"
       placeholder="Mọi nhóm hàng"
       value={value}
