@@ -206,13 +206,15 @@ thông báo thành công ngắn (1,5 giây), lỗi nói cách khắc phục.
 ### Sửa vòng 2 (F-09…F-16)
 
 - **Gộp ba chiều** (`lib/merge3.ts`, F-10): so dòng lúc nạp (base) / máy này (mine) / bản máy kia vừa lưu (theirs) theo
-  **từng ô**. Dòng của máy này nhận dòng gốc qua `key` (gắn với id dòng máy chủ lúc nạp; dòng mới gõ không có). Máy chủ
-  cấp lại id dòng mỗi lần lưu (xóa rồi ghi lại), nên dòng gốc ↔ dòng bản mới được ghép theo **thứ tự + mức giống nhau**
-  (`alignLines`, quy hoạch động; phiếu kho chỉ ghép dòng cùng mặt hàng), không theo mã hàng. Chỉ tôi sửa ⇒ của tôi; chỉ máy
-  kia sửa ⇒ của máy kia; cả hai sửa khác nhau ⇒ mục "Cùng sửa: <ô> — máy kia: X, bạn: Y" với lựa chọn
-  (`MergeChoicePicker`, mặc định "Giữ của máy kia"); tôi sửa / máy kia xóa và ngược lại ⇒ cũng hỏi, mặc định giữ bản đã
-  lưu. Sửa không bao giờ thêm dòng. Dùng chung cho phiếu kho (`DOC_FIELDS`, `mergeLines`) và phiếu thu chi (`V_FIELDS`).
-  Kiểm tra: `npm run test:merge`. Nếu sau này máy chủ giữ id dòng khi sửa, `alignLines` có thể thay bằng ghép theo id.
+  **từng ô**. Một dòng được nhận ra **chỉ bằng id dòng máy chủ** (`LineDraft.id`, `VLine.id`; máy chủ giữ id khi sửa phiếu
+  nếu body gửi kèm `id`); dòng không có id, hoặc id không có trong bản lúc nạp, là dòng mới. Không ghép theo mã hàng hay vị
+  trí. Chỉ tôi sửa ⇒ của tôi; chỉ máy kia sửa ⇒ của máy kia; cả hai sửa khác nhau ⇒ mục "Cùng sửa: <ô> — máy kia: X, bạn: Y"
+  với lựa chọn (`MergeChoicePicker`, mặc định "Giữ của máy kia"); tôi sửa / máy kia xóa và ngược lại ⇒ cũng hỏi, mặc định
+  giữ bản đã lưu. Thứ tự dòng (Alt+↑↓): chỉ một bên đổi ⇒ theo bên đó; cả hai đổi khác nhau ⇒ hỏi. Sửa không bao giờ thêm
+  dòng; dòng thêm lại sau khi máy kia xóa đi lên máy chủ như dòng mới (không mang id cũ). Dùng chung cho phiếu kho
+  (`DOC_FIELDS`, `mergeLines`) và phiếu thu chi (`V_FIELDS`). Kiểm tra: `npm run test:merge`.
+- **Id dòng khi lưu**: `toBody` (phiếu kho) và `body()` (phiếu thu chi) luôn gửi `id` của dòng đang có — kể cả sau khi gộp
+  và sau khi khôi phục phiếu gõ dở (dòng khôi phục mang lại id lúc nạp) — nên máy chủ sửa tại chỗ, giữ id.
 - **Ô chọn có tìm** (`useSearchEnterGuard`, F-11): khi đang có chữ gõ, ô tự xử lý Enter (`data-search-owner`, `enterToNext`
   bỏ qua): kết quả chưa đúng chữ ⇒ chờ; đúng ⇒ chọn mục đầu (hoặc mục người dùng dời tới bằng ↑ ↓); không có kết quả ⇒
   giữ chữ. Đang gõ thì không ghim mục đang chọn vào danh sách. `searchValue` được điều khiển để xóa chữ sau khi chọn.

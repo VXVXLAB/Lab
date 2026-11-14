@@ -115,6 +115,8 @@ export function toBody(type: DocType, h: HeaderDraft, lines: LineDraft[]): Docum
     note: h.note.trim(),
     lines: sentLines(lines).map(
       (l): DocumentLineBody => ({
+        // id dòng máy chủ: sửa tại chỗ, giữ id (dòng mới không có)
+        ...(l.id !== undefined ? { id: l.id } : {}),
         product_id: l.product?.id ?? 0,
         description: l.description.trim(),
         unit: l.unit,
@@ -156,7 +158,6 @@ export function mergeLines(base: LineDraft[], mine: LineDraft[], theirs: LineDra
     mine: sentLines(mine).filter((l) => !!l.product),
     theirs: theirs.filter((l) => !isBlank(l)),
     fields: DOC_FIELDS,
-    compatible: (a, b) => (a.product?.id ?? null) === (b.product?.id ?? null),
   });
 }
 

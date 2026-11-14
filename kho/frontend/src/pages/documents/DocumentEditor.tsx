@@ -36,7 +36,7 @@ import { storage } from '../../lib/storage';
 import { useMenuHighlight } from '../../lib/menuHighlight';
 import { unsavedStore } from '../../lib/unsavedStore';
 import { useNarrow } from '../../lib/useNarrow';
-import { MERGE_COLOR, MERGE_LABEL, conflictText, needsChoice, type MergeChoice, type MergeItem } from '../../lib/merge3';
+import { MERGE_COLOR, MERGE_LABEL, conflictText, isOrderItem, needsChoice, type MergeChoice, type MergeItem } from '../../lib/merge3';
 import { MergeChoicePicker } from '../../components/MergeChoicePicker';
 import { paths } from '../../paths';
 import { DOC_TYPES, isDocType } from './docTypes';
@@ -965,7 +965,20 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                           <Tag color={MERGE_COLOR[c.kind]}>{MERGE_LABEL[c.kind]}</Tag>
                         </td>
                         <td>{c.line.product?.code}</td>
-                        <td>{c.line.product?.is_service ? c.line.description : c.line.product?.name}</td>
+                        <td>
+                          {isOrderItem(c.kind)
+                            ? 'Bạn đã dời thứ tự các dòng'
+                            : c.line.product?.is_service
+                              ? c.line.description
+                              : c.line.product?.name}
+                        </td>
+                        {isOrderItem(c.kind) ? (
+                          <>
+                            <td />
+                            <td />
+                          </>
+                        ) : (
+                          <>
                         <td className="num">
                           {before && before.qty !== c.line.qty ? (
                             <>
@@ -986,6 +999,8 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                             formatMoney(c.line.unit_price)
                           )}
                         </td>
+                          </>
+                        )}
                         {needsChoice(c.kind) && (
                           <td>
                             {readOnly ? (

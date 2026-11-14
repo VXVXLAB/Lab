@@ -29,7 +29,7 @@ import { paths } from '../../paths';
 import { PartnerSelect, type PartnerLite } from '../documents/PartnerSelect';
 import { useDrawers } from '../reports/drawers';
 import { VoucherPrint } from './VoucherPrint';
-import { MERGE_COLOR, MERGE_LABEL, applyMerge, conflictText, needsChoice, threeWay, type MergeChoice, type MergeField, type MergeItem } from '../../lib/merge3';
+import { MERGE_COLOR, MERGE_LABEL, applyMerge, conflictText, isOrderItem, needsChoice, threeWay, type MergeChoice, type MergeField, type MergeItem } from '../../lib/merge3';
 import { MergeChoicePicker } from '../../components/MergeChoicePicker';
 import { DEBT_EFFECT, debtEffect, defaultDebtSide, SIDE_LABEL, VOUCHER_PREFIX } from './voucherText';
 
@@ -72,7 +72,6 @@ const mergeV = (base: VLine[], mine: VLine[], theirs: VLine[]) =>
     mine: mine.filter((l) => !isBlank(l)),
     theirs: theirs.filter((l) => !isBlank(l)),
     fields: V_FIELDS,
-    compatible: () => true,
   });
 const applyV = (cur: VLine[], items: MergeItem<VLine>[], choices: Record<string, MergeChoice>) =>
   withBlank(applyMerge(cur.filter((l) => !isBlank(l)), items, choices, V_FIELDS, nk));
@@ -155,7 +154,8 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
     partner_id: partner?.id ?? null,
     debt_side: effSide, // luôn gửi rõ
     note: note.trim(),
-    lines: sent.map((l) => ({ description: l.description.trim(), amount: l.amount, document_id: l.document_id })),
+    // id dòng máy chủ: sửa tại chỗ, giữ id (dòng mới không có)
+    lines: sent.map((l) => ({ ...(l.id !== undefined ? { id: l.id } : {}), description: l.description.trim(), amount: l.amount, document_id: l.document_id })),
   });
   const fp = JSON.stringify(body());
   const isNew = voucherId === null && !loaded;
@@ -228,7 +228,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
           partner_id: v.partner_id,
           debt_side: v.debt_side,
           note: v.note,
-          lines: v.lines.map((l) => ({ description: l.description, amount: l.amount, document_id: l.document_id })),
+          lines: v.lines.map((l) => ({ id: l.id, description: l.description, amount: l.amount, document_id: l.document_id })),
         }),
       );
       setLineErr({});
@@ -619,6 +619,10 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
                 return (
                   <div key={c.id} className="stash-vline">
                     <Tag color={MERGE_COLOR[c.kind]}>{MERGE_LABEL[c.kind]}</Tag>
+                    {isOrderItem(c.kind) ? (
+                      'Bạn đã dời thứ tự các dòng'
+                    ) : (
+                      <>
                     {before && before.description.trim() !== c.line.description.trim() ? (
                       <>
                         {before.description} → <b>{c.line.description}</b>
@@ -635,6 +639,8 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
                       <b>{formatMoney(c.line.amount)}</b>
                     )}{' '}
                     {c.line.document_no && <span className="muted">({c.line.document_no})</span>}
+                      </>
+                    )}
                     {needsChoice(c.kind) && (
                       <div className="stash-choice">
                         <MergeChoicePicker text={conflictText(c)} value={choices[c.id] ?? 'theirs'} onChange={(v) => setChoices((x) => ({ ...x, [c.id]: v }))} />

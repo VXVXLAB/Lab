@@ -343,6 +343,8 @@ export interface DocumentFull {
 }
 
 export interface DocumentLineBody {
+  /** id dòng đang có của chính phiếu này (giữ id khi sửa); không có = dòng mới */
+  id?: number;
   product_id: number;
   description: string;
   unit: string;
@@ -572,7 +574,8 @@ export interface VoucherBody {
   partner_id: number | null;
   debt_side: DebtSide;
   note: string;
-  lines: { description: string; amount: number | null; document_id: number | null }[];
+  /** `id`: id dòng đang có của chính phiếu (giữ id khi sửa); không có = dòng mới */
+  lines: { id?: number; description: string; amount: number | null; document_id: number | null }[];
   version?: number;
 }
 

@@ -1,12 +1,11 @@
 // Gộp ba chiều các dòng phiếu khi hai máy cùng sửa (F-10).
 //
 // - base: các dòng lúc máy này nạp phiếu; mine: các dòng máy này đang có; theirs: bản máy kia vừa lưu.
-// - Dòng của máy này nhận ra dòng gốc qua `key` (gắn với dòng máy chủ lúc nạp, tức là id dòng); dòng mới gõ thì không có dòng gốc.
-// - Máy chủ cấp lại id dòng mỗi lần lưu (xóa rồi ghi lại các dòng), nên dòng gốc ↔ dòng của bản mới được ghép theo thứ tự
-//   (máy kia lưu các dòng theo đúng thứ tự trên lưới của họ) và mức giống nhau, KHÔNG theo mã hàng: hai dòng cùng mặt hàng
-//   vẫn là hai dòng riêng.
+// - Một dòng được nhận ra CHỈ bằng id dòng trên máy chủ (máy chủ giữ id khi sửa phiếu). Dòng không có id (hoặc id không
+//   có trong bản lúc nạp) là dòng mới. Không bao giờ ghép theo mã hàng hay theo vị trí.
 // - Từng ô: chỉ tôi sửa ⇒ của tôi; chỉ máy kia sửa ⇒ của máy kia; cả hai sửa thành giá trị khác nhau ⇒ hỏi (mặc định giữ của máy kia).
 // - Tôi sửa / máy kia xóa, hoặc tôi xóa / máy kia sửa ⇒ hỏi (mặc định giữ như bản đã lưu).
+// - Thứ tự dòng: chỉ tôi đổi ⇒ theo tôi; chỉ máy kia đổi ⇒ theo máy kia; cả hai đổi khác nhau ⇒ hỏi (mặc định theo máy kia).
 
 export interface MergeField<L> {
   label: string;
@@ -18,7 +17,7 @@ export interface MergeField<L> {
   show: (l: L) => string;
 }
 
-export type MergeKind = 'added' | 'edited' | 'removed' | 'conflict' | 'theyRemoved' | 'theyEdited';
+export type MergeKind = 'added' | 'edited' | 'removed' | 'conflict' | 'theyRemoved' | 'theyEdited' | 'reordered' | 'bothReordered';
 export type MergeChoice = 'theirs' | 'mine';
 
 export interface FieldConflict {
@@ -39,68 +38,41 @@ export interface MergeItem<L> {
   mineFields: string[];
   /** Ô hai máy cùng sửa khác nhau — theo lựa chọn */
   conflicts: FieldConflict[];
+  /** Đổi thứ tự: id các dòng chung theo thứ tự của máy này */
+  order?: number[];
 }
 
-/** Ghép dòng gốc với dòng bản mới, giữ thứ tự (quy hoạch động, điểm = số ô giống nhau). */
-export function alignLines<L>(base: L[], theirs: L[], fields: MergeField<L>[], compatible: (a: L, b: L) => boolean): (number | null)[] {
-  const n = base.length;
-  const m = theirs.length;
-  const score = (i: number, j: number) => {
-    const a = base[i]!;
-    const b = theirs[j]!;
-    if (!compatible(a, b)) return -1;
-    let s = 1;
-    for (const f of fields) if (f.value(a) === f.value(b)) s += 2;
-    // cùng vị trí: ưu tiên nhẹ khi có nhiều cách ghép bằng điểm
-    if (i === j) s += 1;
-    return s;
-  };
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--)
-    for (let j = m - 1; j >= 0; j--) {
-      const sc = score(i, j);
-      dp[i]![j] = Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!, sc > 0 ? sc + dp[i + 1]![j + 1]! : -Infinity);
-    }
-  const out: (number | null)[] = new Array<number | null>(n).fill(null);
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    const sc = score(i, j);
-    if (sc > 0 && dp[i]![j] === sc + dp[i + 1]![j + 1]!) {
-      out[i] = j;
-      i++;
-      j++;
-    } else if (dp[i]![j] === dp[i + 1]![j]) i++;
-    else j++;
-  }
-  return out;
+export interface Identified {
+  key: string;
+  /** id dòng trên máy chủ; không có = dòng mới gõ */
+  id?: number;
 }
 
-export function threeWay<L extends { key: string }>(opts: {
-  base: L[];
-  mine: L[];
-  theirs: L[];
-  fields: MergeField<L>[];
-  compatible: (a: L, b: L) => boolean;
-}): MergeItem<L>[] {
+const sameSeq = <T,>(a: T[], b: T[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+export function threeWay<L extends Identified>(opts: { base: L[]; mine: L[]; theirs: L[]; fields: MergeField<L>[] }): MergeItem<L>[] {
   const { base, mine, theirs, fields } = opts;
   const eq = (f: MergeField<L>, a: L, b: L) => f.value(a) === f.value(b);
   const same = (a: L, b: L) => fields.every((f) => eq(f, a, b));
-  const align = alignLines(base, theirs, fields, opts.compatible);
-  const baseIdx = new Map(base.map((b, i) => [b.key, i]));
+  const byId = (ls: L[]) => {
+    const m = new Map<number, L>();
+    for (const l of ls) if (l.id !== undefined && !m.has(l.id)) m.set(l.id, l);
+    return m;
+  };
+  const baseById = byId(base);
+  const theirsById = byId(theirs);
   const items: MergeItem<L>[] = [];
-  const seen = new Set<string>();
+  const seen = new Set<number>();
   for (const l of mine) {
-    const bi = baseIdx.get(l.key);
-    if (bi === undefined) {
+    const b = l.id !== undefined && !seen.has(l.id) ? baseById.get(l.id) : undefined;
+    if (!b || l.id === undefined) {
+      // không có id (hoặc id không có trong bản lúc nạp) ⇒ dòng mới
       items.push({ id: l.key, kind: 'added', line: l, base: null, theirsKey: null, mineFields: [], conflicts: [] });
       continue;
     }
-    seen.add(l.key);
-    const b = base[bi]!;
+    seen.add(l.id);
     if (same(b, l)) continue; // tôi không đổi dòng này ⇒ bản mới thế nào giữ thế ấy
-    const ti = align[bi];
-    const t = ti === null || ti === undefined ? null : theirs[ti]!;
+    const t = theirsById.get(l.id);
     if (!t) {
       items.push({ id: l.key, kind: 'theyRemoved', line: l, base: b, theirsKey: null, mineFields: [], conflicts: [] });
       continue;
@@ -114,18 +86,32 @@ export function threeWay<L extends { key: string }>(opts: {
     }
     items.push({ id: l.key, kind: conflicts.length ? 'conflict' : 'edited', line: l, base: b, theirsKey: t.key, mineFields, conflicts });
   }
-  base.forEach((b, bi) => {
-    if (seen.has(b.key)) return;
-    const ti = align[bi];
-    const t = ti === null || ti === undefined ? null : theirs[ti]!;
+  for (const b of base) {
+    if (b.id === undefined || seen.has(b.id)) continue;
+    const t = theirsById.get(b.id);
     if (t && !same(b, t)) items.push({ id: b.key, kind: 'theyEdited', line: b, base: b, theirsKey: t.key, mineFields: [], conflicts: [] });
     else items.push({ id: b.key, kind: 'removed', line: b, base: b, theirsKey: t ? t.key : null, mineFields: [], conflicts: [] });
-  });
+  }
+  // Thứ tự: chỉ xét các dòng có ở cả ba bản
+  const common = (ls: L[]) => {
+    const out: number[] = [];
+    for (const l of ls) if (l.id !== undefined && seen.has(l.id) && theirsById.has(l.id) && !out.includes(l.id)) out.push(l.id);
+    return out;
+  };
+  const bo = common(base);
+  const mo = common(mine);
+  const to = common(theirs);
+  if (!sameSeq(mo, bo) && !sameSeq(mo, to)) {
+    const i = mo.findIndex((x, k) => x !== bo[k]);
+    const moved = mine.find((l) => l.id === mo[i])!;
+    const kind: MergeKind = sameSeq(to, bo) ? 'reordered' : 'bothReordered';
+    items.push({ id: `order:${moved.key}`, kind, line: moved, base: null, theirsKey: null, mineFields: [], conflicts: [], order: mo });
+  }
   return items;
 }
 
 /** Đưa các thay đổi đã chọn vào các dòng hiện có (bản mới). Không bao giờ thêm dòng cho một lần sửa. */
-export function applyMerge<L extends { key: string }>(
+export function applyMerge<L extends Identified>(
   current: L[],
   items: MergeItem<L>[],
   choices: Record<string, MergeChoice>,
@@ -137,7 +123,9 @@ export function applyMerge<L extends { key: string }>(
   for (const it of items) {
     const choice = choices[it.id] ?? 'theirs';
     const j = it.theirsKey ? out.findIndex((l) => l.key === it.theirsKey) : -1;
-    if (it.kind === 'added') out.push({ ...it.line, key: newKey() });
+    if (it.kind === 'reordered' || it.kind === 'bothReordered') continue; // làm sau cùng
+    // dòng mới / dòng máy kia đã xóa mà tôi giữ lại ⇒ dòng mới trên máy chủ (không mang id)
+    if (it.kind === 'added') out.push({ ...it.line, key: newKey(), id: undefined });
     else if (it.kind === 'edited' || it.kind === 'conflict') {
       if (j < 0) continue;
       const labels = choice === 'mine' ? [...it.mineFields, ...it.conflicts.map((c) => c.label)] : it.mineFields;
@@ -149,7 +137,19 @@ export function applyMerge<L extends { key: string }>(
       out[j] = row;
     } else if (it.kind === 'removed' || (it.kind === 'theyEdited' && choice === 'mine')) {
       if (j >= 0) out = out.filter((_, i) => i !== j);
-    } else if (it.kind === 'theyRemoved' && choice === 'mine') out.push({ ...it.line, key: newKey() });
+    } else if (it.kind === 'theyRemoved' && choice === 'mine') out.push({ ...it.line, key: newKey(), id: undefined });
+  }
+  const ord = items.find((it) => it.kind === 'reordered' || (it.kind === 'bothReordered' && (choices[it.id] ?? 'theirs') === 'mine'));
+  if (ord?.order) {
+    // xếp lại các dòng chung theo thứ tự của tôi, giữ nguyên chỗ của các dòng khác (dòng mới của hai bên)
+    const want = ord.order.filter((id) => out.some((l) => l.id === id));
+    const slots = out.map((l, i) => (l.id !== undefined && want.includes(l.id) ? i : -1)).filter((i) => i >= 0);
+    const byId = new Map(out.map((l) => [l.id, l]));
+    const next = [...out];
+    slots.forEach((slot, k) => {
+      next[slot] = byId.get(want[k])!;
+    });
+    out = next;
   }
   return out;
 }
@@ -161,6 +161,8 @@ export const MERGE_LABEL: Record<MergeKind, string> = {
   conflict: 'Cùng sửa',
   theyRemoved: 'Máy kia đã xóa',
   theyEdited: 'Máy kia đã sửa',
+  reordered: 'Đổi thứ tự',
+  bothReordered: 'Cùng đổi thứ tự',
 };
 export const MERGE_COLOR: Record<MergeKind, string> = {
   added: 'blue',
@@ -169,6 +171,8 @@ export const MERGE_COLOR: Record<MergeKind, string> = {
   conflict: 'magenta',
   theyRemoved: 'magenta',
   theyEdited: 'magenta',
+  reordered: 'orange',
+  bothReordered: 'magenta',
 };
 
 /** Câu giải thích cho dòng cần chọn */
@@ -176,6 +180,8 @@ export function conflictText<L>(it: MergeItem<L>): string {
   if (it.kind === 'conflict') return it.conflicts.map((c) => `Cùng sửa: ${c.label} — máy kia: ${c.theirs}, bạn: ${c.mine}`).join('; ');
   if (it.kind === 'theyRemoved') return 'Máy kia đã xóa dòng này, bạn đã sửa';
   if (it.kind === 'theyEdited') return 'Máy kia đã sửa dòng này, bạn đã xóa';
+  if (it.kind === 'bothReordered') return 'Hai máy cùng đổi thứ tự dòng, mỗi máy một kiểu';
   return '';
 }
-export const needsChoice = (k: MergeKind) => k === 'conflict' || k === 'theyRemoved' || k === 'theyEdited';
+export const needsChoice = (k: MergeKind) => k === 'conflict' || k === 'theyRemoved' || k === 'theyEdited' || k === 'bothReordered';
+export const isOrderItem = (k: MergeKind) => k === 'reordered' || k === 'bothReordered';
