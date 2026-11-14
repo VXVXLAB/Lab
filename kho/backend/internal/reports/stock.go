@@ -90,7 +90,7 @@ type StockSummary struct {
 
 // StockSummary tính tồn từng mã tại từng kho và tổng các kho.
 func (s *Service) StockSummary(ctx context.Context, p StockSummaryParams) (*StockSummary, error) {
-	if p.AsOf.IsZero() {
+	if p.AsOf.Empty() {
 		p.AsOf = util.Today()
 	}
 	if err := s.checkWarehouse(ctx, p.WarehouseID); err != nil {

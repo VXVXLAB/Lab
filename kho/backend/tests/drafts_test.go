@@ -325,10 +325,15 @@ func TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu(t *testing.T) {
 	if tot == nil || tot[6] != "3990000" {
 		t.Fatalf("dòng Cộng: %q", tot)
 	}
-	joined := fmt.Sprint(rows)
-	if !strings.Contains(joined, "Nợ cũ: 2.000.000") || !strings.Contains(joined, "Tổng nợ (đến ngày 25/09/2026): 5.990.000") {
-		t.Fatalf("Excel thiếu nợ cũ/tổng nợ: %v", rows)
+	// Nợ cũ / Tổng nợ: nhãn và số ở hai ô; số là ô số (REQ-034, B5).
+	if r := findRow(rows, 2, "Nợ cũ:"); r == nil || r[6] != "2000000" {
+		t.Fatalf("Excel dòng Nợ cũ: %q", r)
 	}
+	if r := findRow(rows, 2, "Tổng nợ (đến ngày 25/09/2026):"); r == nil || r[6] != "5990000" {
+		t.Fatalf("Excel dòng Tổng nợ: %q", r)
+	}
+	xb := e.Admin.OK("GET", fmt.Sprintf("/api/documents/%d/export?format=xlsx", doc.ID), nil, nil).Body
+	checkNumericFormulas(t, xb, map[string]string{"SUM(G": "3990000", "+G": "5990000"})
 	// Word.
 	x := docxXML(t, e.Admin.OK("GET", fmt.Sprintf("/api/documents/%d/export?format=docx", doc.ID), nil, nil).Body)
 	cells := docxCellTexts(x)

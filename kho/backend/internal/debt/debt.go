@@ -29,11 +29,13 @@ func ValidSide(side string) error {
 
 // EntriesSQL trả câu SELECT các bút toán công nợ của một phía, cột:
 // partner_id, kind('document'|'voucher'), ref_id, date, ts, ref_no, ref_type, increase, decrease, description.
-// Chỉ chứng từ đã ghi sổ. Phiếu thu/chi luôn có hiệu lực.
+// Chỉ chứng từ đã ghi sổ. Phiếu thu/chi luôn có hiệu lực và thuộc phía ghi ở cash_vouchers.debt_side:
+//   - phía phải thu: phiếu thu làm GIẢM (khách trả tiền), phiếu chi làm TĂNG (trả lại tiền cho khách);
+//   - phía phải trả: phiếu chi làm GIẢM (trả tiền NCC), phiếu thu làm TĂNG (NCC hoàn tiền cho mình).
 func EntriesSQL(side string) string {
-	incType, decType, vType := "sale", "sale_return", "receipt"
+	incType, decType, decVoucher := "sale", "sale_return", "receipt"
 	if side == Payable {
-		incType, decType, vType = "purchase", "purchase_return", "payment"
+		incType, decType, decVoucher = "purchase", "purchase_return", "payment"
 	}
 	return fmt.Sprintf(`
 SELECT d.partner_id, 'document'::text AS kind, d.id AS ref_id, d.doc_date AS date, d.posted_at AS ts,
@@ -47,12 +49,14 @@ SELECT d.partner_id, 'document'::text AS kind, d.id AS ref_id, d.doc_date AS dat
  WHERE d.status='posted' AND d.partner_id IS NOT NULL AND d.doc_type IN ('%[1]s','%[2]s')
 UNION ALL
 SELECT v.partner_id, 'voucher'::text, v.id, v.voucher_date, v.created_at, v.voucher_no, v.voucher_type,
-       0::numeric, v.total_amount,
+       CASE WHEN v.voucher_type <> '%[3]s' THEN v.total_amount ELSE 0 END,
+       CASE WHEN v.voucher_type = '%[3]s' THEN v.total_amount ELSE 0 END,
        (CASE WHEN v.voucher_type='receipt' THEN 'Thu tiền' ELSE 'Chi tiền' END)
          || CASE WHEN a.kind='bank' THEN ' qua ngân hàng' ELSE ' mặt' END
+         || CASE WHEN v.voucher_type <> '%[3]s' THEN (CASE WHEN v.voucher_type='receipt' THEN ' (nhà cung cấp hoàn tiền)' ELSE ' (trả lại tiền khách)' END) ELSE '' END
          || COALESCE(' - ' || NULLIF(v.note,''), ' - ' || NULLIF((SELECT string_agg(NULLIF(l.description,''), '; ' ORDER BY l.line_no) FROM cash_voucher_lines l WHERE l.voucher_id=v.id), ''), '')
   FROM cash_vouchers v JOIN cash_accounts a ON a.id=v.account_id
- WHERE v.partner_id IS NOT NULL AND v.voucher_type='%[3]s'`, incType, decType, vType)
+ WHERE v.partner_id IS NOT NULL AND v.debt_side='%[4]s'`, incType, decType, decVoucher, side)
 }
 
 func openingCol(side string) string {

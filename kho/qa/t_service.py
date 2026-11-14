@@ -115,9 +115,12 @@ def _():
             # old debt / total debt numeric?
             nums = [v for (_, _, _, v, t) in xlsx_cells(wb) if t == "n"]
             check(2000000 in nums, "Nợ cũ 2.000.000 is a numeric cell (editable number), not text")
-            check(5990000 in nums, "Tổng nợ 5.990.000 is a numeric cell, not text")
+            # Tổng nợ may be a formula (Nợ cũ + Cộng) so it follows edits; its cached value must be a number.
+            # (Controller decision after QA finding B5.)
+            cached_nums = [v for (_, _, _, v, t) in xlsx_cells(open_xlsx_values(r.content)) if t == "n"]
+            check(5990000 in nums or 5990000 in cached_nums, "Tổng nợ 5.990.000 is a numeric cell or a formula with numeric cached value, not text")
             check("2.000.000" in txt or 2000000 in nums, "Nợ cũ value present")
-            check("5.990.000" in txt or 5990000 in nums, "Tổng nợ value present")
+            check("5.990.000" in txt or 5990000 in nums or 5990000 in cached_nums, "Tổng nợ value present")
         else:
             dd = docx_basic_checks(r.content, "slip.docx")
             if not dd:

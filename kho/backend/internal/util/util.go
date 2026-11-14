@@ -25,12 +25,20 @@ func init() {
 const DateLayout = "2006-01-02"
 
 // Date là một ngày (không có giờ), JSON dạng "YYYY-MM-DD".
-type Date struct{ time.Time }
+// Giá trị rỗng (Date{}) nghĩa là "không nhập"; mọi ngày đã nhập — kể cả 0001-01-01 — đều có set = true,
+// nên không bao giờ bị thay bằng ngày mặc định.
+type Date struct {
+	time.Time
+	set bool
+}
 
 // NewDate tạo Date từ năm/tháng/ngày.
 func NewDate(y int, m time.Month, d int) Date {
-	return Date{time.Date(y, m, d, 0, 0, 0, 0, time.UTC)}
+	return Date{time.Date(y, m, d, 0, 0, 0, 0, time.UTC), true}
 }
+
+// Empty cho biết ngày không được nhập.
+func (d Date) Empty() bool { return !d.set }
 
 // Today trả về ngày hôm nay theo giờ Việt Nam (UTC+7).
 func Today() Date {
@@ -45,10 +53,10 @@ var VNZone = time.FixedZone("ICT", 7*3600)
 func ParseDate(s string) (Date, error) {
 	s = strings.TrimSpace(s)
 	if t, err := time.Parse(DateLayout, s); err == nil {
-		return Date{t}, nil
+		return Date{t, true}, nil
 	}
 	if t, err := time.Parse("02/01/2006", s); err == nil {
-		return Date{t}, nil
+		return Date{t, true}, nil
 	}
 	return Date{}, fmt.Errorf("ngày không hợp lệ: %q (định dạng YYYY-MM-DD)", s)
 }
@@ -61,7 +69,7 @@ func (d Date) VN() string { return d.Format("02/01/2006") }
 
 // MarshalJSON ghi ngày dạng chuỗi.
 func (d Date) MarshalJSON() ([]byte, error) {
-	if d.IsZero() {
+	if d.Empty() {
 		return []byte("null"), nil
 	}
 	return json.Marshal(d.String())
@@ -110,7 +118,7 @@ func (d *Date) Scan(src any) error {
 
 // Value ghi giá trị DATE vào PostgreSQL.
 func (d Date) Value() (driver.Value, error) {
-	if d.IsZero() {
+	if d.Empty() {
 		return nil, nil
 	}
 	return d.String(), nil

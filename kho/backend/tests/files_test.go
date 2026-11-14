@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"io"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -112,4 +113,29 @@ func docxCellTexts(xml string) [][]string {
 		rows = append(rows, cells)
 	}
 	return rows
+}
+
+// checkNumericFormulas kiểm tra trong sheet đầu tiên: mỗi ô công thức chứa chuỗi khóa có kết quả lưu sẵn là SỐ
+// (không có t="str") đúng bằng giá trị mong đợi. Trình xem không tính lại công thức vẫn hiện đúng con số.
+func checkNumericFormulas(t *testing.T, xlsx []byte, want map[string]string) {
+	t.Helper()
+	sheet := zipFiles(t, xlsx)["xl/worksheets/sheet1.xml"]
+	re := regexp.MustCompile(`<c r="([A-Z]+[0-9]+)"([^>]*)><f>([^<]*)</f><v>([^<]*)</v></c>`)
+	found := map[string]bool{}
+	for _, m := range re.FindAllStringSubmatch(sheet, -1) {
+		attrs, formula, cached := m[2], m[3], m[4]
+		if strings.Contains(attrs, `t="str"`) || strings.Contains(attrs, `t="s"`) {
+			t.Fatalf("ô công thức %s (%s) có kết quả lưu dạng chuỗi: %s", m[1], formula, m[0])
+		}
+		for k, v := range want {
+			if strings.Contains(formula, k) && cached == v {
+				found[k] = true
+			}
+		}
+	}
+	for k, v := range want {
+		if !found[k] {
+			t.Fatalf("không thấy ô công thức chứa %q với kết quả số %s:\n%s", k, v, sheet)
+		}
+	}
 }

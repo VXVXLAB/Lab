@@ -11,7 +11,8 @@ Mọi ví dụ JSON lấy từ phản hồi thật của server (dữ liệu m�
 | Định dạng | Request/response `application/json; charset=utf-8`. Body tối đa 5 MB. Trường lạ trong body bị bỏ qua. |
 | Xác thực | Cookie `session` (HttpOnly, SameSite=Lax, 30 ngày) do `POST /api/auth/login` đặt. Trình duyệt tự gửi; dùng `fetch(..., {credentials: "include"})` nếu khác origin. Cũng chấp nhận header `Authorization: Bearer <token>` (chỉ dùng cho công cụ, token chính là giá trị cookie). Thiếu/hết hạn ⇒ `401 UNAUTHORIZED`. |
 | Số | Tiền, đơn giá, số lượng trả về là **JSON number** (`3990000`, `100.5`). Gửi lên có thể là number hoặc chuỗi số (`"100.5"`). SL lưu 3 chữ số thập phân, đơn giá/tiền 2 chữ số; `amount = round(qty × unit_price, 0)` (đồng). |
-| Ngày | `doc_date`, `from`, `to`, `as_of`… dạng `"YYYY-MM-DD"` (server cũng nhận `"DD/MM/YYYY"`). Thời điểm (`created_at`, `posted_at`…) là RFC 3339 UTC, ví dụ `"2026-11-14T13:58:09.257103Z"` — frontend đổi sang giờ VN khi hiển thị. "Hôm nay" phía server tính theo giờ Việt Nam (UTC+7). |
+| Ký tự NUL | Mọi chuỗi trong body JSON (`\u0000`) và mọi tham số truy vấn (`%00`) có ký tự NUL ⇒ `400 VALIDATION` "Dữ liệu không được chứa ký tự NUL…". |
+| Ngày | `doc_date`, `from`, `to`, `as_of`… dạng `"YYYY-MM-DD"` (server cũng nhận `"DD/MM/YYYY"`). Ngày **đã gửi** không bao giờ bị thay bằng ngày mặc định: chỉ khi bỏ trường / `null` / `""` mới dùng mặc định. Ngày chứng từ / phiếu thu chi phải trong năm 2000–2100 (ngoài khoảng ⇒ 400); tham số lọc báo cáo nhận mọi ngày hợp lệ (vd. `as_of=0001-01-01` ⇒ tồn 0, `from=0001-01-01` ⇒ từ đầu). Thời điểm (`created_at`, `posted_at`…) là RFC 3339 UTC, ví dụ `"2026-11-14T13:58:09.257103Z"` — frontend đổi sang giờ VN khi hiển thị. "Hôm nay" phía server tính theo giờ Việt Nam (UTC+7). |
 | Danh sách phân trang | `{"items":[…],"total":n,"page":p,"page_size":s}`. Tham số `page` (mặc định 1), `page_size` (mặc định 50; tối đa 1000 với danh mục, 500 với chứng từ/phiếu thu chi). |
 | Tham số bool | `true/false` (hoặc `1/0`). `active=all` hoặc bỏ trống = không lọc. |
 | Tìm kiếm `q` | Mặt hàng/đối tác: **không phân biệt hoa thường và dấu** (`que han` khớp "Que hàn", `dong` khớp "Đông"). |
@@ -34,7 +35,7 @@ Mọi lỗi có dạng:
 | 405 | `VALIDATION` | Sai phương thức HTTP | — |
 | 409 | `VERSION_CONFLICT` | `version` gửi lên khác version hiện tại (máy khác đã sửa) | `{"updated_by": "Nguyễn Thị Lan (Máy 1)", "updated_at": "2026-11-14T13:58:09Z", "current_version": 3}` |
 | 409 | `LOSS_WARNING` | Ghi sổ / sửa phiếu bán đã ghi sổ có dòng bán dưới giá vốn mà chưa gửi `confirm_loss: true` | mảng `Warning` (xem §3.1) |
-| 409 | `IN_USE` | Xóa danh mục đã phát sinh chứng từ / mã DV | — |
+| 409 | `IN_USE` | Xóa danh mục đã phát sinh chứng từ / mã DV; xóa phiếu tạm đang được phiếu thu/chi tham chiếu | với phiếu: `{"voucher_nos": ["PT00001", …]}` |
 | 422 | `INSUFFICIENT_STOCK` | Ghi sổ / sửa / bỏ ghi sổ làm tồn cuối ngày của một (mặt hàng, kho) < 0 | mảng `Shortage` (xem §3.1) |
 | 500 | `INTERNAL` | Lỗi hệ thống (không bao giờ do người dùng nhập sai) | — |
 
@@ -88,6 +89,7 @@ Năm danh mục có cùng bộ CRUD:
 - Mã (`code`) duy nhất, không phân biệt hoa thường; trùng ⇒ `400 VALIDATION` với `details.field = "code"`.
 - Mọi thay đổi phát sự kiện SSE `catalog.changed`.
 - Mục `active:false` không dùng được cho **phiếu mới** (400), nhưng phiếu cũ đang dùng vẫn sửa được.
+- `q` của mọi danh mục (kho, nhóm VTHH, mặt hàng, đối tác, tài khoản tiền) **không phân biệt hoa thường và dấu** (`binh duong` khớp "Kho Bình Dương").
 
 ### 2.1 Kho, nhóm VTHH
 ```json
@@ -214,7 +216,7 @@ Phải có ít nhất một trong `is_customer`/`is_supplier`. `opening_receivab
 Với thao tác sửa lùi phiếu nhập (giảm SL nhập, đổi kho, dời ngày, bỏ ghi sổ) `required` có thể = 0 và `available` âm — hãy hiển thị `message`.
 
 ### 3.2 `GET /api/documents`
-Tham số: `type` (một hoặc nhiều, cách bằng dấu phẩy: `type=sale,sale_return`), `status=draft|posted`, `partner_id`, `warehouse_id` (khớp kho xuất **hoặc** kho nhận), `product_id` (phiếu có dòng mã này), `q` (số phiếu, số tạm, tên/mã đối tác không dấu, ghi chú), `from`, `to`, `page`, `page_size`. Sắp xếp `doc_date` giảm dần, rồi `id` giảm dần.
+Tham số: `type` (một hoặc nhiều, cách bằng dấu phẩy: `type=sale,sale_return`), `status=draft|posted`, `partner_id`, `warehouse_id` (khớp kho xuất **hoặc** kho nhận), `product_id` (phiếu có dòng mã này), `q` (số phiếu, số tạm, tên/mã đối tác, ghi chú — tên và ghi chú không phân biệt dấu), `from`, `to`, `page`, `page_size`. Sắp xếp `doc_date` giảm dần, rồi `id` giảm dần.
 ```json
 {"items": [{
   "id": 24, "doc_type": "sale", "doc_type_name": "Phiếu bán hàng", "doc_no": "XK00012", "draft_no": "TAM000024", "display_no": "XK00012",
@@ -248,11 +250,11 @@ Máy 2 xem "phiếu tạm đang treo": `GET /api/documents?status=draft` (REQ-04
 → `201 Document` (status `draft`, version 1, kèm `warnings`).
 Quy tắc dòng:
 - Chọn mặt hàng bằng `product_id` **hoặc** `product_code` (tra chính xác như `/products/lookup`, `DICHVU` ⇒ `DV`).
-- **Hàng hóa**: `qty > 0` bắt buộc; `unit_price ≥ 0`; **bỏ trống `unit_price` ⇒ server tự điền giá mặc định** (`sale`/`sale_return`: `sale_price`; `purchase`/`purchase_return`/`opening`: `purchase_price`; `transfer`: để `null`). Gửi giá khác ⇒ giữ giá gửi (sửa giá khi bán, REQ-027).
+- **Hàng hóa**: `qty > 0` bắt buộc (sau khi làm tròn 3 chữ số; `0.0004` ⇒ 400); `unit_price ≥ 0`; **bỏ trống `unit_price` ⇒ server tự điền giá mặc định** (`sale`/`sale_return`: `sale_price`; `purchase`/`purchase_return`/`opening`: `purchase_price`; `transfer`: để `null`). Gửi giá khác ⇒ giữ giá gửi (sửa giá khi bán, REQ-027).
 - **Dịch vụ** (`is_service`, mã `DV`): `description` tự do; `qty` mặc định 1; `unit_price` dương (cộng), âm (trừ) hoặc `null` (dòng ghi chú, `amount = 0`). Không có ở `transfer`/`opening`. Không ảnh hưởng tồn, không cảnh báo lỗ.
 - `unit` bỏ trống ⇒ ĐVT của mặt hàng. `note` mỗi dòng tùy chọn.
 - `doc_date` bỏ trống ⇒ hôm nay. Phiếu tạm được phép không có dòng nào và được chứa hàng chưa có tồn (REQ-041).
-- `partner_id` phải là KH với `sale`/`sale_return`, NCC với `purchase`/`purchase_return`; `transfer`/`opening` không được có `partner_id`. `transfer` cần `to_warehouse_id ≠ warehouse_id`.
+- `partner_id` phải là KH với `sale`/`sale_return`, NCC với `purchase`/`purchase_return` — kiểm tra khi **đặt hoặc đổi** đối tác; phiếu cũ giữ nguyên đối tác vẫn sửa/ghi sổ được dù sau đó đối tác đã đổi cờ KH/NCC; `transfer`/`opening` không được có `partner_id`. `transfer` cần `to_warehouse_id ≠ warehouse_id`.
 - Lỗi dòng: `400` với `details: {"line_no": n, "field": "qty"|"unit_price"|"product_id"|"product_code"}`.
 
 ### 3.4 `PUT /api/documents/{id}` — sửa (phiếu tạm **hoặc** đã ghi sổ)
@@ -272,6 +274,7 @@ Body `{"version": 4}` → `200 Document` (về `draft`, giữ `doc_no` để ghi
 
 ### 3.7 `DELETE /api/documents/{id}?version=5`
 Chỉ phiếu tạm (đã ghi sổ ⇒ 400, hãy bỏ ghi sổ trước). `version` tùy chọn (khuyên gửi; sai ⇒ 409). → `{"ok":true,"id":28}`.
+Phiếu đang được dòng phiếu thu/chi tham chiếu (`document_id`) ⇒ `409 IN_USE`, message nêu số phiếu, `details: {"voucher_nos": ["PT00003"]}` — sửa phiếu thu/chi bỏ liên kết trước. (Bỏ ghi sổ phiếu được tham chiếu vẫn cho phép.)
 
 ### 3.8 `GET /api/documents/{id}/check`
 Kiểm tra nếu ghi sổ (hoặc lưu lại) ngay bây giờ, **không đổi dữ liệu**:
@@ -282,7 +285,8 @@ Kiểm tra nếu ghi sổ (hoặc lưu lại) ngay bây giờ, **không đổi d
 
 ### 3.9 `GET /api/documents/{id}/export?format=xlsx|docx`
 File phiếu (mặc định `xlsx`). Phiếu tạm: tiêu đề **"PHIẾU TẠM (chưa ghi sổ)"**, tên file `PHIEU_TAM_TAM000025.xlsx`. Đã ghi sổ: tiêu đề theo loại (`PHIẾU XUẤT KHO BÁN HÀNG`, `PHIẾU NHẬP KHO MUA HÀNG`, `PHIẾU NHẬP HÀNG BÁN BỊ TRẢ LẠI`, `PHIẾU XUẤT TRẢ HÀNG NHÀ CUNG CẤP`, `PHIẾU CHUYỂN KHO NỘI BỘ`, `PHIẾU NHẬP TỒN ĐẦU KỲ`), tên file `XK00008.xlsx`.
-Nội dung: thông tin phiếu, bảng `STT | Mã hàng | Tên hàng | ĐVT | Số lượng | Đơn giá | Thành tiền | Ghi chú`, dòng `Cộng` (Excel: công thức `SUM`), "Nợ cũ: …", "Tổng nợ (đến ngày dd/mm/yyyy): …" (phiếu bán/mua), ô ký tên. Dòng dịch vụ: cột Tên hàng = diễn giải. File không khóa, không ảnh ⇒ người dùng thêm/bớt dòng cột được.
+Nội dung: thông tin phiếu, bảng `STT | Mã hàng | Tên hàng | ĐVT | Số lượng | Đơn giá | Thành tiền | Ghi chú`, dòng `Cộng`, rồi (phiếu bán/mua) "Nợ cũ:" và "Tổng nợ (đến ngày dd/mm/yyyy):", ô ký tên.
+Excel: số là ô số thật; ô Cộng = công thức `SUM(...)`; "Nợ cũ:" và "Tổng nợ …:" là ô nhãn (cột C) + **ô số riêng** (cột Thành tiền); ô Tổng nợ = công thức `Nợ cũ + Cộng`. Mọi ô công thức có **kết quả lưu sẵn dạng số** (trình xem không tính lại vẫn hiện đúng). Đơn giá/tiền có số lẻ hiển thị số lẻ (`#,##0.0#`), số chẵn hiển thị `#,##0`. Word: "Nợ cũ: 2.000.000", "Tổng nợ (đến ngày …): 5.990.000". Dòng dịch vụ: cột Tên hàng = diễn giải. File không khóa, không ảnh ⇒ người dùng thêm/bớt dòng cột được.
 Phiếu chính thức chỉ in được khi đã ghi sổ ⇒ hết tồn thì không ghi sổ ⇒ không có phiếu chính thức (REQ-031/032).
 
 ### 3.10 `GET /api/documents/{id}/history`
@@ -300,12 +304,23 @@ Phiếu chính thức chỉ in được khi đã ghi sổ ⇒ hết tồn thì k
 
 Phiếu thu/chi **có hiệu lực ngay khi lưu** (không có trạng thái tạm), sửa/xóa được, có `version`.
 Số phiếu: thu tiền mặt `PT00001`, chi tiền mặt `PC…`, thu ngân hàng `BC…`, chi ngân hàng `BN…` (theo `kind` của tài khoản). Sửa đổi thu↔chi hoặc tiền mặt↔ngân hàng ⇒ cấp số mới theo dãy mới.
-Thu (`receipt`) làm **giảm phải thu** của đối tác; chi (`payment`) làm **giảm phải trả**. `partner_id` có thể `null` (thu/chi khác).
+`partner_id` có thể `null` (thu/chi khác — không vào công nợ).
+
+**Phía công nợ `debt_side`** (`"receivable"` | `"payable"`, lưu trên phiếu, luôn trả về):
+
+| voucher_type | debt_side | Tác động |
+|---|---|---|
+| `receipt` | `receivable` | **giảm** phải thu (khách trả tiền — thông thường) |
+| `receipt` | `payable` | **tăng** phải trả (NCC hoàn tiền cho mình, bù số phải trả âm) |
+| `payment` | `payable` | **giảm** phải trả (trả tiền NCC — thông thường) |
+| `payment` | `receivable` | **tăng** phải thu (mình trả lại tiền cho khách) |
+
+Bỏ trống `debt_side` (khi tạo **và** khi sửa) ⇒ mặc định: `receipt` → `receivable`, `payment` → `payable`; **trừ khi** đối tác chỉ là NCC (phiếu thu → `payable`) hoặc chỉ là KH (phiếu chi → `receivable`). Giá trị khác ⇒ 400. Sổ công nợ, tổng hợp, "Nợ cũ", dashboard, file xuất đều theo quy tắc này.
 
 **Voucher**:
 ```json
 {
-  "id": 1, "voucher_type": "receipt", "voucher_type_name": "Phiếu thu tiền mặt", "voucher_no": "PT00001", "voucher_date": "2026-04-20",
+  "id": 1, "voucher_type": "receipt", "voucher_type_name": "Phiếu thu tiền mặt", "voucher_no": "PT00001", "voucher_date": "2026-04-20", "debt_side": "receivable",
   "account_id": 1, "account_code": "TM", "account_name": "Quỹ tiền mặt", "account_kind": "cash",
   "partner_id": 1, "partner_code": "VINHPHONG", "partner_name": "CTY TNHH TM DV VĨNH PHONG", "partner_address": "123 Lũy Bán Bích, …",
   "note": "Thu nợ tháng 4", "total_amount": 8460000, "version": 1,
@@ -320,17 +335,17 @@ Thu (`receipt`) làm **giảm phải thu** của đối tác; chi (`payment`) l�
 `voucher_type_name`: "Phiếu thu tiền mặt" | "Phiếu chi tiền mặt" | "Thu tiền ngân hàng (giấy báo có)" | "Chi tiền ngân hàng (giấy báo nợ)".
 
 - `GET /api/vouchers?type=receipt|payment&account_id=&partner_id=&from=&to=&q=&page=&page_size=` → phân trang `Summary`:
-  `{"id","voucher_type","voucher_type_name","voucher_no","voucher_date","account_id","account_name","account_kind","partner_id","partner_name","note","total_amount","line_count","version","updated_by_name","updated_at"}`. `q` tìm số phiếu, đối tác (không dấu), ghi chú, diễn giải dòng.
+  `{"id","voucher_type","voucher_type_name","voucher_no","voucher_date","debt_side","account_id","account_name","account_kind","partner_id","partner_name","note","total_amount","line_count","version","updated_by_name","updated_at"}`. `q` tìm số phiếu, đối tác, ghi chú, diễn giải dòng (không phân biệt dấu).
 - `POST /api/vouchers` body:
   ```json
-  {"voucher_type": "receipt", "voucher_date": "2026-04-20", "account_id": 1, "partner_id": 1, "note": "Thu nợ tháng 4",
+  {"voucher_type": "receipt", "voucher_date": "2026-04-20", "account_id": 1, "partner_id": 1, "debt_side": "receivable", "note": "Thu nợ tháng 4",
    "lines": [{"description": "Thu nợ cũ", "amount": 2000000}, {"description": "Thu tiền XK00002", "amount": 4000000, "document_id": 13}]}
   ```
-  → `201 Voucher`. Ít nhất 1 dòng, `amount > 0` mỗi dòng; `document_id` (tùy chọn) phải tồn tại và cùng đối tác. `voucher_date` trống ⇒ hôm nay.
+  → `201 Voucher`. Ít nhất 1 dòng, `amount > 0` mỗi dòng **sau khi làm tròn 2 chữ số** (`0.001` ⇒ 400; `0.005` ⇒ 0,01); `document_id` (tùy chọn) phải tồn tại và cùng đối tác. `voucher_date` trống ⇒ hôm nay.
 - `GET /api/vouchers/{id}` → `Voucher`.
 - `PUT /api/vouchers/{id}` body như POST + `version` (bắt buộc) → `Voucher`; version cũ ⇒ `409 VERSION_CONFLICT`.
 - `DELETE /api/vouchers/{id}?version=` → `{"ok":true,"id":…}`.
-- `GET /api/vouchers/{id}/export?format=xlsx|docx` → "PHIẾU THU" / "PHIẾU CHI" / "GIẤY BÁO CÓ (THU QUA NGÂN HÀNG)" / "GIẤY BÁO NỢ (CHI QUA NGÂN HÀNG)", bảng `STT | Diễn giải | Chứng từ liên quan | Số tiền`.
+- `GET /api/vouchers/{id}/export?format=xlsx|docx` → "PHIẾU THU" / "PHIẾU CHI" / "GIẤY BÁO CÓ (THU QUA NGÂN HÀNG)" / "GIẤY BÁO NỢ (CHI QUA NGÂN HÀNG)", bảng `STT | Diễn giải | Chứng từ liên quan | Số tiền`, dòng Cộng (`SUM`), "Tổng số tiền (đồng):" + ô số (công thức = ô Cộng).
 - `GET /api/vouchers/{id}/history` → như §3.10.
 
 ---
@@ -342,6 +357,7 @@ Tất cả nhận `format=xlsx` (hoặc `docx`) để tải file cùng dữ li�
 dòng chứng từ ⇒ `GET /api/documents/{document_id}`; dòng phiếu thu chi ⇒ `GET /api/vouchers/{voucher_id}`;
 dòng mã hàng ⇒ thẻ kho `stock-ledger?product_id=`; dòng đối tác ⇒ `debt-ledger?partner_id=`.
 Chỉ chứng từ **đã ghi sổ** được tính (trừ `draft-demand`). `to < from` ⇒ 400.
+Excel báo cáo: dòng Cộng của các cột cộng dồn được (SL theo kho, nhập/xuất, tăng/giảm, thu/chi, thành tiền) là công thức `SUM` có kết quả lưu sẵn dạng số.
 
 ### 5.1 `GET /api/reports/stock-summary` — tồn kho (tổng 4 kho + từng kho)
 Tham số: `as_of` (mặc định hôm nay; tồn đến hết ngày), `warehouse_id` (chỉ 1 kho), `group_id`, `q`, `only_with_data` (mặc định `true`: chỉ mã đã từng có phát sinh đến `as_of`; `false`: thêm mọi mã hàng hóa đang dùng, kể cả tồn 0). Mã dịch vụ không bao giờ có.
@@ -415,7 +431,8 @@ Dòng hàng hóa có `description` = tên hàng nếu dòng không có diễn gi
 
 ### 5.5 `GET /api/reports/debt-summary` — tổng hợp công nợ
 Tham số: `side=receivable` (phải thu KH, mặc định) | `payable` (phải trả NCC), `from`, `to` (tùy chọn), `q`, `include_zero` (mặc định `false`: bỏ đối tác toàn số 0).
-- Phải thu = `opening_receivable` + bán − khách trả hàng − phiếu thu. Phải trả = `opening_payable` + mua − trả hàng NCC − phiếu chi.
+- Phải thu = `opening_receivable` + bán − khách trả hàng − phiếu thu (`debt_side=receivable`) + phiếu chi trả lại tiền khách (`debt_side=receivable`).
+- Phải trả = `opening_payable` + mua − trả hàng NCC − phiếu chi (`debt_side=payable`) + phiếu thu NCC hoàn tiền (`debt_side=payable`).
 - `opening` = số dư trước `from` (không có `from` ⇒ số dư đầu kỳ khai báo ở danh mục); `increase`/`decrease` trong `[from, to]`; `closing = opening + increase − decrease`.
 ```json
 {
@@ -447,7 +464,7 @@ Tham số: `partner_id` (bắt buộc), `side` (mặc định `receivable`), `fr
   "total_increase": …, "total_decrease": …, "closing": 3380000
 }
 ```
-`ref_type`: `sale | sale_return | purchase | purchase_return | receipt | payment`. Đúng một trong `document_id`/`voucher_id` khác `null`. Sắp theo ngày, rồi thứ tự ghi sổ/lập phiếu.
+`ref_type`: `sale | sale_return | purchase | purchase_return | receipt | payment`. Phiếu ở phía "ngược" (phiếu chi trên sổ phải thu, phiếu thu trên sổ phải trả) nằm bên `increase`, diễn giải có "(trả lại tiền khách)" / "(nhà cung cấp hoàn tiền)". Đúng một trong `document_id`/`voucher_id` khác `null`. Sắp theo ngày, rồi thứ tự ghi sổ/lập phiếu.
 
 ### 5.7 `GET /api/reports/cash-book` — sổ quỹ / sổ ngân hàng
 Tham số: `account_id` (bỏ ⇒ gộp mọi tài khoản), `kind=cash|bank` (lọc khi không chọn tài khoản), `from`, `to`. Mỗi **dòng tiền** của phiếu là một dòng sổ.

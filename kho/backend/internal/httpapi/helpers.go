@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -53,9 +54,47 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 
 const maxBody = 5 << 20
 
+// errNUL là lỗi khi dữ liệu nhập có ký tự NUL (PostgreSQL không lưu được ký tự này trong TEXT).
+func errNUL(field string) error {
+	return apperr.ValidationField(field, "Dữ liệu không được chứa ký tự NUL (\\0). Vui lòng xóa ký tự lạ rồi nhập lại.")
+}
+
+// hasJSONNul cho biết body JSON có ký tự NUL (byte 0 hoặc chuỗi thoát \u0000 không bị thoát lại).
+func hasJSONNul(b []byte) bool {
+	if bytes.IndexByte(b, 0) >= 0 {
+		return true
+	}
+	for i := 0; ; {
+		j := bytes.Index(b[i:], []byte(`u0000`))
+		if j < 0 {
+			return false
+		}
+		k := i + j // vị trí 'u'
+		// Đếm số dấu \ liền trước: lẻ ⇒ là chuỗi thoát \u0000.
+		n := 0
+		for m := k - 1; m >= 0 && b[m] == '\\'; m-- {
+			n++
+		}
+		if n%2 == 1 {
+			return true
+		}
+		i = k + 1
+	}
+}
+
 func decode(r *http.Request, v any) error {
-	body := http.MaxBytesReader(nil, r.Body, maxBody)
-	dec := json.NewDecoder(body)
+	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxBody))
+	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			return apperr.Validation("Dữ liệu gửi lên quá lớn")
+		}
+		return apperr.Validation("Không đọc được dữ liệu gửi lên")
+	}
+	if hasJSONNul(raw) {
+		return errNUL("")
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	if err := dec.Decode(v); err != nil {
 		if errors.Is(err, io.EOF) {
@@ -204,4 +243,27 @@ func asciiName(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// rejectNUL chặn tham số truy vấn có ký tự NUL (trả 400 thay vì lỗi CSDL).
+func rejectNUL(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.ContainsRune(r.URL.Path, 0) {
+			writeErr(w, r, errNUL(""))
+			return
+		}
+		for k, vs := range r.URL.Query() {
+			if strings.ContainsRune(k, 0) {
+				writeErr(w, r, errNUL(""))
+				return
+			}
+			for _, v := range vs {
+				if strings.ContainsRune(v, 0) {
+					writeErr(w, r, errNUL(k))
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }

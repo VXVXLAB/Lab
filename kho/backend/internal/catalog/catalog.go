@@ -89,7 +89,7 @@ func deleteErr(err error, what string) error {
 func (s *Service) ListWarehouses(ctx context.Context, p util.ListParams) (util.Page[Warehouse], error) {
 	var w util.Where
 	if p.Q != "" {
-		w.Add(`(upper(code) LIKE upper(?) OR name ILIKE ?)`, "%"+p.Q+"%", "%"+p.Q+"%")
+		w.Add(`kho_fold(code || ' ' || name) LIKE ?`, util.LikePattern(p.Q))
 	}
 	if p.Active != nil {
 		w.Add(`active = ?`, *p.Active)
@@ -184,7 +184,7 @@ type GroupInput = WarehouseInput
 func (s *Service) ListGroups(ctx context.Context, p util.ListParams) (util.Page[ProductGroup], error) {
 	var w util.Where
 	if p.Q != "" {
-		w.Add(`(upper(code) LIKE upper(?) OR name ILIKE ?)`, "%"+p.Q+"%", "%"+p.Q+"%")
+		w.Add(`kho_fold(code || ' ' || name) LIKE ?`, util.LikePattern(p.Q))
 	}
 	if p.Active != nil {
 		w.Add(`active = ?`, *p.Active)
@@ -625,7 +625,7 @@ type CashAccountInput struct {
 func (s *Service) ListCashAccounts(ctx context.Context, p util.ListParams) (util.Page[CashAccount], error) {
 	var w util.Where
 	if p.Q != "" {
-		w.Add(`(upper(code) LIKE upper(?) OR name ILIKE ?)`, "%"+p.Q+"%", "%"+p.Q+"%")
+		w.Add(`kho_fold(code || ' ' || name) LIKE ?`, util.LikePattern(p.Q))
 	}
 	if p.Active != nil {
 		w.Add(`active = ?`, *p.Active)

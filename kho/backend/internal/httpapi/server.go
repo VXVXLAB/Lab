@@ -81,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	r.Use(middleware.Recoverer)
 
 	r.Route("/api", func(r chi.Router) {
+		r.Use(rejectNUL)
 		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			if err := s.Pool.Ping(r.Context()); err != nil {
 				writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false})

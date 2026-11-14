@@ -87,8 +87,11 @@ func DocumentTable(d *docs.Document) Table {
 	t.Footer = [][]any{{"Cộng", nil, nil, nil, nil, nil, d.TotalAmount, nil}}
 	t.SumColumns = []int{6}
 	if d.OldDebt != nil && d.TotalDebt != nil {
-		t.After = append(t.After, "Nợ cũ: "+util.FormatVND(*d.OldDebt))
-		t.After = append(t.After, "Tổng nợ (đến ngày "+d.DocDate.VN()+"): "+util.FormatVND(*d.TotalDebt))
+		// Nhãn và số ở hai ô; Tổng nợ = công thức (Nợ cũ + Cộng) để thêm dòng sau khi xuất vẫn tự đúng.
+		t.Summary = []SummaryRow{
+			{Label: "Nợ cũ:", Value: *d.OldDebt},
+			{Label: "Tổng nợ (đến ngày " + d.DocDate.VN() + "):", Value: *d.TotalDebt, Formula: "{s0}+{total}"},
+		}
 	}
 	switch d.DocType {
 	case docs.TypeSale:
@@ -126,7 +129,7 @@ func VoucherTable(v *cash.Voucher) Table {
 	}
 	t.Footer = [][]any{{"Cộng", nil, nil, v.TotalAmount}}
 	t.SumColumns = []int{3}
-	t.After = []string{"Tổng số tiền: " + util.FormatVND(v.TotalAmount) + " đồng"}
+	t.Summary = []SummaryRow{{Label: "Tổng số tiền (đồng):", Value: v.TotalAmount, Formula: "{total}"}}
 	if v.VoucherType == cash.TypeReceipt {
 		t.Signatures = []string{"Người lập phiếu", "Người nộp tiền", "Thủ quỹ"}
 	} else {
@@ -169,6 +172,9 @@ func StockSummaryTable(r *reports.StockSummary) Table {
 	}
 	foot = append(foot, r.TotalQty)
 	t.Footer = [][]any{foot}
+	for i := 5; i < len(t.Columns); i++ {
+		t.SumColumns = append(t.SumColumns, i)
+	}
 	return t
 }
 
@@ -181,6 +187,7 @@ func NXTTable(r *reports.NXT, warehouseName string) Table {
 		t.Rows = append(t.Rows, []any{i + 1, it.Code, it.Name, it.Unit, str(it.GroupName), it.Opening, it.QtyIn, it.QtyOut, it.Closing})
 	}
 	t.Footer = [][]any{{"Cộng", nil, nil, nil, nil, r.Totals.Opening, r.Totals.QtyIn, r.Totals.QtyOut, r.Totals.Closing}}
+	t.SumColumns = []int{5, 6, 7, 8}
 	return t
 }
 
@@ -202,6 +209,7 @@ func LedgerTable(r *reports.Ledger, warehouseName string) Table {
 		t.Rows = append(t.Rows, []any{x.ProductCode, x.Date, x.DocNo, x.Description, x.Unit, in, out, x.Balance})
 	}
 	t.Footer = [][]any{{"Cộng", nil, nil, nil, nil, r.TotalIn, r.TotalOut, r.Closing}}
+	t.SumColumns = []int{5, 6}
 	return t
 }
 
@@ -226,6 +234,7 @@ func TradeTable(r *reports.Trade) Table {
 		t.Rows = append(t.Rows, []any{x.Date, x.DocNo, str(x.PartnerName), x.ProductCode, name, x.Unit, x.Qty, x.UnitPrice, amt})
 	}
 	t.Footer = [][]any{{"Cộng", nil, fmt.Sprintf("%d phiếu", r.DocCount), nil, nil, nil, r.TotalQty, nil, r.TotalAmount}}
+	t.SumColumns = []int{8} // cột SL gồm cả dòng dịch vụ nên tổng SL (chỉ hàng hóa) giữ dạng số
 	return t
 }
 
@@ -242,6 +251,7 @@ func DebtSummaryTable(r *reports.DebtSummary) Table {
 		t.Rows = append(t.Rows, []any{i + 1, x.PartnerCode, x.PartnerName, x.Phone, x.Opening, x.Increase, x.Decrease, x.Closing})
 	}
 	t.Footer = [][]any{{"Cộng", nil, nil, nil, r.Totals.Opening, r.Totals.Increase, r.Totals.Decrease, r.Totals.Closing}}
+	t.SumColumns = []int{4, 5, 6, 7}
 	return t
 }
 
@@ -265,6 +275,7 @@ func DebtLedgerTable(r *reports.DebtLedger) Table {
 		t.Rows = append(t.Rows, []any{x.Date, x.RefNo, x.Description, inc, dec, x.Balance})
 	}
 	t.Footer = [][]any{{"Cộng", nil, nil, r.TotalIncrease, r.TotalDecrease, r.Closing}}
+	t.SumColumns = []int{3, 4}
 	return t
 }
 
@@ -284,6 +295,7 @@ func CashBookTable(r *reports.CashBook) Table {
 		t.Rows = append(t.Rows, []any{x.Date, x.VoucherNo, str(x.PartnerName), x.Description, rc, pm, x.Balance})
 	}
 	t.Footer = [][]any{{"Cộng", nil, nil, nil, r.TotalReceipt, r.TotalPayment, r.Closing}}
+	t.SumColumns = []int{4, 5}
 	return t
 }
 

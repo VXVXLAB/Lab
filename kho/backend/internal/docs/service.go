@@ -59,12 +59,14 @@ func lineErr(i int, field, msg string) error {
 // validate kiểm tra & chuẩn hóa dữ liệu nhập.
 // strict = true (tạo phiếu mới): không cho dùng kho / đối tác / mặt hàng đã ngừng sử dụng.
 // Khi sửa phiếu cũ thì cho phép (dữ liệu cũ có thể tham chiếu mục đã ngừng).
-func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool) (header, []pline, error) {
+// oldPartner: đối tác hiện có trên phiếu (khi sửa / ghi sổ). Nếu phiếu giữ nguyên đối tác này thì không kiểm tra
+// lại cờ Khách hàng / Nhà cung cấp (đối tác có thể đã đổi cờ sau khi phát sinh) — chỉ kiểm khi đặt / đổi đối tác.
+func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, oldPartner *int64) (header, []pline, error) {
 	h := header{DocType: in.DocType, DocDate: in.DocDate, PartnerID: in.PartnerID, WarehouseID: in.WarehouseID, ToWarehouseID: in.ToWarehouseID, Note: strings.TrimSpace(in.Note)}
 	if _, ok := TypeNames[h.DocType]; !ok {
 		return h, nil, apperr.ValidationField("doc_type", "Loại chứng từ không hợp lệ (purchase, sale, sale_return, purchase_return, transfer, opening)")
 	}
-	if h.DocDate.IsZero() {
+	if h.DocDate.Empty() {
 		h.DocDate = util.Today()
 	}
 	if h.DocDate.Year() < 2000 || h.DocDate.Year() > 2100 {
@@ -124,10 +126,11 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool) (
 		if strict && !p.Active {
 			return h, nil, apperr.ValidationField("partner_id", "Đối tác "+p.Name+" đã ngừng sử dụng")
 		}
-		if needsCustomer(h.DocType) && !p.IsCustomer {
+		unchanged := oldPartner != nil && *oldPartner == p.ID
+		if needsCustomer(h.DocType) && !p.IsCustomer && !unchanged {
 			return h, nil, apperr.ValidationField("partner_id", "Đối tác "+p.Name+" không phải là khách hàng")
 		}
-		if needsSupplier(h.DocType) && !p.IsSupplier {
+		if needsSupplier(h.DocType) && !p.IsSupplier && !unchanged {
 			return h, nil, apperr.ValidationField("partner_id", "Đối tác "+p.Name+" không phải là nhà cung cấp")
 		}
 	}
@@ -411,7 +414,7 @@ func checkVersion(r *lockedRow, version int) error {
 func (s *Service) Create(ctx context.Context, userID int64, in Input) (*Document, error) {
 	var id int64
 	err := db.InTx(ctx, s.Pool, func(tx pgx.Tx) error {
-		h, lines, err := s.validate(ctx, tx, in, true)
+		h, lines, err := s.validate(ctx, tx, in, true, nil)
 		if err != nil {
 			return err
 		}
@@ -461,7 +464,7 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Docu
 		if err != nil {
 			return err
 		}
-		h, lines, err := s.validate(ctx, tx, in, false)
+		h, lines, err := s.validate(ctx, tx, in, false, before.PartnerID)
 		if err != nil {
 			return err
 		}
@@ -540,7 +543,7 @@ func (s *Service) loadForPost(ctx context.Context, q db.Q, d *Document) (header,
 		}
 		in.Lines = append(in.Lines, li)
 	}
-	return s.validate(ctx, q, in, false)
+	return s.validate(ctx, q, in, false, d.PartnerID)
 }
 
 // Post ghi sổ phiếu tạm: cấp số chính thức, sinh bút toán kho, phát sinh công nợ (R5, R6).
@@ -687,8 +690,15 @@ func (s *Service) Delete(ctx context.Context, userID, id int64, version int) (*D
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE cash_voucher_lines SET document_id=NULL WHERE document_id=$1`, id); err != nil {
+		var refs []string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(array_agg(DISTINCT v.voucher_no ORDER BY v.voucher_no), '{}')
+			FROM cash_voucher_lines l JOIN cash_vouchers v ON v.id=l.voucher_id WHERE l.document_id=$1`, id).Scan(&refs); err != nil {
 			return err
+		}
+		if len(refs) > 0 {
+			return apperr.New(http.StatusConflict, apperr.CodeInUse,
+				"Phiếu đang được phiếu thu/chi "+strings.Join(refs, ", ")+" tham chiếu, không xóa được. Hãy sửa các phiếu thu/chi đó (bỏ liên kết chứng từ) trước.",
+				map[string]any{"voucher_nos": refs})
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM documents WHERE id=$1`, id); err != nil {
 			return err
@@ -843,8 +853,8 @@ func (s *Service) List(ctx context.Context, f Filter) (util.Page[Summary], error
 		w.Add(`d.doc_date <= ?`, *f.To)
 	}
 	if q := strings.TrimSpace(f.Q); q != "" {
-		w.Add(`(upper(COALESCE(d.doc_no,'')) LIKE upper(?) OR upper(d.draft_no) LIKE upper(?) OR COALESCE(p.search_key,'') LIKE ? OR d.note ILIKE ?)`,
-			"%"+q+"%", "%"+q+"%", util.LikePattern(q), "%"+q+"%")
+		w.Add(`(upper(COALESCE(d.doc_no,'')) LIKE upper(?) OR upper(d.draft_no) LIKE upper(?) OR COALESCE(p.search_key,'') LIKE ? OR kho_fold(d.note) LIKE ?)`,
+			"%"+q+"%", "%"+q+"%", util.LikePattern(q), util.LikePattern(q))
 	}
 	out := util.Page[Summary]{Page: f.Page, PageSize: f.PageSize, Items: []Summary{}}
 	from := ` FROM documents d LEFT JOIN partners p ON p.id=d.partner_id`

@@ -49,6 +49,7 @@ type Voucher struct {
 	VoucherTypeName string          `json:"voucher_type_name"`
 	VoucherNo       string          `json:"voucher_no"`
 	VoucherDate     util.Date       `json:"voucher_date"`
+	DebtSide        string          `json:"debt_side"`
 	AccountID       int64           `json:"account_id"`
 	AccountCode     string          `json:"account_code"`
 	AccountName     string          `json:"account_name"`
@@ -78,13 +79,31 @@ type LineInput struct {
 
 // Input là dữ liệu tạo/sửa phiếu.
 type Input struct {
-	VoucherType string      `json:"voucher_type"`
-	VoucherDate util.Date   `json:"voucher_date"`
-	AccountID   int64       `json:"account_id"`
-	PartnerID   *int64      `json:"partner_id"`
-	Note        string      `json:"note"`
-	Lines       []LineInput `json:"lines"`
-	Version     int         `json:"version"`
+	VoucherType string    `json:"voucher_type"`
+	VoucherDate util.Date `json:"voucher_date"`
+	AccountID   int64     `json:"account_id"`
+	PartnerID   *int64    `json:"partner_id"`
+	// DebtSide: "receivable" | "payable" | "" (mặc định — xem DefaultDebtSide).
+	DebtSide string      `json:"debt_side"`
+	Note     string      `json:"note"`
+	Lines    []LineInput `json:"lines"`
+	Version  int         `json:"version"`
+}
+
+// DefaultDebtSide trả phía công nợ mặc định khi không chỉ định: thu ⇒ phải thu, chi ⇒ phải trả;
+// riêng đối tác chỉ-là-NCC thì phiếu thu ⇒ phải trả (NCC hoàn tiền), đối tác chỉ-là-KH thì phiếu chi ⇒ phải thu
+// (trả lại tiền khách).
+func DefaultDebtSide(voucherType string, isCustomer, isSupplier bool, hasPartner bool) string {
+	if voucherType == TypeReceipt {
+		if hasPartner && isSupplier && !isCustomer {
+			return "payable"
+		}
+		return "receivable"
+	}
+	if hasPartner && isCustomer && !isSupplier {
+		return "receivable"
+	}
+	return "payable"
 }
 
 // TypeName trả tên phiếu theo loại phiếu và loại tài khoản.
@@ -125,7 +144,7 @@ func (s *Service) validate(ctx context.Context, q db.Q, in *Input) (*catalog.Cas
 	if in.VoucherType != TypeReceipt && in.VoucherType != TypePayment {
 		return nil, nil, apperr.ValidationField("voucher_type", "Loại phiếu phải là receipt (thu) hoặc payment (chi)")
 	}
-	if in.VoucherDate.IsZero() {
+	if in.VoucherDate.Empty() {
 		in.VoucherDate = util.Today()
 	}
 	if in.VoucherDate.Year() < 2000 || in.VoucherDate.Year() > 2100 {
@@ -141,10 +160,20 @@ func (s *Service) validate(ctx context.Context, q db.Q, in *Input) (*catalog.Cas
 	if in.PartnerID != nil && *in.PartnerID == 0 {
 		in.PartnerID = nil
 	}
+	var cus, sup bool
 	if in.PartnerID != nil {
-		if _, err := s.Catalog.GetPartner(ctx, q, *in.PartnerID); err != nil {
+		p, err := s.Catalog.GetPartner(ctx, q, *in.PartnerID)
+		if err != nil {
 			return nil, nil, apperr.ValidationField("partner_id", "Đối tác không tồn tại")
 		}
+		cus, sup = p.IsCustomer, p.IsSupplier
+	}
+	switch in.DebtSide {
+	case "":
+		in.DebtSide = DefaultDebtSide(in.VoucherType, cus, sup, in.PartnerID != nil)
+	case "receivable", "payable":
+	default:
+		return nil, nil, apperr.ValidationField("debt_side", "debt_side phải là receivable (công nợ phải thu) hoặc payable (công nợ phải trả)")
 	}
 	in.Note = strings.TrimSpace(in.Note)
 	if len(in.Lines) == 0 {
@@ -155,8 +184,9 @@ func (s *Service) validate(ctx context.Context, q db.Q, in *Input) (*catalog.Cas
 	}
 	out := make([]vline, 0, len(in.Lines))
 	for i, l := range in.Lines {
-		if l.Amount == nil || !l.Amount.IsPositive() {
-			return nil, nil, apperr.New(http.StatusBadRequest, apperr.CodeValidation, fmt.Sprintf("Dòng %d: số tiền phải lớn hơn 0", i+1), map[string]any{"line_no": i + 1, "field": "amount"})
+		// Làm tròn 2 chữ số trước rồi mới kiểm tra > 0 (0,001 ⇒ 0 ⇒ từ chối, không lưu âm thầm thành 0).
+		if l.Amount == nil || !l.Amount.Round(2).IsPositive() {
+			return nil, nil, apperr.New(http.StatusBadRequest, apperr.CodeValidation, fmt.Sprintf("Dòng %d: số tiền phải lớn hơn 0 (tối thiểu 0,01)", i+1), map[string]any{"line_no": i + 1, "field": "amount"})
 		}
 		amt := l.Amount.Round(2)
 		if amt.GreaterThanOrEqual(decimal.New(1, 15)) {
@@ -215,8 +245,8 @@ func (s *Service) Create(ctx context.Context, userID int64, in Input) (*Voucher,
 			return err
 		}
 		no := fmt.Sprintf("%s%05d", prefix, n)
-		if err := tx.QueryRow(ctx, `INSERT INTO cash_vouchers(voucher_type,voucher_no,voucher_date,account_id,partner_id,note,total_amount,created_by,updated_by)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING id`, in.VoucherType, no, in.VoucherDate, in.AccountID, in.PartnerID, in.Note, sum(lines), userID).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO cash_vouchers(voucher_type,voucher_no,voucher_date,account_id,partner_id,note,total_amount,created_by,updated_by,debt_side)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9) RETURNING id`, in.VoucherType, no, in.VoucherDate, in.AccountID, in.PartnerID, in.Note, sum(lines), userID, in.DebtSide).Scan(&id); err != nil {
 			return err
 		}
 		if err := insertLines(ctx, tx, id, lines); err != nil {
@@ -295,8 +325,8 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Vouc
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE cash_vouchers SET voucher_type=$2, voucher_no=$3, voucher_date=$4, account_id=$5, partner_id=$6, note=$7,
-			total_amount=$8, version=version+1, updated_by=$9, updated_at=now() WHERE id=$1`,
-			id, in.VoucherType, no, in.VoucherDate, in.AccountID, in.PartnerID, in.Note, sum(lines), userID); err != nil {
+			total_amount=$8, version=version+1, updated_by=$9, updated_at=now(), debt_side=$10 WHERE id=$1`,
+			id, in.VoucherType, no, in.VoucherDate, in.AccountID, in.PartnerID, in.Note, sum(lines), userID, in.DebtSide); err != nil {
 			return err
 		}
 		after, err := s.Get(ctx, tx, id)
@@ -337,12 +367,12 @@ func (s *Service) Delete(ctx context.Context, userID, id int64, version int) (*V
 // Get đọc phiếu đầy đủ.
 func (s *Service) Get(ctx context.Context, q db.Q, id int64) (*Voucher, error) {
 	var v Voucher
-	err := q.QueryRow(ctx, `SELECT v.id, v.voucher_type, v.voucher_no, v.voucher_date, v.account_id, a.code, a.name, a.kind,
+	err := q.QueryRow(ctx, `SELECT v.id, v.voucher_type, v.voucher_no, v.voucher_date, v.debt_side, v.account_id, a.code, a.name, a.kind,
 		v.partner_id, p.code, p.name, p.address, v.note, v.total_amount, v.version,
 		v.created_by, cu.full_name, v.updated_by, uu.full_name, v.created_at, v.updated_at
 		FROM cash_vouchers v JOIN cash_accounts a ON a.id=v.account_id LEFT JOIN partners p ON p.id=v.partner_id
 		LEFT JOIN users cu ON cu.id=v.created_by LEFT JOIN users uu ON uu.id=v.updated_by WHERE v.id=$1`, id).
-		Scan(&v.ID, &v.VoucherType, &v.VoucherNo, &v.VoucherDate, &v.AccountID, &v.AccountCode, &v.AccountName, &v.AccountKind,
+		Scan(&v.ID, &v.VoucherType, &v.VoucherNo, &v.VoucherDate, &v.DebtSide, &v.AccountID, &v.AccountCode, &v.AccountName, &v.AccountKind,
 			&v.PartnerID, &v.PartnerCode, &v.PartnerName, &v.PartnerAddress, &v.Note, &v.TotalAmount, &v.Version,
 			&v.CreatedBy, &v.CreatedByName, &v.UpdatedBy, &v.UpdatedByName, &v.CreatedAt, &v.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -368,6 +398,7 @@ type Summary struct {
 	VoucherTypeName string          `json:"voucher_type_name"`
 	VoucherNo       string          `json:"voucher_no"`
 	VoucherDate     util.Date       `json:"voucher_date"`
+	DebtSide        string          `json:"debt_side"`
 	AccountID       int64           `json:"account_id"`
 	AccountName     string          `json:"account_name"`
 	AccountKind     string          `json:"account_kind"`
@@ -412,16 +443,16 @@ func (s *Service) List(ctx context.Context, f Filter) (util.Page[Summary], error
 		w.Add(`v.voucher_date <= ?`, *f.To)
 	}
 	if q := strings.TrimSpace(f.Q); q != "" {
-		w.Add(`(upper(v.voucher_no) LIKE upper(?) OR COALESCE(p.search_key,'') LIKE ? OR v.note ILIKE ?
-			OR EXISTS (SELECT 1 FROM cash_voucher_lines l WHERE l.voucher_id=v.id AND l.description ILIKE ?))`,
-			"%"+q+"%", util.LikePattern(q), "%"+q+"%", "%"+q+"%")
+		w.Add(`(upper(v.voucher_no) LIKE upper(?) OR COALESCE(p.search_key,'') LIKE ? OR kho_fold(v.note) LIKE ?
+			OR EXISTS (SELECT 1 FROM cash_voucher_lines l WHERE l.voucher_id=v.id AND kho_fold(l.description) LIKE ?))`,
+			"%"+q+"%", util.LikePattern(q), util.LikePattern(q), util.LikePattern(q))
 	}
 	out := util.Page[Summary]{Page: f.Page, PageSize: f.PageSize, Items: []Summary{}}
 	from := ` FROM cash_vouchers v JOIN cash_accounts a ON a.id=v.account_id LEFT JOIN partners p ON p.id=v.partner_id`
 	if err := s.Pool.QueryRow(ctx, `SELECT count(*)`+from+w.SQL(), w.Args...).Scan(&out.Total); err != nil {
 		return out, err
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT v.id, v.voucher_type, v.voucher_no, v.voucher_date, v.account_id, a.name, a.kind, v.partner_id, p.name,
+	rows, err := s.Pool.Query(ctx, `SELECT v.id, v.voucher_type, v.voucher_no, v.voucher_date, v.debt_side, v.account_id, a.name, a.kind, v.partner_id, p.name,
 		v.note, v.total_amount, (SELECT count(*) FROM cash_voucher_lines l WHERE l.voucher_id=v.id)::int, v.version, uu.full_name, v.updated_at`+from+`
 		LEFT JOIN users uu ON uu.id=v.updated_by`+w.SQL()+` ORDER BY v.voucher_date DESC, v.id DESC LIMIT `+w.Arg(f.PageSize)+` OFFSET `+w.Arg(f.Offset()), w.Args...)
 	if err != nil {
@@ -430,7 +461,7 @@ func (s *Service) List(ctx context.Context, f Filter) (util.Page[Summary], error
 	defer rows.Close()
 	for rows.Next() {
 		var x Summary
-		if err := rows.Scan(&x.ID, &x.VoucherType, &x.VoucherNo, &x.VoucherDate, &x.AccountID, &x.AccountName, &x.AccountKind, &x.PartnerID, &x.PartnerName,
+		if err := rows.Scan(&x.ID, &x.VoucherType, &x.VoucherNo, &x.VoucherDate, &x.DebtSide, &x.AccountID, &x.AccountName, &x.AccountKind, &x.PartnerID, &x.PartnerName,
 			&x.Note, &x.TotalAmount, &x.LineCount, &x.Version, &x.UpdatedByName, &x.UpdatedAt); err != nil {
 			return out, err
 		}

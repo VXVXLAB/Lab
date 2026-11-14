@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/shopspring/decimal"
@@ -43,8 +44,19 @@ type Table struct {
 	Footer    [][]any // dòng tổng (in đậm)
 	// SumColumns: chỉ số cột (0-based) có công thức SUM ở dòng Footer đầu tiên (tự cộng lại khi thêm dòng).
 	SumColumns []int
-	After      []string // các dòng sau bảng (nợ cũ, tổng nợ, chữ ký ...)
+	// Summary: các dòng "nhãn + số" sau bảng (Nợ cũ, Tổng nợ, Tổng số tiền…). Trong Excel nhãn và số nằm ở hai ô,
+	// số là ô số thật; Formula (tùy chọn) là công thức Excel với ký hiệu {total} = ô Cộng của cột SumColumns[0]
+	// và {s0}, {s1}… = ô số của dòng Summary thứ 0, 1…; giá trị lưu sẵn (cached) = Value.
+	Summary    []SummaryRow
+	After      []string // các dòng văn bản sau bảng
 	Signatures []string // tiêu đề các ô ký tên
+}
+
+// SummaryRow là một dòng "nhãn: số" sau bảng.
+type SummaryRow struct {
+	Label   string
+	Value   decimal.Decimal
+	Formula string
 }
 
 func cellText(v any, k Kind) string {
@@ -61,12 +73,12 @@ func cellText(v any, k Kind) string {
 		}
 		return fmtNum(*x, k)
 	case util.Date:
-		if x.IsZero() {
+		if x.Empty() {
 			return ""
 		}
 		return x.VN()
 	case *util.Date:
-		if x == nil || x.IsZero() {
+		if x == nil || x.Empty() {
 			return ""
 		}
 		return x.VN()
@@ -150,6 +162,13 @@ func XLSX(t Table) ([]byte, error) {
 		bst.Font = &excelize.Font{Family: "Times New Roman", Bold: true}
 		boldStyles[k], _ = f.NewStyle(&bst)
 	}
+	// Tiền/đơn giá có phần lẻ (vd. 13.001,5) dùng định dạng có số lẻ để không làm tròn khi hiển thị.
+	moneyFracFmt := "#,##0.0#"
+	mfs := &excelize.Style{Font: &excelize.Font{Family: "Times New Roman"}, Border: border, Alignment: &excelize.Alignment{Vertical: "top"}, CustomNumFmt: &moneyFracFmt}
+	moneyFrac, _ := f.NewStyle(mfs)
+	mfb := *mfs
+	mfb.Font = &excelize.Font{Family: "Times New Roman", Bold: true}
+	moneyFracBold, _ := f.NewStyle(&mfb)
 	row := 1
 	set := func(cell string, v any) error { return f.SetCellValue(sheet, cell, v) }
 	if err := set("A1", t.Title); err != nil {
@@ -205,6 +224,12 @@ func XLSX(t Table) ([]byte, error) {
 			if bold {
 				st = boldStyles[k]
 			}
+			if k == Money && hasFraction(v) {
+				st = moneyFrac
+				if bold {
+					st = moneyFracBold
+				}
+			}
 			_ = f.SetCellStyle(sheet, cell, cell, st)
 		}
 		row++
@@ -216,19 +241,66 @@ func XLSX(t Table) ([]byte, error) {
 		}
 	}
 	lastData := row - 1
+	totalCell := ""
 	for fi, r := range t.Footer {
 		footRow := row
 		if err := writeRow(r, true); err != nil {
 			return nil, err
 		}
-		if fi == 0 && lastData >= firstData {
-			for _, ci := range t.SumColumns {
+		if fi == 0 {
+			for i, ci := range t.SumColumns {
 				cell := fmt.Sprintf("%s%d", colName(ci), footRow)
-				_ = f.SetCellFormula(sheet, cell, fmt.Sprintf("SUM(%s%d:%s%d)", colName(ci), firstData, colName(ci), lastData))
+				if i == 0 {
+					totalCell = cell
+				}
+				if lastData >= firstData {
+					// Giá trị số đã ghi ở trên được giữ làm kết quả lưu sẵn của công thức.
+					_ = f.SetCellFormula(sheet, cell, fmt.Sprintf("SUM(%s%d:%s%d)", colName(ci), firstData, colName(ci), lastData))
+				}
 			}
 		}
 	}
 	row++
+	if len(t.Summary) > 0 {
+		valCol := ncol - 1
+		if len(t.SumColumns) > 0 {
+			valCol = t.SumColumns[0]
+		}
+		labelCol := 0
+		if valCol >= 3 {
+			labelCol = 2
+		}
+		labelStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Family: "Times New Roman"}, Alignment: &excelize.Alignment{Horizontal: "right"}})
+		valFmt := "#,##0"
+		valStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Family: "Times New Roman"}, CustomNumFmt: &valFmt})
+		valFracFmt := "#,##0.0#"
+		valFracStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Family: "Times New Roman"}, CustomNumFmt: &valFracFmt})
+		cells := make([]string, len(t.Summary))
+		for i := range t.Summary {
+			cells[i] = fmt.Sprintf("%s%d", colName(valCol), row+i)
+		}
+		for i, sr := range t.Summary {
+			lc := fmt.Sprintf("%s%d", colName(labelCol), row)
+			_ = f.SetCellStr(sheet, lc, sr.Label)
+			_ = f.SetCellStyle(sheet, lc, lc, labelStyle)
+			vc := cells[i]
+			_ = f.SetCellDefault(sheet, vc, sr.Value.String())
+			st := valStyle
+			if hasFraction(sr.Value) {
+				st = valFracStyle
+			}
+			_ = f.SetCellStyle(sheet, vc, vc, st)
+			if sr.Formula != "" && (totalCell != "" || !strings.Contains(sr.Formula, "{total}")) {
+				expr := strings.ReplaceAll(sr.Formula, "{total}", totalCell)
+				for j := len(cells) - 1; j >= 0; j-- {
+					expr = strings.ReplaceAll(expr, fmt.Sprintf("{s%d}", j), cells[j])
+				}
+				_ = f.SetCellFormula(sheet, vc, expr)
+			}
+			row++
+		}
+		row++
+	}
 	for _, line := range t.After {
 		_ = set(fmt.Sprintf("A%d", row), line)
 		_ = f.SetCellStyle(sheet, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), infoStyle)
@@ -254,7 +326,54 @@ func XLSX(t Table) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return numericFormulaCells(buf.Bytes())
+}
+
+func hasFraction(v any) bool {
+	switch x := v.(type) {
+	case decimal.Decimal:
+		return !x.Equal(x.Truncate(0))
+	case *decimal.Decimal:
+		return x != nil && !x.Equal(x.Truncate(0))
+	}
+	return false
+}
+
+// numericFormulaCells sửa kiểu ô công thức: excelize ghi ô công thức với t="str" (kết quả lưu sẵn là chuỗi).
+// Mọi công thức của ta (SUM, cộng ô) đều ra số, nên bỏ t="str" để kết quả lưu sẵn là SỐ — trình xem không tính lại
+// công thức (xem trước trên điện thoại, LibreOffice không recalc) vẫn hiển thị đúng con số.
+func numericFormulaCells(b []byte) ([]byte, error) {
+	zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	zw := zip.NewWriter(&out)
+	for _, zf := range zr.File {
+		rc, err := zf.Open()
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(zf.Name, "xl/worksheets/") && strings.HasSuffix(zf.Name, ".xml") {
+			data = bytes.ReplaceAll(data, []byte(` t="str"><f>`), []byte(`><f>`))
+		}
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: zf.Name, Method: zip.Deflate, Modified: zf.Modified})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := w.Write(data); err != nil {
+			return nil, err
+		}
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
 
 func writeCell(f *excelize.File, sheet, cell string, v any, k Kind) error {
@@ -270,12 +389,12 @@ func writeCell(f *excelize.File, sheet, cell string, v any, k Kind) error {
 		}
 		return f.SetCellDefault(sheet, cell, x.String())
 	case util.Date:
-		if x.IsZero() {
+		if x.Empty() {
 			return nil
 		}
 		return f.SetCellValue(sheet, cell, x.VN())
 	case *util.Date:
-		if x == nil || x.IsZero() {
+		if x == nil || x.Empty() {
 			return nil
 		}
 		return f.SetCellValue(sheet, cell, x.VN())
@@ -434,6 +553,9 @@ func DOCX(t Table) ([]byte, error) {
 		body.WriteString(`</w:tbl>`)
 	}
 	body.WriteString(para("", false, false, "", 0))
+	for _, sr := range t.Summary {
+		body.WriteString(para(sr.Label+" "+util.FormatVND(sr.Value), true, false, "", 0))
+	}
 	for _, line := range t.After {
 		body.WriteString(para(line, true, false, "", 0))
 	}
