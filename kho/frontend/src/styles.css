@@ -149,7 +149,7 @@ td.col-code { font-weight: 500; font-variant-numeric: tabular-nums; white-space:
 .st-posted { color: #1b5e20; border-color: #4caf50; background: #e8f5e9; }
 .st-editing { color: #b71c1c; border-color: #e57373; background: #fdecea; }
 .doc-actions { margin-left: auto; display: flex; gap: 6px; flex: none; }
-@media (max-width: 1100px) { .doc-top { flex-wrap: wrap; } .doc-actions { flex-wrap: wrap; } }
+@media (max-width: 1100px) { .doc-top { flex-wrap: wrap; } .doc-actions { flex-wrap: wrap; width: 100%; justify-content: flex-start; margin-left: 0; } }
 .dd-caret { font-size: 11px; }
 .doc-meta { color: #6b7280; font-size: 12.5px; margin-top: -4px; }
 .doc-alert { flex: none; }
@@ -398,3 +398,7 @@ td.col-code { font-weight: 500; font-variant-numeric: tabular-nums; white-space:
   .doc-footer { flex-direction: column; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Lưới dòng không bóp cột tên hàng ở màn hẹp: cuộn ngang bên trong khung dòng */
+.line-grid table { min-width: 900px; }
+.voucher-editor .line-grid table { min-width: 640px; }

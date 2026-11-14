@@ -124,6 +124,7 @@ export function StockSummaryPage() {
           summary={summary}
           minWidth={560 + whs.length * 84 + 96}
           onOpen={(r) => openLedger(r)}
+          emptyText={dq || groupId || warehouseId ? 'Không có mã nào khớp điều kiện lọc.' : 'Chưa có hàng nào có số tồn. Nhập tồn đầu kỳ (Kho › Tồn đầu kỳ) hoặc ghi sổ phiếu nhập mua để có số tồn.'}
         />
       </div>
       <OpenHint what="xem thẻ kho mã đó" />

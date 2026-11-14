@@ -14,7 +14,7 @@ export const VOUCHER_PREFIX: Record<VoucherType, Record<CashAccountKind, string>
 /** Ý nghĩa của debt_side theo lời kế toán. */
 export const DEBT_EFFECT: Record<VoucherType, Record<DebtSide, string>> = {
   receipt: {
-    receivable: 'Khách trả tiền — giảm số khách đang nợ (phải thu)',
+    receivable: 'Thu tiền bán hàng / thu nợ — giảm số đối tác đang nợ mình (phải thu)',
     payable: 'Nhà cung cấp hoàn tiền cho mình — tăng lại số phải trả',
   },
   payment: {

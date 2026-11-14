@@ -72,6 +72,15 @@ pages/
     DocumentView         xem nhanh phiếu (chỉ đọc) + "Mở phiếu để sửa"; StockLedgerView thẻ kho; TradeReportView bán/mua
     StockPages           Tồn kho, Thẻ kho, Tổng hợp NXT; OtherReportPages: chi tiết bán/mua, lịch sử bán, Hàng cần đặt, trang Báo cáo
   catalog/CompanySettingsPage   Thông tin công ty (admin); auth/ChangePasswordModal (menu người dùng ở thanh trên)
+  vouchers/
+    VoucherListPage      danh sách phiếu thu / phiếu chi (sum_total_amount)
+    VoucherEditor        /phieu-thu-chi/:id và /phieu-thu-chi/moi?loai=receipt|payment&partner_id=&document_id=
+    VoucherView          xem nhanh phiếu thu chi (ngăn kéo); VoucherPrint bản in A5 có "Bằng chữ"
+    DebtLedgerView       sổ chi tiết công nợ một đối tác (ngăn kéo), nút Thu tiền / Chi tiền
+    MoneyPages           Công nợ phải thu / phải trả (debt-summary), Sổ quỹ / sổ ngân hàng (cash-book)
+    voucherText.ts       câu chữ thu chi dùng chung: VOUCHER_TITLE, VOUCHER_PREFIX, DEBT_EFFECT, defaultDebtSide, debtEffect
+  GuidePage.tsx          trang Hướng dẫn: hiển thị docs/HUONG_DAN_SU_DUNG.md (một nguồn nội dung, import ?raw)
+lib/numberWords.ts       numberToVietnameseWords / moneyInWords (linh, mươi, mốt, lăm, tư, "không trăm" ở nhóm giữa, tỷ lặp)
 ```
 
 ## Quy ước
@@ -158,6 +167,37 @@ thông báo thành công ngắn (1,5 giây), lỗi nói cách khắc phục.
   (`enterToNext`); nếu không có mục nào sáng thì Enter không làm gì.
 - Phiếu nhập từ "Hàng cần đặt": `navigate(paths.newDocument('purchase'), { state: { prefill: { lines:[{product_id, qty}], note } } })`.
 
+## Thu chi và công nợ (giai đoạn 4)
+
+- **Phiếu thu/chi có hiệu lực ngay khi lưu** (không có phiếu tạm). Trình soạn: loại THU/CHI, tài khoản (nút lớn
+  Tiền mặt / Ngân hàng — quyết định số PT/PC/BC/BN, hiện ngay "Số phiếu: PT…"), ngày, đối tác (bỏ trống = thu/chi khác),
+  ghi chú, nhiều dòng {diễn giải → Enter → số tiền → Enter → dòng sau; "chứng từ liên quan" là ô chọn tùy chọn, chỉ
+  phiếu đã ghi sổ của đối tác đó; chọn phiếu ⇒ tự điền số tiền + diễn giải nếu đang trống}.
+- **`debt_side` luôn gửi rõ.** Mặc định như máy chủ (`defaultDebtSide`); chỉ hỏi người dùng khi có ý nghĩa: phiếu THU
+  từ đối tác là NCC, phiếu CHI cho đối tác là KH (câu chữ ở `DEBT_EFFECT`). Công nợ "trước phiếu → sau phiếu" tính từ
+  `debt-ledger` (đến ngày phiếu) trừ ảnh hưởng của chính phiếu đang sửa.
+- Từ phiếu bán/mua đã ghi sổ: "Thu tiền phiếu này" / "Chi tiền phiếu này" ⇒ `paths.newVoucher(type, {document_id})`.
+  Từ sổ công nợ: nút Thu tiền / Chi tiền ⇒ `paths.newVoucher(type, {partner_id})`.
+- Ngăn kéo thêm `{kind:'voucher', id}` và `{kind:'debt', partner, side, from?, to?}`. Báo cáo công nợ → sổ chi tiết →
+  phiếu/phiếu thu chi, Esc đóng từng tầng. Danh mục đối tác và ô đối tác trong phiếu có "Xem công nợ".
+- **Tiêu đề in báo cáo** dùng `<PrintTitle title filters={[...]} />`: luôn liệt kê mọi bộ lọc đang dùng + giờ in.
+- **Lần đầu dùng** (CSDL mới): Tổng quan hiện khung "Bắt đầu sử dụng" 5 bước, tự đánh dấu theo dữ liệu thật, tự ẩn khi xong
+  (hoặc người dùng bấm "Ẩn hướng dẫn này" — nhớ theo máy).
+- Lưới dòng (phiếu kho và phiếu thu chi) chuyển con trỏ bằng `useLayoutEffect` để người gõ nhanh không mất phím.
+
+### Từ ngữ thống nhất
+
+| Dùng | Không dùng |
+|---|---|
+| Ghi sổ / Bỏ ghi sổ / Đã ghi sổ | duyệt, hoàn tất, chốt |
+| Phiếu tạm (số TAM…) | nháp, phiếu nháp |
+| Nợ cũ, Tổng nợ (trên phiếu bán/mua) | dư nợ trước |
+| Phải thu (khách nợ mình) / Phải trả (mình nợ NCC) | công nợ khách / công nợ NCC lẫn lộn |
+| Tăng / Giảm / Còn nợ (bảng công nợ) | Nợ / Có |
+| Thu tiền / Chi tiền; Tiền mặt / Ngân hàng | thanh toán, giao dịch |
+| Tồn kho, Thẻ kho, Tồn đầu kỳ | số lượng hiện có |
+| Ngừng sử dụng | vô hiệu hóa, khóa (trừ tài khoản người dùng: "Khóa") |
+
 ## Cache & cập nhật trực tiếp
 
 Khóa (`api/queryKeys.ts`) có phần tử đầu là "miền" để làm mới theo tiền tố:
@@ -184,6 +224,7 @@ Màn mới **phải** đặt khóa theo quy ước này thì mới tự cập nh
 
 Giai đoạn 2: ảnh ở `frontend/screenshots/stage2/` (kèm PDF in thử, file xlsx/docx tải về).
 Giai đoạn 3: `frontend/screenshots/stage3/` (thẻ kho mẫu của khách, tồn 4 kho, chồng ngăn kéo, file Excel từng báo cáo, PDF in thẻ kho).
+Giai đoạn 4: `frontend/screenshots/stage4/` (thu chi nhiều dòng, hoàn tiền, công nợ, sổ quỹ, in phiếu thu A5, xung đột hai máy, CSDL mới, máy tính bảng 820px).
 
 
 Ảnh chụp 1366×768 (và máy tính bảng 820×1180) ở `frontend/screenshots/stage1/`. Đã chạy bằng Playwright (Chromium) với

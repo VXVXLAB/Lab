@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -239,7 +239,8 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   }));
 
   // ---------- lưới dòng tiền ----------
-  useEffect(() => {
+  // đặt con trỏ ngay sau khi vẽ (trước khi trình duyệt nhận phím kế tiếp)
+  useLayoutEffect(() => {
     if (!pending) return;
     const el = gridRef.current?.querySelector<HTMLInputElement>(`[data-vcell="${pending.key}:${pending.col}"]`);
     if (el) {
@@ -630,7 +631,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
                 <th className="num">STT</th>
                 <th>Diễn giải</th>
                 <th>
-                  <Tooltip title="Tùy chọn: phiếu bán/mua của đối tác mà khoản tiền này thanh toán (để tra cứu)">Chứng từ liên quan</Tooltip>
+                  <Tooltip title="Tùy chọn: phiếu bán/mua của đối tác mà khoản tiền này thu/trả cho (để tra cứu)">Chứng từ liên quan</Tooltip>
                 </th>
                 <th className="num">Số tiền</th>
                 <th />

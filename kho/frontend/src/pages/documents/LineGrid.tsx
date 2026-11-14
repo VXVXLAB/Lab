@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Button, Tooltip } from 'antd';
 import { DeleteOutlined, FileSearchOutlined, HistoryOutlined, PlusOutlined } from '@ant-design/icons';
 import { Checkbox } from 'antd';
@@ -53,7 +53,8 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
     if (focusRequest) setPending({ key: focusRequest.key, col: focusRequest.col });
   }, [focusRequest]);
 
-  useEffect(() => {
+  // đặt con trỏ ngay sau khi vẽ (trước khi trình duyệt nhận phím kế tiếp)
+  useLayoutEffect(() => {
     if (!pending) return;
     const el = wrapRef.current?.querySelector<HTMLInputElement>(`[data-cell="${pending.key}:${pending.col}"]`);
     if (el) {

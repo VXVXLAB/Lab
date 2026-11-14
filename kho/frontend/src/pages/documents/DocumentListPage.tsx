@@ -400,7 +400,9 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
               ? errorMessage(query.error)
               : draftsOnly
                 ? 'Không có phiếu tạm nào đang treo.'
-                : 'Không có phiếu nào khớp điều kiện lọc. Thử chọn "Tất cả" thời gian.',
+                : !dq && !partner && !productId && !warehouseId && status === 'all' && preset === 'all'
+                  ? `Chưa có ${cfg ? cfg.name.toLowerCase() : 'phiếu'} nào. Bấm F2 để lập phiếu đầu tiên.`
+                  : 'Không có phiếu nào khớp điều kiện lọc. Thử chọn "Tất cả" thời gian hoặc bỏ bớt bộ lọc.',
           }}
         />
       </div>

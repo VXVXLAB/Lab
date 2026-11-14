@@ -34,10 +34,10 @@ export function DebtSummaryPage({ side }: { side: DebtSide }) {
     { title: 'Mã', dataIndex: 'partner_code', width: 120, ellipsis: true, className: 'col-code' },
     { title: rec ? 'Khách hàng' : 'Nhà cung cấp', dataIndex: 'partner_name', ellipsis: true },
     { title: 'Điện thoại', dataIndex: 'phone', width: 130 },
-    { title: from ? 'Đầu kỳ' : 'Nợ đầu kỳ (khai báo)', dataIndex: 'opening', width: 140, align: 'right', render: money },
-    { title: rec ? 'Tăng (bán hàng…)' : 'Tăng (mua hàng…)', dataIndex: 'increase', width: 140, align: 'right', render: money },
-    { title: rec ? 'Giảm (đã thu, trả hàng)' : 'Giảm (đã trả, trả hàng)', dataIndex: 'decrease', width: 160, align: 'right', render: money },
-    { title: rec ? 'Khách còn nợ' : 'Mình còn nợ', dataIndex: 'closing', width: 140, align: 'right', render: (n: number) => <b className={n < 0 ? 'neg' : undefined}>{formatMoney(n)}</b> },
+    { title: 'Đầu kỳ', dataIndex: 'opening', width: 130, align: 'right', render: money },
+    { title: 'Tăng', dataIndex: 'increase', width: 130, align: 'right', render: money },
+    { title: rec ? 'Giảm (đã thu)' : 'Giảm (đã trả)', dataIndex: 'decrease', width: 130, align: 'right', render: money },
+    { title: rec ? 'Khách còn nợ' : 'Mình còn nợ', dataIndex: 'closing', width: 130, align: 'right', render: (n: number) => <b className={n < 0 ? 'neg' : undefined}>{formatMoney(n)}</b> },
   ];
   const t = d?.totals;
   const summary = t ? [<b key="c">Cộng</b>, <span key="n" className="muted">{d.items.length} đối tác</span>, null, ...[t.opening, t.increase, t.decrease, t.closing].map((n, i) => <b key={i}>{formatMoney(n)}</b>)] : null;
@@ -46,7 +46,7 @@ export function DebtSummaryPage({ side }: { side: DebtSide }) {
     <div className="list-page">
       <PageHeader
         title={title}
-        sub={rec ? 'Khách còn nợ mình bao nhiêu: đầu kỳ, phát sinh, đã thu, cuối kỳ. Bấm dòng để xem sổ chi tiết.' : 'Mình còn nợ nhà cung cấp bao nhiêu. Bấm dòng để xem sổ chi tiết.'}
+        sub={rec ? 'Đầu kỳ + Tăng (bán hàng, trả lại tiền khách) − Giảm (đã thu, khách trả hàng) = Khách còn nợ. Bấm dòng để xem sổ chi tiết.' : 'Đầu kỳ + Tăng (mua hàng, NCC hoàn tiền) − Giảm (đã trả, trả hàng NCC) = Mình còn nợ. Bấm dòng để xem sổ chi tiết.'}
         actions={<ReportActions xlsxUrl={reportApi.xlsxUrl('debt-summary', params)} />}
       />
       <div className="toolbar">
@@ -57,7 +57,7 @@ export function DebtSummaryPage({ side }: { side: DebtSide }) {
         </Checkbox>
       </div>
       <div className="report-area">
-        <PrintTitle title={title.toUpperCase()} filters={[describeRange(range), dq && `tìm "${dq}"`]} />
+        <PrintTitle title={title.toUpperCase()} filters={[describeRange(range), dq && `Tìm: "${dq}"`]} />
         <ReportTable<DebtSummaryItem>
           columns={columns}
           rows={d?.items ?? []}
