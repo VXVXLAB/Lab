@@ -137,7 +137,7 @@ test.describe('Câu chuyện 12: báo cáo, mở chi tiết và xuất Excel', (
     await page.keyboard.press('Escape');
   });
 
-  test('REQ-021 Từ danh mục hàng hóa: nút "Lịch sử bán" mở lịch sử ngay tại chỗ', async () => {
+  test('REQ-021 Từ danh mục hàng hóa: nút "Lịch sử bán" mở lịch sử ngay tại chỗ; nút In chỉ in ngăn kéo', async () => {
     await ui.menu(page, 'Danh mục', 'Hàng hóa, dịch vụ');
     await page.getByPlaceholder(/Tìm mã, tên hàng/).fill('E6013-25');
     const row = page.getByRole('row', { name: /E6013-25/ });
@@ -146,6 +146,8 @@ test.describe('Câu chuyện 12: báo cáo, mở chi tiết và xuất Excel', (
     await expect(dr).toContainText(`Lịch sử bán — E6013-25 ${A.name}`);
     const r = await ui.readReport(dr, { waitFor: no.x2 });
     expect(r.rows.length).toBe(2);
+    // ngăn kéo lịch sử bán có nút In, chỉ in ngăn kéo đó
+    await ui.checkDrawerPrint(page, dr, no.x2);
     await page.keyboard.press('Escape');
   });
 
@@ -179,7 +181,7 @@ test.describe('Câu chuyện 12: báo cáo, mở chi tiết và xuất Excel', (
     expect(t.total[t.col('Tồn cuối kỳ')]).toBe(132);
   });
 
-  test('REQ-063 REQ-068 Tồn kho: bấm số tồn của một kho mở thẻ kho kho đó ngay tại chỗ', async () => {
+  test('REQ-063 REQ-068 Tồn kho: bấm số tồn của một kho mở thẻ kho kho đó ngay tại chỗ; nút In chỉ in ngăn kéo', async () => {
     await ui.menu(page, 'Kho', 'Tồn kho');
     await page.getByPlaceholder('Tìm mã, tên hàng…').fill('E6013');
     await ui.readReport(page, { waitFor: B.code });
@@ -192,6 +194,8 @@ test.describe('Câu chuyện 12: báo cáo, mở chi tiết và xuất Excel', (
     const led = await ui.readReport(dr, { waitFor: no.x3 });
     expect(led.sumCells.filter(Boolean).slice(-1)[0]).toBe('65');
     await ui.shot(page, '12-ton-kho-mo-the-kho');
+    // ngăn kéo thẻ kho có nút In, chỉ in ngăn kéo đó
+    await ui.checkDrawerPrint(page, dr, no.x3);
     await page.keyboard.press('Escape');
   });
 });

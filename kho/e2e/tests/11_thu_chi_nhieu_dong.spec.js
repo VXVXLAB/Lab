@@ -5,6 +5,7 @@ const { test, expect, openAs } = require('../lib/fixtures');
 const ui = require('../lib/ui');
 const { Api } = require('../lib/api');
 const { readXlsx, readDocx, findRow } = require('../lib/files');
+const { printAndExports, comparable } = require('../lib/printcmp');
 
 test.describe.configure({ mode: 'serial' });
 
@@ -74,7 +75,7 @@ test.describe('Câu chuyện 11: thu chi nhiều dòng, tiền mặt và ngân h
     await dlg.getByRole('button', { name: 'Đóng' }).click();
   });
 
-  test('REQ-008 REQ-087 Xuất Excel/Word phiếu thu: bảng dòng tiền, số là số, Cộng = SUM, không khóa', async () => {
+  test('REQ-008 REQ-087 Xuất Excel/Word phiếu thu: bảng dòng tiền, số là số, "Tổng số tiền" = SUM, không khóa', async () => {
     const xf = await ui.exportDoc(page, 'xlsx', '11-phieu-thu.xlsx');
     files.xlsx = xf.file;
     const x = await readXlsx(xf.file);
@@ -82,27 +83,69 @@ test.describe('Câu chuyện 11: thu chi nhiều dòng, tiền mặt và ngân h
     expect(findRow(x.rows, 'PHIẾU THU')).toBeGreaterThanOrEqual(0);
     const h = findRow(x.rows, 'Chứng từ liên quan');
     expect(x.rows[h].filter((v) => v !== null)).toEqual(['STT', 'Diễn giải', 'Chứng từ liên quan', 'Số tiền']);
-    const amounts = [1, 2, 3].map((i) => x.rows[h + i][x.rows[h].indexOf('Số tiền')]);
+    const col = x.rows[h].indexOf('Số tiền');
+    const amounts = [1, 2, 3].map((i) => x.rows[h + i][col]);
     expect(amounts).toEqual([5000000, 3205000, 250000]);
-    const sumRow = x.rows[findRow(x.rows, /^Cộng/)];
-    expect(sumRow.filter((v) => typeof v === 'number').slice(-1)[0]).toBe(8455000);
+    const si = findRow(x.rows, /^Tổng số tiền$/);
+    expect(si).toBe(h + 4);
+    expect(x.rows[si][col]).toBe(8455000);
+    expect(x.cells[si][col].formula || x.cells[si][col].value.formula).toMatch(/SUM/i);
     files.docx = (await ui.exportDoc(page, 'docx', '11-phieu-thu.docx')).file;
     const d = await readDocx(files.docx);
     expect(d.isProtected).toBe(false);
     const t = d.tables.find((tb) => tb[0] && tb[0].includes('Diễn giải'));
     expect(t.slice(1, 4).map((r) => r[1])).toEqual(['Thu nợ cũ', 'Thu tiền phiếu bán tháng 9', 'Thu tiền cước xe']);
-    expect(d.allText).toContain('Tổng số tiền (đồng): 8.455.000');
+    expect(t[4][0]).toBe('Tổng số tiền');
+    expect(t[4][t[4].length - 1]).toBe('8.455.000');
   });
 
-  // PHÁT HIỆN F-02 (BAO_CAO_E2E.md): bản in trên màn hình có "Bằng chữ", nhưng file Excel và Word của phiếu thu/chi
-  // (file kế toán mở ra in hoặc gửi đi) không có dòng số tiền bằng chữ — phiếu thu/chi thiếu nội dung bắt buộc.
-  test.fail('REQ-085 REQ-087 File Excel/Word của phiếu thu có dòng "Bằng chữ"', async () => {
+  // F-02 (đã sửa, kiểm lại): file Excel/Word của phiếu thu có "Bằng chữ" và đúng y chữ đang hiện trên màn hình;
+  // toàn bộ file khớp bản in (tiêu đề, số/ngày/quỹ, người nộp, lý do, bảng, Tổng số tiền, Bằng chữ, Kèm theo, 5 ô ký).
+  test('REQ-085 REQ-087 File Excel/Word phiếu thu có "Bằng chữ" = chữ trên màn hình và khớp bản in', async () => {
+    const screenWords = (await page.locator('.money-words').innerText()).replace(/\s+/g, ' ').trim();
+    expect(screenWords).toBe('Bằng chữ: Tám triệu bốn trăm năm mươi lăm nghìn đồng');
     const x = await readXlsx(files.xlsx);
+    expect(x.rows[findRow(x.rows, /^Bằng chữ:/)].find((v) => typeof v === 'string')).toBe(screenWords);
     const d = await readDocx(files.docx);
-    expect({
-      xlsx: findRow(x.rows, /Tám triệu bốn trăm năm mươi lăm nghìn đồng/) >= 0,
-      docx: /Tám triệu bốn trăm năm mươi lăm nghìn đồng/.test(d.allText),
-    }).toEqual({ xlsx: true, docx: true });
+    expect(d.paragraphs).toContain(screenWords);
+    const r = await printAndExports(page, '11-phieu-thu-so-khop');
+    expect(r.print.words).toEqual([screenWords, 'Kèm theo: ……… chứng từ gốc.']);
+    expect(r.print.signers).toEqual(['Giám đốc', 'Kế toán trưởng', 'Người nộp tiền', 'Người lập phiếu', 'Thủ quỹ']);
+    expect(r.print.info).toEqual([`Họ tên người nộp tiền: ${CUS.name}`, 'Lý do nộp: Thu nợ đợt 1']);
+    expect(comparable(r.xlsx)).toEqual(r.print);
+    expect(comparable(r.docx)).toEqual(r.print);
+  });
+
+  test('REQ-085 Số tiền bằng chữ trên màn hình đúng quy tắc tiếng Việt (linh, mốt, lăm, bốn, không trăm, tỷ)', async () => {
+    await ui.enterVoucher(page, { type: 'receipt', account: 'TM', date: '17/10/2026', lines: [{ desc: 'Kiểm tra bằng chữ', amount: '1' }], save: false });
+    const amountCell = page.getByLabel('Số tiền dòng 1');
+    const cases = [
+      ['1.234.000', 'Một triệu hai trăm ba mươi bốn nghìn đồng'],
+      ['24', 'Hai mươi bốn đồng'],
+      ['21.000', 'Hai mươi mốt nghìn đồng'],
+      ['105.000', 'Một trăm linh năm nghìn đồng'],
+      ['15.000', 'Mười lăm nghìn đồng'],
+      ['45.000', 'Bốn mươi lăm nghìn đồng'],
+      ['1.005.000', 'Một triệu không trăm linh năm nghìn đồng'],
+      ['10.000.000', 'Mười triệu đồng'],
+      ['2.000.000.000', 'Hai tỷ đồng'],
+    ];
+    const wrong = [];
+    for (const [amt, words] of cases) {
+      await amountCell.fill(amt);
+      const got = (await page.locator('.money-words').innerText()).replace(/^Bằng chữ:\s*/, '').trim();
+      if (got !== words) wrong.push(`${amt}: "${got}" (mong đợi "${words}")`);
+    }
+    expect(wrong).toEqual([]);
+    // phiếu thu khác (không đối tác) 1.234.000 — lưu, so file xuất với bản in và chữ trên màn hình
+    await amountCell.fill('1.234.000');
+    await page.keyboard.press('Control+s');
+    await expect(page.getByText('ĐÃ LƯU — có hiệu lực', { exact: true })).toBeVisible();
+    const r = await printAndExports(page, '11-thu-khac-1234000');
+    expect(r.print.words[0]).toBe('Bằng chữ: Một triệu hai trăm ba mươi bốn nghìn đồng');
+    expect(r.print.info[0]).toMatch(/^Họ tên người nộp tiền: …+$/);
+    expect(comparable(r.xlsx)).toEqual(r.print);
+    expect(comparable(r.docx)).toEqual(r.print);
   });
 
   test('REQ-058 REQ-060 Thu qua ngân hàng (giấy báo có BC) 2 dòng cho cùng khách', async () => {
@@ -119,6 +162,12 @@ test.describe('Câu chuyện 11: thu chi nhiều dòng, tiền mặt và ngân h
     });
     expect(no.bc).toMatch(/^BC\d{5}$/);
     await expect(page.locator('.money-words')).toHaveText('Bằng chữ: Ba triệu không trăm mười lăm nghìn đồng');
+    const r = await printAndExports(page, '11-giay-bao-co');
+    expect(r.print.title).toBe('GIẤY BÁO CÓ (THU QUA NGÂN HÀNG)');
+    expect(r.print.account).toBe('Ngân hàng');
+    expect(r.print.words[0]).toBe('Bằng chữ: Ba triệu không trăm mười lăm nghìn đồng');
+    expect(comparable(r.xlsx)).toEqual(r.print);
+    expect(comparable(r.docx)).toEqual(r.print);
     expect(await api.debtClosing('PHUCTHINH', 'receivable')).toBe(11545000 - 3015000);
   });
 
@@ -147,6 +196,12 @@ test.describe('Câu chuyện 11: thu chi nhiều dòng, tiền mặt và ngân h
     });
     expect([no.pc, no.bn].map((n) => n.slice(0, 2))).toEqual(['PC', 'BN']);
     await expect(page.locator('.money-words')).toHaveText('Bằng chữ: Mười triệu đồng');
+    const r = await printAndExports(page, '11-giay-bao-no');
+    expect(r.print.title).toBe('GIẤY BÁO NỢ (CHI QUA NGÂN HÀNG)');
+    expect(r.print.signers).toEqual(['Giám đốc', 'Kế toán trưởng', 'Thủ quỹ', 'Người lập phiếu', 'Người nhận tiền']);
+    expect(r.print.info[0]).toBe(`Họ tên người nhận tiền: ${SUP.name}`);
+    expect(comparable(r.xlsx)).toEqual(r.print);
+    expect(comparable(r.docx)).toEqual(r.print);
     expect(await api.debtClosing('HUNGTHINH', 'payable')).toBe(10000000);
   });
 

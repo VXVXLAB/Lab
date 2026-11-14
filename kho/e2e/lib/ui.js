@@ -80,7 +80,14 @@ async function selectByTyping(page, combo, text, optionRe) {
   const dd = await dropdownOf(page, combo);
   const opt = dd.locator('.ant-select-item-option').filter({ hasText: optionRe ?? text });
   await expect(opt.first()).toBeVisible();
-  // mục khớp phải đang sáng (đầu danh sách) rồi mới Enter
+  // chờ ô tìm có kết quả của đúng chữ vừa gõ (không còn "đang chờ") và mục khớp đứng đầu danh sách — như người dùng
+  // nhìn thấy rồi mới Enter. (Ô lọc tại máy, như Kho/Nhóm, không có cờ chờ.)
+  await expect(page.locator('[data-search-pending]')).toHaveCount(0);
+  await expect(dd.locator('.ant-select-item-option').first()).toContainText(optionRe ?? text);
+  // PHÁT HIỆN F-11 (b): khi danh sách gợi ý không đổi sau khi gõ (vd. CSDL chỉ có một khách — chạy riêng một câu chuyện trên
+  // CSDL mới), không mục nào được tô sáng và Enter KHÔNG chọn gì. Người dùng thấy không có mục sáng thì bấm ↓ rồi Enter —
+  // làm như vậy ở đây; lỗi được kiểm nghiêm ở tests/15.
+  if ((await dd.locator('.ant-select-item-option-active').count()) === 0) await combo.press('ArrowDown');
   await expect(dd.locator('.ant-select-item-option-active')).toContainText(optionRe ?? text);
   await combo.press('Enter');
 }
@@ -279,6 +286,9 @@ async function enterVoucher(page, { type, account = 'TM', date, partner, partner
   await expect(page.getByRole('heading', { name: type === 'receipt' ? /^Phiếu thu tiền/ : /^Phiếu chi tiền/ })).toBeVisible();
   await page.locator('body').press('F2');
   await expect(page.getByText('PHIẾU MỚI — chưa lưu', { exact: true })).toBeVisible();
+  // phiếu mới đặt con trỏ vào ô đối tác khi đã sẵn sàng — chờ như người dùng thấy con trỏ rồi mới gõ.
+  // (Gõ ngày chỉ ~0,1 s sau khi mở phiếu thì đôi khi ngày bị bỏ qua — tốc độ máy, không phải người; xem báo cáo.)
+  await expect(page.locator('#partner')).toBeFocused();
   await page.locator('.acc-choice label').filter({ hasText: `${account} ·` }).click();
   if (date) {
     const d = page.locator('#voucher_date');
@@ -350,6 +360,32 @@ async function readReport(scope, { allowEmpty = false, waitFor } = {}) {
   return { headers, rows, obj, sum: sumObj, sumCells: sum };
 }
 
+/**
+ * Nút "In" trong ngăn kéo chi tiết: chặn hộp in thật của trình duyệt, kiểm lúc gọi in thì chỉ ngăn kéo này được đánh dấu in;
+ * giả lập chế độ in (CSS @media print): nội dung ngăn kéo (có `mustText`) hiện, màn phía sau ẩn.
+ */
+async function checkDrawerPrint(page, drawer, mustText) {
+  await page.evaluate(() => {
+    window.__printCalls = [];
+    window.print = () => window.__printCalls.push({ body: document.body.className, marked: document.querySelectorAll('.print-this').length });
+  });
+  await drawer.getByRole('button', { name: /^(printer )?In$/ }).click();
+  const calls = await page.evaluate(() => window.__printCalls);
+  expect(calls.length).toBe(1);
+  expect(calls[0].body).toContain('printing-drawer');
+  expect(calls[0].marked).toBe(1);
+  await page.emulateMedia({ media: 'print' });
+  try {
+    await expect(drawer.getByText(mustText).first()).toBeVisible();
+    await expect(page.locator('.ant-layout-sider, aside').first()).toBeHidden();
+    await expect(page.locator('.list-page .page-header, .list-page h2').first()).toBeHidden();
+  } finally {
+    await page.emulateMedia({ media: 'screen' });
+    await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+  }
+  await expect(page.locator('body')).not.toHaveClass(/printing-drawer/);
+}
+
 /** Ngăn kéo chi tiết trên cùng (Drawer). */
 function topDrawer(page) {
   return page.locator('.ant-drawer-open .ant-drawer-content-wrapper').last();
@@ -386,4 +422,5 @@ module.exports = {
   exportDoc,
   readReport,
   topDrawer,
+  checkDrawerPrint,
 };

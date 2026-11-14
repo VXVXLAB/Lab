@@ -8,6 +8,7 @@
 // Riêng các 404 xảy ra ngay sau khi xóa phiếu tạm được kiểm ở câu chuyện 5 (phát hiện F-06).
 const fs = require('fs');
 const { test, expect, ISSUES } = require('../lib/fixtures');
+const { BASE_URL } = require('../lib/env');
 
 function readIssues() {
   if (!fs.existsSync(ISSUES)) return [];
@@ -36,17 +37,40 @@ test('REQ-UX Toàn bộ lần chạy: không lỗi JavaScript, không phản h�
   expect(summary).toEqual([]);
 });
 
-test('REQ-UX Các phản hồi 4xx chỉ là mã nghiệp vụ đã thiết kế (401/409/422) hoặc 404 sau khi xóa phiếu tạm (F-06)', async () => {
+// Vòng 2 (sau khi F-06 được sửa): KHÔNG còn 404 nào; 401 chỉ được có ở test cố ý gõ sai mật khẩu và ở các test cố ý làm
+// hết phiên (tên test có "Phiên"/"F-04"); màn đăng nhập của trình duyệt mới không còn gọi /api/auth/me.
+test('REQ-UX Phản hồi 4xx chỉ là mã nghiệp vụ đã thiết kế: không 404; 401 chỉ ở test sai mật khẩu / hết phiên', async () => {
   const bad = readIssues()
     .filter(http4xx)
     .filter((i) => {
       const st = Number(/status of (\d+)/.exec(i.text)[1]);
       const url = (i.url || '').replace(/^https?:\/\/[^/]+/, '');
-      if (st === 401) return false; // màn đăng nhập / phiên hết hạn
+      if (st === 401 && url === '/api/auth/login' && /Màn đăng nhập/.test(i.test)) return false; // cố ý sai mật khẩu
+      if (st === 401 && /Phiên|F-04/.test(i.test)) return false; // cố ý làm hết phiên
       if ((st === 409 || st === 422) && /^\/api\/(documents\/\d+(\/post)?|vouchers\/\d+)$/.test(url)) return false; // thiếu hàng, bán lỗ, xung đột
-      if (st === 404 && /^\/api\/documents\/(\d+|check)$/.test(url)) return false; // F-06: gọi lại phiếu vừa xóa
+      if (st === 404 && /^\/api\/products\/lookup\?/.test(url)) return false; // tra mã chính xác khi gõ dở — phát hiện F-16, kiểm riêng bên dưới
       return true;
     })
-    .map((i) => `${i.test}: ${i.text} ${i.url}`);
+    .map((i) => `${i.test} (${i.machine}): ${i.text} ${i.url}`);
   expect(bad).toEqual([]);
+});
+
+// PHÁT HIỆN F-16 (BAO_CAO_E2E.md, thấp): gõ mã hàng từng chữ trong lưới phiếu, mỗi tiền tố ("K", "KT", "KT4"…) được tra
+// "mã chính xác" và nhận 404 ⇒ mỗi lần gõ chậm là một dòng lỗi đỏ trong console. Người dùng không thấy, nhưng là lỗi console.
+test.fail('REQ-UX F-16 Gõ mã hàng trong lưới phiếu không sinh phản hồi 404 (tra mã khi chưa gõ xong)', async () => {
+  const lookups = readIssues().filter((i) => http4xx(i) && /status of 404/.test(i.text) && /\/api\/products\/lookup\?/.test(i.url || ''));
+  expect(lookups.map((i) => `${i.test}: ${(i.url || '').replace(/^.*\/api/, '/api')}`)).toEqual([]);
+});
+
+test('REQ-UX Màn đăng nhập của trình duyệt chưa từng đăng nhập không gọi /api/auth/me (không lỗi 401 đỏ)', async ({ browser }) => {
+  const ctx = await browser.newContext({ baseURL: BASE_URL });
+  const page = await ctx.newPage();
+  const calls = [];
+  page.on('request', (r) => r.url().includes('/api/auth/me') && calls.push(r.url()));
+  const errors = [];
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  await page.goto('/');
+  await expect(page.getByLabel('Tên đăng nhập')).toBeVisible();
+  expect({ calls, errors }).toEqual({ calls: [], errors: [] });
+  await ctx.close();
 });

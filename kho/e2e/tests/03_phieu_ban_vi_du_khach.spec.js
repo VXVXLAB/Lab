@@ -6,6 +6,7 @@ const ui = require('../lib/ui');
 const { Api } = require('../lib/api');
 const { readXlsx, readDocx, findRow } = require('../lib/files');
 const { SLIP_PRODUCTS, THANHCONG, COMPANY } = require('../lib/data');
+const { printAndExports, comparable } = require('../lib/printcmp');
 
 test.describe.configure({ mode: 'serial' });
 
@@ -58,8 +59,11 @@ test.describe('Câu chuyện 3: phiếu bán hàng theo ví dụ của khách, c
     await page.keyboard.press('Enter');
     await expect(page.locator('#partner')).toBeFocused();
     await page.keyboard.type('thanh cong', { delay: 20 });
-    await expect(page.locator('.ant-select-item-option-active')).toContainText('Xưởng cơ khí Thành Công');
+    await expect(page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option').first()).toContainText('Xưởng cơ khí Thành Công');
+    await expect(page.locator('[data-search-pending]')).toHaveCount(0);
+    if ((await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-active').count()) === 0) await page.keyboard.press('ArrowDown'); // F-11
     await page.keyboard.press('Enter');
+    await expect(page.locator('.hf-partner .ant-select-selection-item')).toContainText('Xưởng cơ khí Thành Công');
     await expect(page.locator('#warehouse')).toBeFocused();
     await expect(page.locator('.hf-partner .ant-select-selection-item')).toContainText('Xưởng cơ khí Thành Công');
     // cạnh tên khách có công nợ hiện tại (hướng dẫn: "Cạnh tên khách có công nợ hiện tại của khách")
@@ -154,7 +158,7 @@ test.describe('Câu chuyện 3: phiếu bán hàng theo ví dụ của khách, c
     LINES.forEach((e, i) => {
       const r = x.rows[h + 1 + i];
       expect(r[0]).toBe(i + 1);
-      if (e.code !== 'DICHVU') expect(r[1]).toBe(e.code); // mã của dòng dịch vụ: xem test riêng (phát hiện F-03)
+      expect(r[1]).toBe(e.code); // dòng dịch vụ ghi DICHVU như mẫu khách (F-03 đã sửa)
       expect(r[2]).toBe(e.name);
       expect(typeof r[4]).toBe('number');
       expect(r[4]).toBe(e.qty);
@@ -184,7 +188,7 @@ test.describe('Câu chuyện 3: phiếu bán hàng theo ví dụ của khách, c
     expect(t[0].slice(0, 7)).toEqual(['STT', 'Mã hàng', 'Tên hàng', 'ĐVT', 'Số lượng', 'Đơn giá', 'Thành tiền']);
     LINES.forEach((e, i) => {
       const r = t[1 + i];
-      if (e.code !== 'DICHVU') expect(r[1]).toBe(e.code); // mã của dòng dịch vụ: xem test riêng (phát hiện F-03)
+      expect(r[1]).toBe(e.code); // dòng dịch vụ ghi DICHVU như mẫu khách (F-03 đã sửa)
       expect(r[2]).toBe(e.name);
       expect(r[6]).toBe(e.amount === null ? '' : ui.money(e.amount));
     });
@@ -196,15 +200,15 @@ test.describe('Câu chuyện 3: phiếu bán hàng theo ví dụ của khách, c
     expect(d.paragraphs.join('\n') + d.tables.flat(2).join('\n')).toMatch(/Tổng nợ \(đến ngày 25\/09\/2026\):\s*5\.990\.000/);
   });
 
-  // PHÁT HIỆN F-03 (BAO_CAO_E2E.md): bản in ghi mã dòng dịch vụ là "DICHVU" đúng như mẫu phiếu của khách,
-  // nhưng file Excel/Word (file gửi khách) lại ghi "DV" — cùng một phiếu, hai cách ghi.
-  test.fail('REQ-047 REQ-087 Mã dòng dịch vụ trong file Excel/Word giống bản in và mẫu của khách ("DICHVU")', async () => {
-    const x = await readXlsx(files.xlsx);
-    const h = findRow(x.rows, /^Tên hàng$/);
-    const d = await readDocx(files.docx);
-    const t = d.tables.find((tb) => tb[0] && tb[0].includes('Tên hàng'));
-    const xCodes = [x.rows[h + 6][1], x.rows[h + 7][1]];
-    const dCodes = [t[6][1], t[7][1]];
-    expect({ xlsx: xCodes, docx: dCodes }).toEqual({ xlsx: ['DICHVU', 'DICHVU'], docx: ['DICHVU', 'DICHVU'] });
+  // F-03 (đã sửa, kiểm lại): file Excel/Word phải khớp bản in từng phần — tiêu đề, "Số", khách "Tên (MÃ)", địa chỉ,
+  // "Xuất từ kho:", bảng (mã DICHVU), Cộng, Nợ cũ/Tổng nợ, dòng ngày, 4 ô ký, "Ghi sổ bởi …".
+  test('REQ-047 REQ-073 REQ-087 File Excel và Word khớp bản in (DICHVU, nhãn kho, 4 ô ký, Nợ cũ/Tổng nợ)', async () => {
+    const r = await printAndExports(page, '03-phieu-ban-so-khop');
+    expect(r.print.signers).toEqual(['Người lập phiếu', 'Người giao hàng', 'Khách hàng', 'Thủ kho']);
+    expect(r.print.info).toContain(`Khách hàng: ${THANHCONG.name} (THANHCONG)`);
+    expect(r.print.info).toContain('Xuất từ kho: Kho 1');
+    expect(r.print.rows.map((x) => x[1])).toEqual(LINES.map((l) => l.code));
+    expect(comparable(r.xlsx)).toEqual(r.print);
+    expect(comparable(r.docx)).toEqual(r.print);
   });
 });

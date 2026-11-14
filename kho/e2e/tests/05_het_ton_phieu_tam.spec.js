@@ -118,6 +118,14 @@ test.describe('Câu chuyện 5: hết hàng, phiếu tạm, hàng cần đặt',
     await page.getByRole('button', { name: /Lập phiếu nhập cho 1 mã thiếu/ }).click();
     await expect(page.getByRole('heading', { name: 'Phiếu nhập mua hàng' })).toBeVisible();
     await ui.toast(page, /Đã điền sẵn 1 mã thiếu/);
+    await expect(page.locator('.line-grid tbody tr').filter({ hasText: P.name })).toBeVisible();
+    // F-08 (đã sửa): phiếu do phần mềm điền sẵn, chưa gõ gì ⇒ rời đi không bị hỏi "Phiếu chưa lưu"
+    await ui.clickMenu(page, 'Mua hàng', 'Hàng cần đặt');
+    await expect(page.getByRole('heading', { name: 'Hàng cần đặt' })).toBeVisible();
+    await expect(page.locator('.ant-modal-confirm').filter({ hasText: 'Phiếu chưa lưu' })).toHaveCount(0);
+    await page.getByRole('button', { name: /Lập phiếu nhập cho 1 mã thiếu/ }).click();
+    await expect(page.getByRole('heading', { name: 'Phiếu nhập mua hàng' })).toBeVisible();
+    await expect(page.locator('.line-grid tbody tr').filter({ hasText: P.name })).toBeVisible();
     const lines = await ui.readLines(page);
     expect(lines.length).toBe(1);
     expect(lines[0].code).toBe(P.code);
@@ -174,9 +182,9 @@ test.describe('Câu chuyện 5: hết hàng, phiếu tạm, hàng cần đặt',
     await page.waitForTimeout(800);
   });
 
-  // PHÁT HIỆN F-06 (BAO_CAO_E2E.md): ngay sau khi xóa phiếu tạm, màn hình vẫn gọi lại máy chủ để tải phiếu vừa xóa và
-  // kiểm tra tồn của nó ⇒ các phản hồi 404 thừa (Chrome in lỗi đỏ ra console). Người dùng không thấy, nhưng là lệnh gọi sai.
-  test.fail('REQ-UX Sau khi xóa phiếu tạm không còn lệnh gọi nào tới phiếu đã xóa (không có 404)', async () => {
+  // F-06 (đã sửa, kiểm lại): trước đây ngay sau khi xóa phiếu tạm, màn hình vẫn tải lại phiếu vừa xóa và kiểm tra tồn
+  // của nó ⇒ 404 thừa. Nay không còn lệnh gọi nào trả 404 cho phiếu đã xóa.
+  test('REQ-UX Sau khi xóa phiếu tạm không còn lệnh gọi nào tới phiếu đã xóa (không có 404)', async () => {
     expect(after404).toEqual([]);
   });
 });

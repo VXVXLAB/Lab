@@ -136,35 +136,92 @@ test.describe('Câu chuyện 10: công nợ và mở chi tiết tại chỗ', ()
     await expect(page.locator('.ant-drawer-open')).toHaveCount(0);
   });
 
-  // PHÁT HIỆN F-08 (BAO_CAO_E2E.md): phiếu thu mở từ nút "Thu tiền" (khách do phần mềm điền sẵn, người dùng chưa gõ gì)
-  // bị coi là "có thay đổi chưa lưu" ⇒ rời đi bị hỏi "Phiếu chưa lưu … sẽ mất các thay đổi" dù không có gì để mất.
-  test.fail('REQ-UX Phiếu thu vừa mở từ "Thu tiền", chưa gõ gì: rời đi không bị hỏi "Phiếu chưa lưu"', async () => {
-    await ui.clickMenu(page, 'Công nợ', 'Phải thu khách hàng');
+  // F-08 (đã sửa, kiểm lại cả hai chiều): giá trị phần mềm tự điền là mốc ⇒ chưa gõ gì thì rời đi KHÔNG hỏi;
+  // gõ bất cứ gì thì PHẢI hỏi.
+  const leave = async (group, item, heading) => {
+    await ui.clickMenu(page, group, item);
     const c = page.locator('.ant-modal-confirm').filter({ hasText: 'Phiếu chưa lưu' });
     const asked = await c.waitFor({ timeout: 2000 }).then(() => true, () => false);
-    if (asked) await ui.shot(page, 'F08-hoi-chua-luu-du-chua-go-gi');
-    if (asked) await c.getByRole('button', { name: 'Bỏ thay đổi, rời đi' }).click();
+    return { asked, c, heading };
+  };
+
+  test('REQ-UX F-08: phiếu thu vừa mở từ "Thu tiền", chưa gõ gì ⇒ rời đi không bị hỏi', async () => {
+    const r = await leave('Công nợ', 'Phải thu khách hàng');
+    if (r.asked) await r.c.getByRole('button', { name: 'Bỏ thay đổi, rời đi' }).click();
     await expect(page.getByRole('heading', { name: 'Công nợ phải thu khách hàng' })).toBeVisible();
-    expect(asked).toBe(false);
+    expect(r.asked).toBe(false);
   });
 
-  test('REQ-062 Từ phiếu bán đã ghi sổ bấm "Thu tiền phiếu này": phiếu thu điền sẵn khách, chứng từ liên quan và số tiền', async () => {
-    await ui.menu(page, 'Bán hàng', 'Phiếu bán');
-    await page.getByPlaceholder('Số phiếu, tên đối tác, ghi chú…').fill(no.xk);
-    await page.getByRole('row', { name: new RegExp(no.xk) }).dblclick();
-    await expect(page.getByText('ĐÃ GHI SỔ', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Thu tiền phiếu này' }).click();
+  test('REQ-UX F-08: mở từ "Thu tiền" rồi gõ ghi chú ⇒ rời đi PHẢI hỏi; "Ở lại phiếu" giữ chữ đã gõ', async () => {
+    await ui.readReport(page, { waitFor: 'MINHTAM' });
+    await page.getByRole('row', { name: /MINHTAM/ }).click();
+    await ui.topDrawer(page).getByRole('button', { name: 'Thu tiền', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Phiếu thu tiền' })).toBeVisible();
+    await page.getByLabel('Ghi chú / lý do').fill('Khách hẹn chuyển khoản');
+    let r = await leave('Công nợ', 'Phải thu khách hàng');
+    expect(r.asked).toBe(true);
+    await r.c.getByRole('button', { name: 'Ở lại phiếu' }).click();
+    await expect(page.getByLabel('Ghi chú / lý do')).toHaveValue('Khách hẹn chuyển khoản');
+    // dòng tiền gõ thêm cũng tính là thay đổi
+    await page.locator('[data-vcell$=":desc"]').last().click();
+    await page.keyboard.type('Thu một phần');
+    r = await leave('Công nợ', 'Phải thu khách hàng');
+    expect(r.asked).toBe(true);
+    await r.c.getByRole('button', { name: 'Bỏ thay đổi, rời đi' }).click();
+    await expect(page.getByRole('heading', { name: 'Công nợ phải thu khách hàng' })).toBeVisible();
+  });
+
+  test('REQ-UX F-08: phiếu thu mới (F2, chỉ có tài khoản mặc định) chưa gõ gì ⇒ không hỏi; chọn khách ⇒ hỏi', async () => {
+    await ui.menu(page, 'Quỹ & Ngân hàng', 'Thu tiền');
+    await page.locator('body').press('F2');
+    await expect(page.getByText('PHIẾU MỚI — chưa lưu', { exact: true })).toBeVisible();
+    let r = await leave('Quỹ & Ngân hàng', 'Chi tiền');
+    expect(r.asked).toBe(false);
+    await expect(page.getByRole('heading', { name: /^Phiếu chi tiền/ })).toBeVisible();
+    await page.locator('body').press('F2');
+    await expect(page.getByText('PHIẾU MỚI — chưa lưu', { exact: true })).toBeVisible();
+    await ui.selectByTyping(page, page.locator('#partner'), 'TANTHANH', /Tân Thành/);
+    r = await leave('Quỹ & Ngân hàng', 'Thu tiền');
+    expect(r.asked).toBe(true);
+    await r.c.getByRole('button', { name: 'Bỏ thay đổi, rời đi' }).click();
+  });
+
+  test('REQ-062 Từ phiếu bán đã ghi sổ bấm "Thu tiền phiếu này": phiếu thu điền sẵn khách, chứng từ liên quan và số tiền; chưa sửa ⇒ không hỏi, sửa số tiền ⇒ hỏi', async () => {
+    const openFromSale = async () => {
+      await ui.menu(page, 'Bán hàng', 'Phiếu bán');
+      await page.getByPlaceholder('Số phiếu, tên đối tác, ghi chú…').fill(no.xk);
+      await page.getByRole('row', { name: new RegExp(no.xk) }).dblclick();
+      await expect(page.getByText('ĐÃ GHI SỔ', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Thu tiền phiếu này' }).click();
+      await expect(page.getByRole('heading', { name: 'Phiếu thu tiền' })).toBeVisible();
+    };
+    await openFromSale();
     await expect(page.locator('.hf-partner .ant-select-selection-item')).toContainText(CUS.name);
     const row = page.locator('.voucher-editor .line-grid tbody tr').first();
     await expect(row.locator('[data-vcell$=":desc"]')).toHaveValue(`Thu tiền phiếu ${no.xk} ngày 02/10/2026`);
     await expect(row).toContainText(no.xk);
     await expect(row.getByLabel('Số tiền dòng 1')).toHaveValue('1.000.000');
     await expect(page.locator('.money-words')).toHaveText('Bằng chữ: Một triệu đồng');
-    // không lưu: rời đi, phần mềm hỏi lại
-    await ui.clickMenu(page, 'Công nợ', 'Phải thu khách hàng');
-    const c = page.locator('.ant-modal-confirm').filter({ hasText: 'Phiếu chưa lưu' });
-    await c.getByRole('button', { name: 'Bỏ thay đổi, rời đi' }).click();
+    let r = await leave('Công nợ', 'Phải thu khách hàng');
+    expect(r.asked).toBe(false);
     await expect(page.getByRole('heading', { name: 'Công nợ phải thu khách hàng' })).toBeVisible();
+    await openFromSale();
+    // sửa sau khi dòng điền sẵn đã hiện (như người dùng nhìn thấy dòng rồi mới sửa)
+    await expect(page.locator('.voucher-editor .line-grid tbody tr').first().getByLabel('Số tiền dòng 1')).toHaveValue('1.000.000');
+    await page.locator('.voucher-editor .line-grid tbody tr').first().getByLabel('Số tiền dòng 1').fill('600000');
+    await expect(page.locator('.money-words')).toHaveText('Bằng chữ: Sáu trăm nghìn đồng');
+    r = await leave('Công nợ', 'Phải thu khách hàng');
+    expect(r.asked).toBe(true);
+    await r.c.getByRole('button', { name: 'Bỏ thay đổi, rời đi' }).click();
+    await expect(page.getByRole('heading', { name: 'Công nợ phải thu khách hàng' })).toBeVisible();
+  });
+
+  test('REQ-069 REQ-UX Sổ chi tiết công nợ trong ngăn kéo có nút In: chỉ in ngăn kéo đó', async () => {
+    await ui.readReport(page, { waitFor: 'MINHTAM' });
+    await page.getByRole('row', { name: /MINHTAM/ }).click();
+    const dr = ui.topDrawer(page);
+    await ui.readReport(dr, { waitFor: no.pt });
+    await ui.checkDrawerPrint(page, dr, no.pt);
+    await page.keyboard.press('Escape');
   });
 });
