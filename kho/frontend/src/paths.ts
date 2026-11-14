@@ -1,0 +1,31 @@
+// Mọi đường dẫn màn hình. Không viết chuỗi đường dẫn ở chỗ khác.
+export const paths = {
+  home: '/',
+  sales: '/ban-hang/phieu-ban',
+  salesReturns: '/ban-hang/khach-tra-hang',
+  drafts: '/ban-hang/phieu-tam',
+  purchases: '/mua-hang/phieu-nhap',
+  purchaseReturns: '/mua-hang/tra-hang-ncc',
+  reorder: '/mua-hang/hang-can-dat',
+  stock: '/kho/ton-kho',
+  stockLedger: '/kho/the-kho',
+  transfers: '/kho/chuyen-kho',
+  opening: '/kho/ton-dau-ky',
+  receivable: '/cong-no/phai-thu',
+  payable: '/cong-no/phai-tra',
+  receipts: '/quy/thu',
+  payments: '/quy/chi',
+  cashBook: '/quy/so-quy',
+  reports: '/bao-cao',
+  products: '/danh-muc/hang-hoa',
+  productGroups: '/danh-muc/nhom-hang',
+  customers: '/danh-muc/khach-hang',
+  suppliers: '/danh-muc/nha-cung-cap',
+  warehouses: '/danh-muc/kho',
+  cashAccounts: '/danh-muc/tai-khoan-tien',
+  users: '/he-thong/nguoi-dung',
+  /** Mở một chứng từ kho (giai đoạn 2). */
+  document: (id: number | string) => `/chung-tu/${id}`,
+  /** Mở một phiếu thu/chi (giai đoạn 3). */
+  voucher: (id: number | string) => `/phieu-thu-chi/${id}`,
+} as const;
