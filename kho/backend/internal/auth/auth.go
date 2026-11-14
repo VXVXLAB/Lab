@@ -109,11 +109,11 @@ func (s *Service) UserBySession(ctx context.Context, token string) (*User, error
 
 // UserInput là dữ liệu tạo/sửa người dùng.
 type UserInput struct {
-	Username string  `json:"username"`
-	Password string  `json:"password"`
-	FullName string  `json:"full_name"`
-	Role     string  `json:"role"`
-	Active   *bool   `json:"active"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	FullName string `json:"full_name"`
+	Role     string `json:"role"`
+	Active   *bool  `json:"active"`
 }
 
 // ListUsers liệt kê người dùng.

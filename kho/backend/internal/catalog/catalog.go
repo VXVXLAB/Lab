@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -77,7 +78,8 @@ func deleteErr(err error, what string) error {
 	if err == nil {
 		return nil
 	}
-	if ae := apperr.From(err); ae.Code == apperr.CodeInUse {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "23503" {
 		return apperr.InUse(what + " đã phát sinh dữ liệu, không xóa được. Hãy chuyển sang \"Ngừng sử dụng\".")
 	}
 	return err

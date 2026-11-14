@@ -116,16 +116,19 @@ func (d Date) Value() (driver.Value, error) {
 	return d.String(), nil
 }
 
-// Fold chuẩn hóa chuỗi để tìm kiếm: chữ thường, bỏ dấu tiếng Việt, đ → d.
-func Fold(s string) string {
+// StripAccents bỏ dấu tiếng Việt (giữ hoa/thường), Đ → D, đ → d.
+func StripAccents(s string) string {
 	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
 	out, _, err := transform.String(t, s)
 	if err != nil {
 		out = s
 	}
-	out = strings.ToLower(out)
-	out = strings.ReplaceAll(out, "đ", "d")
-	return strings.Join(strings.Fields(out), " ")
+	return strings.NewReplacer("đ", "d", "Đ", "D").Replace(out)
+}
+
+// Fold chuẩn hóa chuỗi để tìm kiếm: chữ thường, bỏ dấu tiếng Việt, đ → d.
+func Fold(s string) string {
+	return strings.Join(strings.Fields(strings.ToLower(StripAccents(s))), " ")
 }
 
 // LikePattern tạo mẫu ILIKE '%...%' an toàn từ chuỗi đã Fold.

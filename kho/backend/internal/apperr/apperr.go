@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -79,7 +80,7 @@ func From(err error) *Error {
 		case "23505":
 			return New(http.StatusBadRequest, CodeValidation, "Mã đã tồn tại, vui lòng chọn mã khác", map[string]any{"constraint": pe.ConstraintName})
 		case "23503":
-			if pe.TableName != "" && pe.Message != "" && containsDelete(pe.Message) {
+			if strings.Contains(pe.Message, "update or delete") {
 				return InUse("Dữ liệu đã phát sinh chứng từ, không xóa được (có thể ngừng sử dụng thay vì xóa)")
 			}
 			return New(http.StatusBadRequest, CodeValidation, "Dữ liệu tham chiếu không tồn tại", map[string]any{"constraint": pe.ConstraintName})
@@ -92,14 +93,4 @@ func From(err error) *Error {
 		}
 	}
 	return New(http.StatusInternalServerError, CodeInternal, "Lỗi hệ thống, vui lòng thử lại hoặc báo quản trị", nil)
-}
-
-func containsDelete(msg string) bool {
-	// "update or delete on table ... violates foreign key constraint ..."
-	for i := 0; i+16 <= len(msg); i++ {
-		if msg[i:i+16] == "update or delete" {
-			return true
-		}
-	}
-	return false
 }

@@ -57,7 +57,9 @@ func lineErr(i int, field, msg string) error {
 }
 
 // validate kiểm tra & chuẩn hóa dữ liệu nhập.
-func (s *Service) validate(ctx context.Context, q db.Q, in Input) (header, []pline, error) {
+// strict = true (tạo phiếu mới): không cho dùng kho / đối tác / mặt hàng đã ngừng sử dụng.
+// Khi sửa phiếu cũ thì cho phép (dữ liệu cũ có thể tham chiếu mục đã ngừng).
+func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool) (header, []pline, error) {
 	h := header{DocType: in.DocType, DocDate: in.DocDate, PartnerID: in.PartnerID, WarehouseID: in.WarehouseID, ToWarehouseID: in.ToWarehouseID, Note: strings.TrimSpace(in.Note)}
 	if _, ok := TypeNames[h.DocType]; !ok {
 		return h, nil, apperr.ValidationField("doc_type", "Loại chứng từ không hợp lệ (purchase, sale, sale_return, purchase_return, transfer, opening)")
@@ -71,8 +73,12 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input) (header, []pli
 	if h.WarehouseID == 0 {
 		return h, nil, apperr.ValidationField("warehouse_id", "Vui lòng chọn kho")
 	}
-	if _, err := s.Catalog.GetWarehouse(ctx, q, h.WarehouseID); err != nil {
+	wh, err := s.Catalog.GetWarehouse(ctx, q, h.WarehouseID)
+	if err != nil {
 		return h, nil, apperr.ValidationField("warehouse_id", "Kho không tồn tại")
+	}
+	if strict && !wh.Active {
+		return h, nil, apperr.ValidationField("warehouse_id", "Kho "+wh.Name+" đã ngừng sử dụng")
 	}
 	if h.PartnerID != nil && *h.PartnerID == 0 {
 		h.PartnerID = nil
@@ -88,8 +94,12 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input) (header, []pli
 		if *h.ToWarehouseID == h.WarehouseID {
 			return h, nil, apperr.ValidationField("to_warehouse_id", "Kho nhận phải khác kho xuất")
 		}
-		if _, err := s.Catalog.GetWarehouse(ctx, q, *h.ToWarehouseID); err != nil {
+		tw, err := s.Catalog.GetWarehouse(ctx, q, *h.ToWarehouseID)
+		if err != nil {
 			return h, nil, apperr.ValidationField("to_warehouse_id", "Kho nhận không tồn tại")
+		}
+		if strict && !tw.Active {
+			return h, nil, apperr.ValidationField("to_warehouse_id", "Kho "+tw.Name+" đã ngừng sử dụng")
 		}
 		if h.PartnerID != nil {
 			return h, nil, apperr.ValidationField("partner_id", "Phiếu chuyển kho không có đối tác")
@@ -110,6 +120,9 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input) (header, []pli
 		p, err := s.Catalog.GetPartner(ctx, q, *h.PartnerID)
 		if err != nil {
 			return h, nil, apperr.ValidationField("partner_id", "Đối tác không tồn tại")
+		}
+		if strict && !p.Active {
+			return h, nil, apperr.ValidationField("partner_id", "Đối tác "+p.Name+" đã ngừng sử dụng")
 		}
 		if needsCustomer(h.DocType) && !p.IsCustomer {
 			return h, nil, apperr.ValidationField("partner_id", "Đối tác "+p.Name+" không phải là khách hàng")
@@ -138,6 +151,9 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input) (header, []pli
 			}
 		default:
 			return h, nil, lineErr(i, "product_id", "vui lòng chọn mã hàng")
+		}
+		if strict && !p.Active {
+			return h, nil, lineErr(i, "product_id", "mặt hàng "+p.Code+" đã ngừng sử dụng")
 		}
 		pl := pline{LineNo: i + 1, Product: p, Description: strings.TrimSpace(li.Description), Note: strings.TrimSpace(li.Note)}
 		if li.Unit != nil {
@@ -395,7 +411,7 @@ func checkVersion(r *lockedRow, version int) error {
 func (s *Service) Create(ctx context.Context, userID int64, in Input) (*Document, error) {
 	var id int64
 	err := db.InTx(ctx, s.Pool, func(tx pgx.Tx) error {
-		h, lines, err := s.validate(ctx, tx, in)
+		h, lines, err := s.validate(ctx, tx, in, true)
 		if err != nil {
 			return err
 		}
@@ -445,7 +461,7 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Docu
 		if err != nil {
 			return err
 		}
-		h, lines, err := s.validate(ctx, tx, in)
+		h, lines, err := s.validate(ctx, tx, in, false)
 		if err != nil {
 			return err
 		}
@@ -524,7 +540,7 @@ func (s *Service) loadForPost(ctx context.Context, q db.Q, d *Document) (header,
 		}
 		in.Lines = append(in.Lines, li)
 	}
-	return s.validate(ctx, q, in)
+	return s.validate(ctx, q, in, false)
 }
 
 // Post ghi sổ phiếu tạm: cấp số chính thức, sinh bút toán kho, phát sinh công nợ (R5, R6).

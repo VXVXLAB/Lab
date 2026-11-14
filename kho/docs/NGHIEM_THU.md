@@ -1,0 +1,121 @@
+# NGHIỆM THU — ma trận 91 đầu việc ↔ test tự động ↔ kết quả
+
+- Test tích hợp: `backend/tests/*_test.go`, chạy trên PostgreSQL 16 thật qua HTTP (`httptest.Server` + handler thật),
+  mỗi test một schema CSDL riêng (migrate + seed), độc lập, chạy song song.
+- Lệnh: `cd backend && go test ./... -count=1` (và `-race`). Kết quả bên dưới là lần chạy ngày 14/11/2026:
+  **32/32 test tích hợp ĐẠT** (+ 3 unit test `internal/util`), cả khi chạy `-race -count=2`.
+- Cột "Test" liệt kê mọi test có gắn mã (tên `TestREQxxx_…` hoặc chú thích `// REQ: …`). Một test phủ nhiều mã.
+- REQ-001…008 là quy tắc nghiệp vụ đã chốt trong `docs/SPEC.md` §2 (đề xuất kỹ thuật, **cần khách xác nhận**);
+  các test liệt kê ở đó minh họa quy tắc. Chỗ diễn giải SPEC: `docs/QUYET_DINH.md`.
+
+| Mã | Đầu việc | Test | Kết quả |
+|---|---|---|---|
+| 001 | Mô hình 4 kho | `TestREQ001_DanhMucCRUDVaInUse`<br>`TestREQ009_010_076_TonTong4KhoVaTungKho`<br>`TestREQ011_077_ChuyenKhoNoiBo` | Quy tắc chốt trong SPEC §2 (R1); cần khách xác nhận — có test minh họa: ĐẠT |
+| 002 | Nhập-Xuất-Tồn theo mã hàng | `TestREQ012_078_TheKhoViDuKhachHang`<br>`TestREQ016_NhapMuaCuaAi` | Quy tắc chốt trong SPEC §2 (R2); cần khách xác nhận — có test minh họa: ĐẠT |
+| 003 | Sửa chứng từ quá khứ | `TestREQ035_039_081_SuaPhieuNhapThang1VaoThang9`<br>`TestREQ039_BoGhiSoVaXoaPhieuTam` | Quy tắc chốt trong SPEC §2 (R3); cần khách xác nhận — có test minh họa: ĐẠT |
+| 004 | Cảnh báo bán lỗ | `TestREQ028_029_080_CanhBaoBanLo` | Quy tắc chốt trong SPEC §2 (R4); cần khách xác nhận — có test minh họa: ĐẠT |
+| 005 | Phiếu tạm | `TestREQ030_031_032_079_HetTonChanGhiSoVaIn`<br>`TestREQ040_045_082_PhieuTamHaiMay` | Quy tắc chốt trong SPEC §2 (R5); cần khách xác nhận — có test minh họa: ĐẠT |
+| 006 | Mã Dịch vụ (DV) | `TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu` | Quy tắc chốt trong SPEC §2 (R7); cần khách xác nhận — có test minh họa: ĐẠT |
+| 007 | Thu - chi | `TestREQ056_061_085_ThuChiNhieuDong` | Quy tắc chốt trong SPEC §2 (R9); cần khách xác nhận — có test minh họa: ĐẠT |
+| 008 | Báo cáo & xuất file | `TestREQ008_PhucVuGiaoDienSPA`<br>`TestREQ052_053_084_CongNoKhachHang`<br>`TestREQ071_074_087_XuatPhieuExcelWordChinhSuaDuoc` | Quy tắc chốt trong SPEC §2 (R10); cần khách xác nhận — có test minh họa: ĐẠT |
+| 009 | Tồn tổng 4 kho | `TestREQ009_010_076_TonTong4KhoVaTungKho` | ĐẠT |
+| 010 | Tồn từng kho | `TestREQ009_010_076_TonTong4KhoVaTungKho` | ĐẠT |
+| 011 | Chuyển kho nội bộ | `TestREQ011_077_ChuyenKhoNoiBo` | ĐẠT |
+| 012 | Tra cứu theo mã hàng | `TestREQ012_078_TheKhoViDuKhachHang`<br>`TestREQ019_LocThoiGianTheKho` | ĐẠT |
+| 013 | Tồn đầu kỳ | `TestREQ012_078_TheKhoViDuKhachHang` | ĐẠT |
+| 014 | Thông tin giao dịch | `TestREQ012_078_TheKhoViDuKhachHang` | ĐẠT |
+| 015 | SL Nhập-Xuất-Tồn | `TestREQ012_078_TheKhoViDuKhachHang` | ĐẠT |
+| 016 | Mua của ai | `TestREQ016_NhapMuaCuaAi` | ĐẠT |
+| 017 | Bán cho ai | `TestREQ012_078_TheKhoViDuKhachHang` | ĐẠT |
+| 018 | Khách trả hàng | `TestREQ012_078_TheKhoViDuKhachHang` | ĐẠT |
+| 019 | Lọc thời gian | `TestREQ019_LocThoiGianTheKho` | ĐẠT |
+| 020 | Nhóm VTHH | `TestREQ001_DanhMucCRUDVaInUse`<br>`TestREQ020_TonTheoNhomVTHH` | ĐẠT |
+| 021 | Lịch sử bán từng mặt hàng | `TestREQ021_LichSuBanTungMatHang` | ĐẠT |
+| 022 | Xuất tồn Excel | `TestREQ022_063_075_XuatTonKhoExcel` | ĐẠT |
+| 023 | Phiếu nhập hàng | `TestREQ023_024_PhieuNhapMuaVaGhiSo`<br>`TestREQ023_KiemTraDuLieuNhapKhong500` | ĐẠT |
+| 024 | Ghi sổ phiếu nhập | `TestREQ023_024_PhieuNhapMuaVaGhiSo` | ĐẠT |
+| 025 | Phiếu bán hàng | `TestREQ023_KiemTraDuLieuNhapKhong500`<br>`TestREQ025_026_027_033_034_PhieuBanHang` | ĐẠT |
+| 026 | Giá bán mặc định | `TestREQ001_DanhMucCRUDVaInUse`<br>`TestREQ025_026_027_033_034_PhieuBanHang` | ĐẠT |
+| 027 | Sửa giá bán | `TestREQ025_026_027_033_034_PhieuBanHang` | ĐẠT |
+| 028 | So sánh giá bán - giá mua | `TestREQ028_029_080_CanhBaoBanLo` | ĐẠT |
+| 029 | Cảnh báo bán lỗ | `TestREQ028_029_080_CanhBaoBanLo` | ĐẠT |
+| 030 | Kiểm tra tồn | `TestREQ023_KiemTraDuLieuNhapKhong500`<br>`TestREQ030_031_032_079_HetTonChanGhiSoVaIn`<br>`TestREQ031_HaiMayCungGhiSoTranhTon` | ĐẠT |
+| 031 | Chặn ghi sổ khi tồn = 0 | `TestREQ030_031_032_079_HetTonChanGhiSoVaIn`<br>`TestREQ031_HaiMayCungGhiSoTranhTon` | ĐẠT |
+| 032 | Chặn in khi tồn = 0 | `TestREQ030_031_032_079_HetTonChanGhiSoVaIn` | ĐẠT |
+| 033 | Trừ tồn khi bán | `TestREQ025_026_027_033_034_PhieuBanHang` | ĐẠT |
+| 034 | Công nợ bán hàng | `TestREQ025_026_027_033_034_PhieuBanHang`<br>`TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu`<br>`TestREQ052_053_084_CongNoKhachHang` | ĐẠT |
+| 035 | Mở phiếu nhập cũ | `TestREQ035_039_081_SuaPhieuNhapThang1VaoThang9` | ĐẠT |
+| 036 | Sửa phiếu nhập cũ | `TestREQ035_039_081_SuaPhieuNhapThang1VaoThang9` | ĐẠT |
+| 037 | Mở phiếu bán cũ | `TestREQ035_039_081_SuaPhieuNhapThang1VaoThang9` | ĐẠT |
+| 038 | Sửa phiếu bán cũ | `TestREQ035_039_081_SuaPhieuNhapThang1VaoThang9` | ĐẠT |
+| 039 | Cập nhật sau sửa | `TestREQ035_039_081_SuaPhieuNhapThang1VaoThang9`<br>`TestREQ039_BoGhiSoVaXoaPhieuTam` | ĐẠT |
+| 040 | Tạo phiếu tạm | `TestREQ040_045_082_PhieuTamHaiMay`<br>`TestREQ040_Dashboard` | ĐẠT |
+| 041 | Hàng chưa có tồn | `TestREQ030_031_032_079_HetTonChanGhiSoVaIn`<br>`TestREQ040_045_082_PhieuTamHaiMay` | ĐẠT |
+| 042 | Dữ liệu dùng chung | `TestREQ040_045_082_PhieuTamHaiMay`<br>`TestREQ042_DangNhapPhanQuyen`<br>`TestREQ043_SuKienSSEGiuaHaiMay` | ĐẠT |
+| 043 | Máy khác nhìn thấy | `TestREQ040_045_082_PhieuTamHaiMay`<br>`TestREQ043_SuKienSSEGiuaHaiMay` | ĐẠT |
+| 044 | Máy khác tiếp tục | `TestREQ040_045_082_PhieuTamHaiMay`<br>`TestREQ043_SuKienSSEGiuaHaiMay` | ĐẠT |
+| 045 | Chốt phiếu tạm | `TestREQ039_BoGhiSoVaXoaPhieuTam`<br>`TestREQ040_045_082_PhieuTamHaiMay` | ĐẠT |
+| 046 | Kế toán mua xem phiếu tạm | `TestREQ046_HangCanDatTuPhieuTam` | ĐẠT |
+| 047 | Mã Dịch vụ (DV) | `TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu` | ĐẠT |
+| 048 | Diễn giải Dịch vụ | `TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu` | ĐẠT |
+| 049 | Dịch vụ cộng tiền | `TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu`<br>`TestREQ050_DichVuTruTienGiamCongNo` | ĐẠT |
+| 050 | Dịch vụ trừ tiền | `TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu`<br>`TestREQ050_DichVuTruTienGiamCongNo` | ĐẠT |
+| 051 | Không theo dõi NXT | `TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu`<br>`TestREQ050_DichVuTruTienGiamCongNo` | ĐẠT |
+| 052 | Công nợ Khách hàng | `TestREQ040_Dashboard`<br>`TestREQ052_053_084_CongNoKhachHang` | ĐẠT |
+| 053 | Chi tiết công nợ KH | `TestREQ052_053_084_CongNoKhachHang` | ĐẠT |
+| 054 | Công nợ NCC | `TestREQ040_Dashboard`<br>`TestREQ054_055_CongNoNhaCungCap` | ĐẠT |
+| 055 | Chi tiết công nợ NCC | `TestREQ054_055_CongNoNhaCungCap` | ĐẠT |
+| 056 | Thu tiền quỹ | `TestREQ056_061_085_ThuChiNhieuDong` | ĐẠT |
+| 057 | Chi tiền quỹ | `TestREQ056_061_085_ThuChiNhieuDong` | ĐẠT |
+| 058 | Thu tiền ngân hàng | `TestREQ056_061_085_ThuChiNhieuDong` | ĐẠT |
+| 059 | Chi tiền ngân hàng | `TestREQ056_061_085_ThuChiNhieuDong` | ĐẠT |
+| 060 | Nhiều dòng cùng KH | `TestREQ056_061_085_ThuChiNhieuDong` | ĐẠT |
+| 061 | Nhiều dòng cùng NCC | `TestREQ056_061_085_ThuChiNhieuDong` | ĐẠT |
+| 062 | Liên kết công nợ | `TestREQ052_053_084_CongNoKhachHang`<br>`TestREQ056_061_085_ThuChiNhieuDong` | ĐẠT |
+| 063 | Báo cáo tồn kho | `TestREQ022_063_075_XuatTonKhoExcel` | ĐẠT |
+| 064 | Báo cáo NXT | `TestREQ064_BaoCaoNXT` | ĐẠT |
+| 065 | Báo cáo công nợ | `TestREQ054_055_CongNoNhaCungCap`<br>`TestREQ065_066_067_070_BaoCaoMuaBanCongNo` | ĐẠT |
+| 066 | Báo cáo mua hàng | `TestREQ065_066_067_070_BaoCaoMuaBanCongNo` | ĐẠT |
+| 067 | Báo cáo bán hàng | `TestREQ065_066_067_070_BaoCaoMuaBanCongNo` | ĐẠT |
+| 068 | Mở chi tiết từ báo cáo tồn | `TestREQ068_069_086_MoChiTietTuBaoCao` | ĐẠT |
+| 069 | Mở chi tiết từ công nợ | `TestREQ068_069_086_MoChiTietTuBaoCao` | ĐẠT |
+| 070 | Mở chi tiết từ mua/bán | `TestREQ065_066_067_070_BaoCaoMuaBanCongNo` | ĐẠT |
+| 071 | Xuất phiếu nhập Excel | `TestREQ071_074_087_XuatPhieuExcelWordChinhSuaDuoc` | ĐẠT |
+| 072 | Xuất phiếu xuất Excel | `TestREQ071_074_087_XuatPhieuExcelWordChinhSuaDuoc` | ĐẠT |
+| 073 | Xuất phiếu Word | `TestREQ071_074_087_XuatPhieuExcelWordChinhSuaDuoc` | ĐẠT |
+| 074 | File sau xuất chỉnh sửa được | `TestREQ071_074_087_XuatPhieuExcelWordChinhSuaDuoc` | ĐẠT |
+| 075 | Xuất tồn toàn bộ mã | `TestREQ022_063_075_XuatTonKhoExcel` | ĐẠT |
+| 076 | Kiểm thử tồn 4 kho | `TestREQ009_010_076_TonTong4KhoVaTungKho`<br>`TestREQ031_HaiMayCungGhiSoTranhTon` | ĐẠT |
+| 077 | Kiểm thử chuyển kho | `TestREQ011_077_ChuyenKhoNoiBo` | ĐẠT |
+| 078 | Kiểm thử NXT | `TestREQ012_078_TheKhoViDuKhachHang` | ĐẠT |
+| 079 | Kiểm thử hết tồn | `TestREQ030_031_032_079_HetTonChanGhiSoVaIn` | ĐẠT |
+| 080 | Kiểm thử bán lỗ | `TestREQ028_029_080_CanhBaoBanLo` | ĐẠT |
+| 081 | Kiểm thử sửa chứng từ cũ | `TestREQ035_039_081_SuaPhieuNhapThang1VaoThang9` | ĐẠT |
+| 082 | Kiểm thử phiếu tạm nhiều máy | `TestREQ040_045_082_PhieuTamHaiMay` | ĐẠT |
+| 083 | Kiểm thử Mã Dịch vụ | `TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu`<br>`TestREQ050_DichVuTruTienGiamCongNo` | ĐẠT |
+| 084 | Kiểm thử công nợ | `TestREQ052_053_084_CongNoKhachHang`<br>`TestREQ054_055_CongNoNhaCungCap` | ĐẠT |
+| 085 | Kiểm thử thu-chi nhiều dòng | `TestREQ056_061_085_ThuChiNhieuDong` | ĐẠT |
+| 086 | Kiểm thử mở chi tiết báo cáo | `TestREQ068_069_086_MoChiTietTuBaoCao` | ĐẠT |
+| 087 | Kiểm thử Excel/Word | `TestREQ022_063_075_XuatTonKhoExcel`<br>`TestREQ071_074_087_XuatPhieuExcelWordChinhSuaDuoc` | ĐẠT |
+| 088 | UAT | — | Cần khách hàng (UAT / sửa lỗi sau UAT) — ngoài phạm vi tự động |
+| 089 | Sửa lỗi | — | Cần khách hàng (UAT / sửa lỗi sau UAT) — ngoài phạm vi tự động |
+| 090 | Hướng dẫn sử dụng | — | Chưa làm ở giai đoạn backend (tài liệu hướng dẫn sử dụng thuộc GĐ 4); có `backend/README.md`, `docs/API.md` |
+| 091 | Bàn giao | — | Cần khách hàng (biên bản bàn giao) |
+
+## Các kịch bản bắt buộc và test tương ứng
+
+| Kịch bản | Test |
+|---|---|
+| Thẻ kho đúng ví dụ của khách (WW829HT107k: đầu kỳ 27; bán 4, 3 cho VĨNH PHONG; CHÚ NGỌC MINH trả 1; bán 1 cho NHỰA PHẠM GIA ⇒ tồn 23, 20, 21, 20; cộng 1 / 8 / 20; diễn giải có tên đối tượng) | `TestREQ012_078_TheKhoViDuKhachHang` |
+| Phiếu bán đúng mẫu của khách (5 dòng hàng + DICHVU ghi chú giá trống + DICHVU 400.000 ⇒ Cộng 3.990.000; nợ cũ 2.000.000 ⇒ tổng nợ 5.990.000), xuất Excel + Word kiểm tra từng ô | `TestREQ047_083_PhieuBanMauCuaKhachVoiDichVu` |
+| Tồn tổng 4 kho + từng kho | `TestREQ009_010_076_TonTong4KhoVaTungKho` |
+| Chuyển kho nội bộ | `TestREQ011_077_ChuyenKhoNoiBo` |
+| Sửa phiếu nhập tháng 1 vào tháng 9 ⇒ tồn/công nợ/báo cáo đổi; sửa lùi làm âm kho bị từ chối (giảm SL, đổi kho, dời ngày, bỏ ghi sổ) | `TestREQ035_039_081_SuaPhieuNhapThang1VaoThang9` |
+| Phiếu tạm có hàng hết tồn: lập được, xuất "PHIẾU TẠM (chưa ghi sổ)", ghi sổ bị chặn | `TestREQ030_031_032_079_HetTonChanGhiSoVaIn` |
+| Cảnh báo lỗ + `confirm_loss` | `TestREQ028_029_080_CanhBaoBanLo` |
+| Dòng dịch vụ âm làm giảm công nợ | `TestREQ050_DichVuTruTienGiamCongNo` |
+| Thu/chi nhiều dòng tiền mặt + ngân hàng | `TestREQ056_061_085_ThuChiNhieuDong` |
+| Hai phiên (hai người dùng = hai máy) cùng xem, tiếp tục phiếu tạm; `VERSION_CONFLICT` khi version cũ | `TestREQ040_045_082_PhieuTamHaiMay` |
+| SSE giao sự kiện giữa hai máy | `TestREQ043_SuKienSSEGiuaHaiMay` |
+| Hai máy cùng ghi sổ tranh cùng lượng tồn — chỉ một thành công (5 vòng + 10 phiếu đồng thời); đã kiểm chứng bỏ khóa thì test đỏ | `TestREQ031_HaiMayCungGhiSoTranhTon` |
+| Xuất xlsx/docx mở lại kiểm tra nội dung; xlsx thêm/bớt dòng cột rồi lưu; docx có `<w:tbl>` | `TestREQ071_074_087_XuatPhieuExcelWordChinhSuaDuoc`, `TestREQ022_063_075_XuatTonKhoExcel` |
