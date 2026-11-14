@@ -152,6 +152,9 @@ type Summary struct {
 
 // LineInput là dòng chứng từ do client gửi.
 type LineInput struct {
+	// ID (tùy chọn, khi sửa): id của dòng đang có của CHÍNH phiếu này ⇒ giữ nguyên id dòng.
+	// Không gửi / id không thuộc phiếu / id lặp lại ⇒ dòng mới (id mới).
+	ID          int64            `json:"id"`
 	ProductID   int64            `json:"product_id"`
 	ProductCode string           `json:"product_code"`
 	Description string           `json:"description"`

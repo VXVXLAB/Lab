@@ -130,3 +130,9 @@ người dùng không rành công nghệ vẫn dùng được. Điểm đánh d�
 | L2 | Tìm mặt hàng ở mọi nơi theo từ, tách theo khoảng trắng (giữ "3.2", "er70s6-12"), mỗi từ liền trong mã hoặc tên (cột `search_key`), thứ tự bất kỳ; danh mục mặt hàng xếp trùng mã → mã bắt đầu → mọi từ trong tên → còn lại; báo cáo vẫn sắp theo mã. Từ có thể khớp trong mã (vd. "32" khớp mã "KT42132"). Ký tự `%`, `_` được coi là chữ thường. | F-13: thống nhất với ô Mã hàng trong lưới phiếu. |
 | L3 | Dòng địa chỉ trên file xuất bỏ phần trống. | F-09. |
 | L4 | `GET /products/lookup?optional=1` ⇒ luôn 200 `{"found": bool, "product": Product|null}`; mặc định giữ 404. | F-16: gõ từng chữ không sinh 404 trong console; bộ QA dựa vào hành vi mặc định. |
+
+## M. Id dòng ổn định khi sửa
+
+| # | Quyết định | Lý do |
+|---|---|---|
+| M1 | PUT chứng từ / phiếu thu chi: dòng gửi kèm `id` thuộc chính phiếu ⇒ UPDATE tại chỗ, giữ id; `id` của phiếu khác hoặc lặp lại ⇒ **coi là dòng mới** (không trả 400, để bản ghép xung đột của giao diện không bị chặn); dòng không gửi lại ⇒ xóa. Bút toán kho của phiếu đã ghi sổ được xóa và sinh lại như trước (liên kết `stock_movements.line_id` trỏ đúng id dòng mới/giữ). Liên kết phiếu thu → chứng từ (`document_id`) và nhật ký không tham chiếu id dòng nên không bị ảnh hưởng. | Giao diện ghép xung đột hai máy cần nhận ra đúng từng dòng. |

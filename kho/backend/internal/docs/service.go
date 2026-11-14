@@ -31,6 +31,7 @@ var maxPrice = decimal.New(1, 14) // 10^14
 
 // pline là dòng chứng từ đã kiểm tra, sẵn sàng ghi.
 type pline struct {
+	ReqID       int64 // id dòng client gửi (có thể không thuộc phiếu)
 	LineNo      int
 	Product     *catalog.Product
 	Description string
@@ -161,7 +162,7 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 		if strict && !p.Active {
 			return h, nil, lineErr(i, "product_id", "mặt hàng "+p.Code+" đã ngừng sử dụng")
 		}
-		pl := pline{LineNo: i + 1, Product: p, Description: strings.TrimSpace(li.Description), Note: strings.TrimSpace(li.Note)}
+		pl := pline{ReqID: li.ID, LineNo: i + 1, Product: p, Description: strings.TrimSpace(li.Description), Note: strings.TrimSpace(li.Note)}
 		if li.Unit != nil {
 			pl.Unit = strings.TrimSpace(*li.Unit)
 		}
@@ -310,10 +311,56 @@ func lossErr(w []Warning) error {
 		"Có mặt hàng bán thấp hơn giá mua (bán lỗ). Bấm xác nhận để vẫn ghi sổ.", w)
 }
 
-// insertLines ghi các dòng, trả id dòng theo thứ tự.
-func insertLines(ctx context.Context, tx pgx.Tx, docID int64, lines []pline) ([]int64, error) {
+// saveLines ghi các dòng của phiếu theo thứ tự yêu cầu, trả id dòng theo thứ tự.
+// Dòng có ReqID là dòng đang có của chính phiếu này ⇒ sửa tại chỗ, GIỮ id; còn lại ⇒ thêm mới.
+// Dòng đang có mà yêu cầu không gửi lại ⇒ xóa. Bút toán kho của phiếu phải được xóa trước (gọi bởi Update).
+func saveLines(ctx context.Context, tx pgx.Tx, docID int64, lines []pline) ([]int64, error) {
+	existing := map[int64]bool{}
+	rows, err := tx.Query(ctx, `SELECT id FROM document_lines WHERE document_id=$1`, docID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		existing[id] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	keep := map[int64]bool{}
+	for _, l := range lines {
+		if l.ReqID != 0 && existing[l.ReqID] && !keep[l.ReqID] {
+			keep[l.ReqID] = true
+		}
+	}
+	var drop []int64
+	for id := range existing {
+		if !keep[id] {
+			drop = append(drop, id)
+		}
+	}
+	if len(drop) > 0 {
+		if _, err := tx.Exec(ctx, `DELETE FROM document_lines WHERE document_id=$1 AND id = ANY($2)`, docID, drop); err != nil {
+			return nil, err
+		}
+	}
+	used := map[int64]bool{}
 	ids := make([]int64, len(lines))
 	for i, l := range lines {
+		if l.ReqID != 0 && keep[l.ReqID] && !used[l.ReqID] {
+			used[l.ReqID] = true
+			if _, err := tx.Exec(ctx, `UPDATE document_lines SET line_no=$3, product_id=$4, description=$5, unit=$6, qty=$7, unit_price=$8, amount=$9, note=$10
+				WHERE id=$1 AND document_id=$2`, l.ReqID, docID, l.LineNo, l.Product.ID, l.Description, l.Unit, l.Qty, l.UnitPrice, l.Amount, l.Note); err != nil {
+				return nil, err
+			}
+			ids[i] = l.ReqID
+			continue
+		}
 		if err := tx.QueryRow(ctx, `INSERT INTO document_lines(document_id,line_no,product_id,description,unit,qty,unit_price,amount,note)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
 			docID, l.LineNo, l.Product.ID, l.Description, l.Unit, l.Qty, l.UnitPrice, l.Amount, l.Note).Scan(&ids[i]); err != nil {
@@ -435,7 +482,7 @@ func (s *Service) Create(ctx context.Context, userID int64, in Input) (*Document
 		if err != nil {
 			return err
 		}
-		if _, err := insertLines(ctx, tx, id, lines); err != nil {
+		if _, err := saveLines(ctx, tx, id, lines); err != nil {
 			return err
 		}
 		after, err := s.Get(ctx, tx, id)
@@ -503,10 +550,11 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Docu
 				return lossErr(lw)
 			}
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM document_lines WHERE document_id=$1`, id); err != nil {
+		// Bút toán kho luôn dựng lại từ đầu; dòng giữ id nếu client gửi id dòng của chính phiếu này.
+		if _, err := tx.Exec(ctx, `DELETE FROM stock_movements WHERE document_id=$1`, id); err != nil {
 			return err
 		}
-		lineIDs, err := insertLines(ctx, tx, id, lines)
+		lineIDs, err := saveLines(ctx, tx, id, lines)
 		if err != nil {
 			return err
 		}

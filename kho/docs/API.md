@@ -290,6 +290,7 @@ Quy tắc dòng:
 - Lỗi dòng: `400` với `details: {"line_no": n, "field": "qty"|"unit_price"|"product_id"|"product_code"}`.
 
 ### 3.4 `PUT /api/documents/{id}` — sửa (phiếu tạm **hoặc** đã ghi sổ)
+**Id dòng ổn định:** mỗi dòng trong body có thể kèm `"id"` (id dòng lấy từ `GET`). Dòng có `id` là dòng đang có của **chính phiếu này** ⇒ sửa tại chỗ, **giữ nguyên `id`**; dòng không có `id` ⇒ dòng mới (id mới); dòng đang có mà không được gửi lại ⇒ bị xóa; `id` không thuộc phiếu này hoặc lặp lại lần thứ hai ⇒ bị bỏ qua, coi là **dòng mới** (không lỗi). `line_no` theo thứ tự trong body (đổi thứ tự vẫn giữ id). Máy khách không gửi `id` ⇒ mọi dòng nhận id mới như trước. Bút toán kho luôn được dựng lại.
 Body như POST + **`version` bắt buộc** (+ `confirm_loss` cho phiếu bán đã ghi sổ). `doc_type` có thể bỏ, không được đổi.
 Thay toàn bộ header + dòng. → `200 Document` (version + 1).
 - Version cũ ⇒ `409 VERSION_CONFLICT` (details: `updated_by`, `updated_at`, `current_version`) — frontend tải lại phiếu rồi cho sửa tiếp.
@@ -380,7 +381,7 @@ Bỏ trống `debt_side` (khi tạo **và** khi sửa) ⇒ mặc định: `recei
   ```
   → `201 Voucher`. Ít nhất 1 dòng, `amount > 0` mỗi dòng **sau khi làm tròn 2 chữ số** (`0.001` ⇒ 400; `0.005` ⇒ 0,01); `document_id` (tùy chọn) phải tồn tại và cùng đối tác. `voucher_date` trống ⇒ hôm nay.
 - `GET /api/vouchers/{id}` → `Voucher`.
-- `PUT /api/vouchers/{id}` body như POST + `version` (bắt buộc) → `Voucher`; version cũ ⇒ `409 VERSION_CONFLICT`.
+- `PUT /api/vouchers/{id}` body như POST + `version` (bắt buộc) → `Voucher`; version cũ ⇒ `409 VERSION_CONFLICT`. Dòng tiền có thể kèm `"id"` với cùng quy tắc id dòng ổn định như §3.4 (id dòng của chính phiếu ⇒ giữ; thiếu / lạ / lặp ⇒ dòng mới; dòng không gửi lại ⇒ xóa).
 - `DELETE /api/vouchers/{id}?version=` → `{"ok":true,"id":…}`.
 - `GET /api/vouchers/{id}/export?format=xlsx|docx` → khớp bản in `VoucherPrint`: tiêu đề "PHIẾU THU" / "PHIẾU CHI" / "GIẤY BÁO CÓ (THU QUA NGÂN HÀNG)" / "GIẤY BÁO NỢ (CHI QUA NGÂN HÀNG)"; "Số: … &nbsp; Ngày: … &nbsp; <tài khoản>"; "Họ tên người nộp tiền:" / "Họ tên người nhận tiền:" (không có đối tác ⇒ dòng chấm); "Địa chỉ:"; "Lý do nộp:" / "Lý do chi:" (ghi chú, hoặc diễn giải nếu phiếu một dòng); bảng `STT | Diễn giải | Chứng từ liên quan | Số tiền` với dòng **"Tổng số tiền"** (công thức `SUM`, kết quả số); **"Bằng chữ: <số tiền bằng chữ> đồng"** (vd. "Tám triệu bốn trăm năm mươi lăm nghìn đồng"; quy tắc: linh, mười/mươi, mốt, lăm, "bốn" sau mươi — 34 = "ba mươi bốn", "không trăm" ở nhóm giữa, viết hoa chữ đầu, số âm "Âm …", làm tròn về đồng); "Kèm theo: ……… chứng từ gốc."; ô ký — phiếu thu: Giám đốc, Kế toán trưởng, Người nộp tiền, Người lập phiếu, Thủ quỹ; phiếu chi: Giám đốc, Kế toán trưởng, Thủ quỹ, Người lập phiếu, Người nhận tiền — kèm "(Ký, họ tên)"; dòng cuối "Xuất file lúc … · Lập bởi <tên>".
 - `GET /api/vouchers/{id}/history` → như §3.10.

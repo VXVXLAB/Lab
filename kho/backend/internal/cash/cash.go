@@ -72,6 +72,8 @@ type Voucher struct {
 
 // LineInput là dòng tiền do client gửi.
 type LineInput struct {
+	// ID (tùy chọn, khi sửa): id dòng đang có của CHÍNH phiếu này ⇒ giữ nguyên id; còn lại ⇒ dòng mới.
+	ID          int64            `json:"id"`
 	Description string           `json:"description"`
 	Amount      *decimal.Decimal `json:"amount"`
 	DocumentID  *int64           `json:"document_id"`
@@ -135,6 +137,7 @@ func Prefix(vt, kind string) string {
 }
 
 type vline struct {
+	ReqID       int64
 	Description string
 	Amount      decimal.Decimal
 	DocumentID  *int64
@@ -192,7 +195,7 @@ func (s *Service) validate(ctx context.Context, q db.Q, in *Input) (*catalog.Cas
 		if amt.GreaterThanOrEqual(decimal.New(1, 15)) {
 			return nil, nil, apperr.New(http.StatusBadRequest, apperr.CodeValidation, fmt.Sprintf("Dòng %d: số tiền quá lớn", i+1), map[string]any{"line_no": i + 1, "field": "amount"})
 		}
-		vl := vline{Description: strings.TrimSpace(l.Description), Amount: amt}
+		vl := vline{ReqID: l.ID, Description: strings.TrimSpace(l.Description), Amount: amt}
 		if l.DocumentID != nil && *l.DocumentID != 0 {
 			var partner *int64
 			err := q.QueryRow(ctx, `SELECT partner_id FROM documents WHERE id=$1`, *l.DocumentID).Scan(&partner)
@@ -221,8 +224,53 @@ func sum(lines []vline) decimal.Decimal {
 	return t
 }
 
-func insertLines(ctx context.Context, tx pgx.Tx, id int64, lines []vline) error {
+// saveLines ghi các dòng tiền theo thứ tự yêu cầu: dòng có id thuộc chính phiếu ⇒ sửa tại chỗ (giữ id);
+// còn lại ⇒ thêm mới; dòng đang có không được gửi lại ⇒ xóa.
+func saveLines(ctx context.Context, tx pgx.Tx, id int64, lines []vline) error {
+	existing := map[int64]bool{}
+	rows, err := tx.Query(ctx, `SELECT id FROM cash_voucher_lines WHERE voucher_id=$1`, id)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var lid int64
+		if err := rows.Scan(&lid); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[lid] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	keep := map[int64]bool{}
+	for _, l := range lines {
+		if l.ReqID != 0 && existing[l.ReqID] {
+			keep[l.ReqID] = true
+		}
+	}
+	var drop []int64
+	for lid := range existing {
+		if !keep[lid] {
+			drop = append(drop, lid)
+		}
+	}
+	if len(drop) > 0 {
+		if _, err := tx.Exec(ctx, `DELETE FROM cash_voucher_lines WHERE voucher_id=$1 AND id = ANY($2)`, id, drop); err != nil {
+			return err
+		}
+	}
+	used := map[int64]bool{}
 	for i, l := range lines {
+		if l.ReqID != 0 && keep[l.ReqID] && !used[l.ReqID] {
+			used[l.ReqID] = true
+			if _, err := tx.Exec(ctx, `UPDATE cash_voucher_lines SET line_no=$3, description=$4, amount=$5, document_id=$6 WHERE id=$1 AND voucher_id=$2`,
+				l.ReqID, id, i+1, l.Description, l.Amount, l.DocumentID); err != nil {
+				return err
+			}
+			continue
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO cash_voucher_lines(voucher_id,line_no,description,amount,document_id) VALUES ($1,$2,$3,$4,$5)`,
 			id, i+1, l.Description, l.Amount, l.DocumentID); err != nil {
 			return err
@@ -249,7 +297,7 @@ func (s *Service) Create(ctx context.Context, userID int64, in Input) (*Voucher,
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9) RETURNING id`, in.VoucherType, no, in.VoucherDate, in.AccountID, in.PartnerID, in.Note, sum(lines), userID, in.DebtSide).Scan(&id); err != nil {
 			return err
 		}
-		if err := insertLines(ctx, tx, id, lines); err != nil {
+		if err := saveLines(ctx, tx, id, lines); err != nil {
 			return err
 		}
 		after, err := s.Get(ctx, tx, id)
@@ -318,10 +366,7 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Vouc
 			}
 			no = fmt.Sprintf("%s%05d", prefix, n)
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM cash_voucher_lines WHERE voucher_id=$1`, id); err != nil {
-			return err
-		}
-		if err := insertLines(ctx, tx, id, lines); err != nil {
+		if err := saveLines(ctx, tx, id, lines); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE cash_vouchers SET voucher_type=$2, voucher_no=$3, voucher_date=$4, account_id=$5, partner_id=$6, note=$7,
