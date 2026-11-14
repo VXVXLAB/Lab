@@ -6,9 +6,11 @@ import { SearchOutlined } from '@ant-design/icons';
 import { qk } from '../../api/queryKeys';
 import { reportApi, type TradeParams } from '../../api/reports';
 import type { TradeRow } from '../../api/types';
-import { DateRangeFilter, rangeOf, type DateRangeValue, type Preset } from '../../components/DateRangeFilter';
+import { DateRangeFilter, describeRange, rangeOf, type DateRangeValue, type Preset } from '../../components/DateRangeFilter';
 import { ProductSelect, type ProductPick } from '../../components/ProductSelect';
-import { OpenHint, ReportActions, ReportTable } from '../../components/ReportTable';
+import { OpenHint, PrintTitle, ReportActions, ReportTable } from '../../components/ReportTable';
+import { PageHeader } from '../../components/PageHeader';
+import { useAllGroups, useWarehouses } from '../../api/hooks';
 import { GroupSelect, WarehouseSelect } from '../../components/WarehouseSelect';
 import { formatDate, formatMoney, formatQty, toApiDate, todayVn } from '../../lib/format';
 import { useDebounced } from '../../lib/useDebounced';
@@ -26,7 +28,11 @@ export function TradeReportView({
   inDrawer = false,
   initialProduct = null,
   initialPreset,
+  pageTitle,
+  pageSub,
 }: {
+  pageTitle?: string;
+  pageSub?: string;
   kind: 'sales' | 'purchases';
   fixedProduct?: ProductPick;
   inDrawer?: boolean;
@@ -34,6 +40,8 @@ export function TradeReportView({
   initialPreset?: Preset;
 }) {
   const drawers = useDrawers();
+  const groups = useAllGroups();
+  const whs = useWarehouses();
   const isSales = kind === 'sales';
   const [range, setRange] = useState<DateRangeValue>({ preset: initialPreset ?? (fixedProduct ? 'all' : 'month'), range: [null, null] });
   const [partner, setPartner] = useState<PartnerLite | null>(null);
@@ -109,6 +117,7 @@ export function TradeReportView({
 
   return (
     <>
+      {pageTitle && <PageHeader title={pageTitle} sub={pageSub} actions={<ReportActions xlsxUrl={reportApi.xlsxUrl(kind, params)} />} />}
       <div className="toolbar">
         <DateRangeFilter value={range} onChange={setRange} />
         <PartnerSelect
@@ -130,13 +139,26 @@ export function TradeReportView({
         <Checkbox checked={withReturns} onChange={(e) => setWithReturns(e.target.checked)}>
           Gồm {isSales ? 'khách trả hàng' : 'trả hàng NCC'}
         </Checkbox>
-        <span style={{ marginLeft: 'auto' }} />
-        <ReportActions xlsxUrl={reportApi.xlsxUrl(kind, params)} canPrint={!inDrawer} />
+        {!pageTitle && (
+          <>
+            <span style={{ marginLeft: 'auto' }} />
+            <ReportActions xlsxUrl={reportApi.xlsxUrl(kind, params)} canPrint={!inDrawer} />
+          </>
+        )}
       </div>
       <div className="report-area">
-        <div className="print-only report-print-title">
-          {isSales ? 'CHI TIẾT BÁN HÀNG' : 'CHI TIẾT MUA HÀNG'} {product ? `— ${product.code} ${product.name}` : ''} · {formatDate(params.from)} – {formatDate(params.to)}
-        </div>
+        <PrintTitle
+          title={isSales ? 'CHI TIẾT BÁN HÀNG' : 'CHI TIẾT MUA HÀNG'}
+          filters={[
+            describeRange(range),
+            partner && `${isSales ? 'Khách hàng' : 'Nhà cung cấp'}: ${partner.name}`,
+            product && `Mặt hàng: ${product.code} ${product.name}`,
+            groupId && `Nhóm: ${groups.data?.items.find((g) => g.id === groupId)?.name ?? ''}`,
+            warehouseId && `Kho: ${whs.data?.items.find((w) => w.id === warehouseId)?.name ?? ''}`,
+            dq && `Tìm: "${dq}"`,
+            withReturns && 'Gồm hàng trả lại',
+          ]}
+        />
         <ReportTable<TradeRow>
           columns={columns}
           rows={d?.rows ?? []}

@@ -15,9 +15,11 @@ import {
   RollbackOutlined,
   SaveOutlined,
   CheckCircleOutlined,
+  DollarOutlined,
 } from '@ant-design/icons';
 import { productsApi } from '../../api/catalog';
 import { useWarehouses } from '../../api/hooks';
+import { reportApi } from '../../api/reports';
 import { useDebounced } from '../../lib/useDebounced';
 import { ApiError, errorMessage } from '../../api/client';
 import { documentsApi } from '../../api/documents';
@@ -664,6 +666,14 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     },
   });
 
+  const partnerSide = cfg?.partner === 'supplier' ? 'payable' : 'receivable';
+  const partnerDebt = useQuery({
+    queryKey: qk.report('debt-ledger', { partner_id: header.partner?.id, side: partnerSide }),
+    queryFn: () => reportApi.debtLedger({ partner_id: header.partner!.id, side: partnerSide }),
+    enabled: !!header.partner && !!cfg?.partner,
+    staleTime: 15_000,
+  });
+
   useMenuHighlight(
     cfg?.listPath ?? null,
     cfg ? `${cfg.name}${loaded ? ` ${loaded.doc_no ?? loaded.draft_no}` : ' (mới)'}` : 'Chứng từ',
@@ -746,6 +756,11 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
               <Button type="primary" icon={<EditOutlined />} onClick={() => setEditing(true)}>
                 Sửa phiếu <Kbd>F8</Kbd>
               </Button>
+              {(type === 'sale' || type === 'purchase') && (
+                <Button icon={<DollarOutlined />} onClick={() => loaded && navigate(paths.newVoucher(type === 'sale' ? 'receipt' : 'payment', { document_id: loaded.id }))}>
+                  {type === 'sale' ? 'Thu tiền phiếu này' : 'Chi tiền phiếu này'}
+                </Button>
+              )}
               <Button icon={<RollbackOutlined />} onClick={unpost}>
                 Bỏ ghi sổ
               </Button>
@@ -942,10 +957,33 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
             )}
           </>
         )}
-        {cfg.partner && header.partner && (header.partner.address || header.partner.phone) && (
+        {cfg.partner && header.partner && (
           <div className="hf-partner-info muted">
             {header.partner.address}
             {header.partner.phone && <> · ĐT {header.partner.phone}</>}
+            {partnerDebt.data && (
+              <span className="partner-debt">
+                {' '}
+                · {cfg.partner === 'customer' ? 'Khách đang nợ' : 'Mình đang nợ'}:{' '}
+                <b className={partnerDebt.data.closing > 0 ? 'neg' : undefined}>{formatMoney(partnerDebt.data.closing)} đ</b>{' '}
+                <Button
+                  type="link"
+                  size="small"
+                  className="link-cell"
+                  tabIndex={-1}
+                  onClick={() =>
+                    header.partner &&
+                    drawers.push({
+                      kind: 'debt',
+                      partner: { id: header.partner.id, code: header.partner.code, name: header.partner.name },
+                      side: cfg.partner === 'customer' ? 'receivable' : 'payable',
+                    })
+                  }
+                >
+                  Xem công nợ
+                </Button>
+              </span>
+            )}
           </div>
         )}
       </div>

@@ -356,7 +356,7 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
             ) : dq ? (
               `Không có ${noun} nào khớp "${dq}"`
             ) : (
-              `Chưa có ${noun} nào`
+              `Chưa có ${noun} nào. Bấm F2 (Thêm mới) để thêm.`
             ),
           }}
         />

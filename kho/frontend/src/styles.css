@@ -337,3 +337,64 @@ td.col-code { font-weight: 500; font-variant-numeric: tabular-nums; white-space:
   body.printing-report .ant-table { font-size: 10pt; }
   body.printing-report .report-area { zoom: .9; }
 }
+
+/* ======================= Thu chi, công nợ (giai đoạn 4) ======================= */
+.voucher-header { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; background: #fff; border: 1px solid #dde2e9; border-radius: 4px; flex: none; }
+.vh-row { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+.vh-row .hf-date { width: 160px; }
+.vh-row .hf-partner { flex: 1.4; min-width: 280px; }
+.vh-row .hf-note { flex: 1; min-width: 200px; }
+.big-seg.ant-segmented { font-size: 15px; font-weight: 700; padding: 3px; }
+.big-seg .ant-segmented-item-label { padding: 2px 18px; min-height: 34px; line-height: 34px; }
+.acc-choice { display: flex; flex-wrap: wrap; gap: 8px; }
+.acc-choice .ant-radio-button-wrapper { height: auto; padding: 4px 14px; line-height: 1.3; border-radius: 6px !important; border-inline-start-width: 1px; }
+.acc-choice .ant-radio-button-wrapper::before { display: none !important; }
+.acc-choice .ant-radio-button-wrapper > span:last-child { display: flex; flex-direction: column; }
+.acc-kind { font-weight: 700; font-size: 15px; }
+.acc-name { font-size: 12.5px; opacity: .85; }
+.acc-hint { font-size: 12.5px; margin-top: 3px; }
+.side-choice { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: #fff7e0; border: 1px solid #f0d28a; border-radius: 4px; }
+.side-choice .ant-radio-group { display: flex; flex-direction: column; gap: 2px; }
+.debt-line { font-size: 13.5px; }
+.debt-line .pos { color: #1b5e20; }
+.debt-headline { background: #fff; border: 1px solid #dde2e9; border-radius: 4px; padding: 6px 12px; font-size: 14px; margin-bottom: 6px; }
+.debt-headline b { font-size: 16px; }
+.money-words { font-size: 13.5px; }
+.partner-debt { white-space: nowrap; }
+.ps-words { margin-top: 6px; }
+.voucher-sheet .ps-signs-5 > div { flex: 1; }
+.print-filters { font-size: 10pt; font-weight: 400; }
+
+/* Hướng dẫn */
+.guide { max-width: 1160px; }
+.guide-layout { display: flex; gap: 20px; align-items: flex-start; }
+.guide-toc { position: sticky; top: 0; flex: none; width: 230px; display: flex; flex-direction: column; gap: 2px; background: #fff; border: 1px solid #dde2e9; border-radius: 4px; padding: 8px; }
+.guide-toc a { padding: 4px 8px; border-radius: 4px; color: #1c1f23; }
+.guide-toc a:hover { background: #e1ecf8; color: #1d5fa8; }
+.guide-body { flex: 1; min-width: 0; background: #fff; border: 1px solid #dde2e9; border-radius: 4px; padding: 6px 22px 18px; font-size: 14.5px; line-height: 1.6; }
+.guide-body h3 { margin: 18px 0 6px; font-size: 17px; color: #1d5fa8; }
+.guide-body code { background: #f2f4f7; padding: 0 4px; border-radius: 3px; }
+.guide-table { border-collapse: collapse; }
+.guide-table th, .guide-table td { border: 1px solid #dde2e9; padding: 4px 10px; text-align: left; }
+.guide-table th { background: #f2f4f7; }
+
+/* Bắt đầu sử dụng (CSDL mới) */
+.onboard { background: #fff; border: 1px solid #9fbfe3; border-left: 4px solid #1d5fa8; border-radius: 4px; padding: 12px 16px; margin-bottom: 14px; }
+.onboard h3 { margin: 0 0 6px; font-size: 16px; }
+.onboard ol { margin: 0; padding-left: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
+.onboard li { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid #e1e4e8; border-radius: 4px; }
+.onboard li.done { background: #f1f8f2; border-color: #b9dfbd; }
+.onboard .step-n { flex: none; width: 24px; height: 24px; border-radius: 50%; background: #1d5fa8; color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+.onboard li.done .step-n { background: #2e7d32; }
+.onboard .step-desc { color: #4a5160; font-size: 12.5px; }
+
+@media (max-width: 1100px) {
+  .doc-header { grid-template-columns: 150px 1fr 1fr; }
+  .doc-header .hf-note { grid-column: 1 / -1; }
+  .guide-toc { display: none; }
+}
+@media (max-width: 900px) {
+  .doc-sums { gap: 12px; flex-wrap: wrap; }
+  .doc-footer { flex-direction: column; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

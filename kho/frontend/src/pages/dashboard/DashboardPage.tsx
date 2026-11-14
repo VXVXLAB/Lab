@@ -3,7 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Skeleton, Table, Tag } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import { dashboardApi } from '../../api/catalog';
+import { dashboardApi, partnersApi, productsApi } from '../../api/catalog';
+import { documentsApi } from '../../api/documents';
+import { settingsApi } from '../../api/reports';
+import { storage } from '../../lib/storage';
+import { useState } from 'react';
+
+const HIDE_KEY = 'kho.onboardHidden';
 import { errorMessage } from '../../api/client';
 import { qk } from '../../api/queryKeys';
 import type { RecentDraft } from '../../api/types';
@@ -44,6 +50,76 @@ function money(n: number) {
       {formatMoney(n)}
       <span className="unit"> đ</span>
     </>
+  );
+}
+
+/** Hướng dẫn bắt đầu cho CSDL mới: tự đánh dấu bước đã xong theo dữ liệu thật; ẩn khi xong hết hoặc người dùng tắt. */
+function Onboarding() {
+  const navigate = useNavigate();
+  const [hidden, setHidden] = useState(() => storage.get(HIDE_KEY) === '1');
+  const s = useQuery({
+    queryKey: ['catalog', 'onboarding'],
+    queryFn: async () => {
+      const [settings, goods, cust, supp, opening, sales] = await Promise.all([
+        settingsApi.get(),
+        productsApi.list({ is_service: false, page_size: 1 }),
+        partnersApi.list({ type: 'customer', page_size: 1 }),
+        partnersApi.list({ type: 'supplier', page_size: 1 }),
+        documentsApi.list({ type: 'opening', status: 'posted', page_size: 1 }),
+        documentsApi.list({ type: 'sale', page_size: 1 }),
+      ]);
+      return {
+        company: !!settings.company_name.trim(),
+        goods: goods.total > 0,
+        partners: cust.total > 0 && supp.total > 0,
+        opening: opening.total > 0,
+        sales: sales.total > 0,
+      };
+    },
+    staleTime: 60_000,
+    enabled: !hidden,
+  });
+  const d = s.data;
+  if (hidden || !d || Object.values(d).every(Boolean)) return null;
+  const steps = [
+    { done: d.company, title: 'Nhập thông tin công ty', desc: 'Tên, địa chỉ, MST in ở đầu mọi phiếu (người quản trị).', to: paths.company },
+    { done: d.goods, title: 'Danh mục hàng hóa', desc: 'Mã, tên, ĐVT, giá bán, giá mua.', to: paths.products },
+    { done: d.partners, title: 'Khách hàng và nhà cung cấp', desc: 'Kèm nợ phải thu / phải trả đầu kỳ nếu có.', to: d.goods ? paths.customers : paths.products },
+    { done: d.opening, title: 'Tồn đầu kỳ', desc: 'Mỗi kho một phiếu tồn đầu, rồi Ghi sổ.', to: paths.opening },
+    { done: d.sales, title: 'Bắt đầu bán hàng', desc: 'Lập phiếu bán đầu tiên (F2).', to: paths.sales },
+  ];
+  return (
+    <div className="onboard">
+      <h3>
+        Bắt đầu sử dụng — làm lần lượt các bước sau{' '}
+        <Button
+          size="small"
+          type="link"
+          onClick={() => {
+            storage.set(HIDE_KEY, '1');
+            setHidden(true);
+          }}
+        >
+          Ẩn hướng dẫn này
+        </Button>
+        <Button size="small" type="link" onClick={() => navigate(paths.guide)}>
+          Xem hướng dẫn đầy đủ
+        </Button>
+      </h3>
+      <ol>
+        {steps.map((st, i) => (
+          <li key={st.title} className={st.done ? 'done' : undefined}>
+            <span className="step-n">{st.done ? '✓' : i + 1}</span>
+            <span>
+              <Button type="link" size="small" className="link-cell" onClick={() => navigate(st.to)}>
+                {st.title}
+              </Button>
+              <div className="step-desc">{st.done ? 'Đã xong' : st.desc}</div>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -88,6 +164,7 @@ export function DashboardPage() {
         }
       />
 
+      <Onboarding />
       <div className="tiles">
         <Tile
           label="Phiếu tạm đang treo"

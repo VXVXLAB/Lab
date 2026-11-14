@@ -494,3 +494,157 @@ export interface DraftDemandItem {
   shortage: number;
   drafts: { document_id: number; draft_no: string; doc_date: string; partner_id: number | null; partner_name: string | null; qty: number }[];
 }
+
+// ---------- Giai đoạn 4: thu chi, công nợ, sổ quỹ ----------
+export type VoucherType = 'receipt' | 'payment';
+export type DebtSide = 'receivable' | 'payable';
+
+export interface VoucherLine {
+  id: number;
+  line_no: number;
+  description: string;
+  amount: number;
+  document_id: number | null;
+  document_no: string | null;
+}
+
+export interface Voucher {
+  id: number;
+  voucher_type: VoucherType;
+  voucher_type_name: string;
+  voucher_no: string;
+  voucher_date: string;
+  debt_side: DebtSide;
+  account_id: number;
+  account_code: string;
+  account_name: string;
+  account_kind: CashAccountKind;
+  partner_id: number | null;
+  partner_code: string | null;
+  partner_name: string | null;
+  partner_address: string | null;
+  note: string;
+  total_amount: number;
+  version: number;
+  created_by: number;
+  created_by_name: string;
+  updated_by: number;
+  updated_by_name: string;
+  created_at: string;
+  updated_at: string;
+  lines: VoucherLine[];
+}
+
+export interface VoucherSummary {
+  id: number;
+  voucher_type: VoucherType;
+  voucher_type_name: string;
+  voucher_no: string;
+  voucher_date: string;
+  debt_side: DebtSide;
+  account_id: number;
+  account_name: string;
+  account_kind: CashAccountKind;
+  partner_id: number | null;
+  partner_name: string | null;
+  note: string;
+  total_amount: number;
+  line_count: number;
+  version: number;
+  updated_by_name: string;
+  updated_at: string;
+}
+
+export interface VoucherPage extends Paged<VoucherSummary> {
+  sum_total_amount: number;
+}
+
+export interface VoucherBody {
+  voucher_type: VoucherType;
+  voucher_date: string;
+  account_id: number | null;
+  partner_id: number | null;
+  debt_side: DebtSide;
+  note: string;
+  lines: { description: string; amount: number | null; document_id: number | null }[];
+  version?: number;
+}
+
+export interface VoucherHistoryEntry {
+  id: number;
+  at: string;
+  user_id: number;
+  user_name: string;
+  action: 'created' | 'updated' | 'deleted';
+  before: Voucher | null;
+  after: Voucher | null;
+}
+
+export interface DebtSummaryItem {
+  partner_id: number;
+  partner_code: string;
+  partner_name: string;
+  phone: string;
+  opening: number;
+  increase: number;
+  decrease: number;
+  closing: number;
+}
+export interface DebtSummary {
+  side: DebtSide;
+  from: string | null;
+  to: string | null;
+  items: DebtSummaryItem[];
+  totals: DebtSummaryItem;
+}
+
+export interface DebtLedgerRow {
+  date: string;
+  ref_no: string;
+  ref_type: DocType | VoucherType;
+  document_id: number | null;
+  voucher_id: number | null;
+  description: string;
+  increase: number;
+  decrease: number;
+  balance: number;
+}
+export interface DebtLedger {
+  side: DebtSide;
+  partner: { id: number; code: string; name: string; address: string; phone: string };
+  from: string | null;
+  to: string | null;
+  opening: number;
+  rows: DebtLedgerRow[];
+  total_increase: number;
+  total_decrease: number;
+  closing: number;
+}
+
+export interface CashBookRow {
+  date: string;
+  voucher_no: string;
+  voucher_id: number;
+  voucher_type: VoucherType;
+  account_id: number;
+  account_code: string;
+  partner_id: number | null;
+  partner_name: string | null;
+  line_no: number;
+  description: string;
+  document_id: number | null;
+  receipt: number;
+  payment: number;
+  balance: number;
+}
+export interface CashBook {
+  account_id: number | null;
+  account_name: string;
+  from: string | null;
+  to: string | null;
+  opening: number;
+  rows: CashBookRow[];
+  total_receipt: number;
+  total_payment: number;
+  closing: number;
+}

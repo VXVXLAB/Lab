@@ -6,9 +6,10 @@ import { qk } from '../../api/queryKeys';
 import { useWarehouses } from '../../api/hooks';
 import { reportApi, type LedgerParams } from '../../api/reports';
 import type { StockLedgerRow } from '../../api/types';
-import { DateRangeFilter, rangeOf, type DateRangeValue } from '../../components/DateRangeFilter';
+import { DateRangeFilter, describeRange, rangeOf, type DateRangeValue } from '../../components/DateRangeFilter';
 import { ProductSelect, type ProductPick } from '../../components/ProductSelect';
-import { OpenHint, ReportActions, ReportTable } from '../../components/ReportTable';
+import { OpenHint, PrintTitle, ReportActions, ReportTable } from '../../components/ReportTable';
+import { PageHeader } from '../../components/PageHeader';
 import { WarehouseSelect } from '../../components/WarehouseSelect';
 import { formatDate, formatQty, fromApiDate, toApiDate } from '../../lib/format';
 import { DOC_TYPES } from '../documents/docTypes';
@@ -29,7 +30,11 @@ export function StockLedgerView({
   initialFrom,
   initialTo,
   inDrawer = false,
+  pageTitle,
+  pageSub,
 }: {
+  pageTitle?: string;
+  pageSub?: string;
   product: ProductPick | null;
   /** Có ⇒ hiện ô chọn mặt hàng (màn Thẻ kho) */
   onProductChange?: (p: ProductPick | null) => void;
@@ -105,12 +110,17 @@ export function StockLedgerView({
 
   return (
     <>
+      {pageTitle && <PageHeader title={pageTitle} sub={pageSub} actions={params ? <ReportActions xlsxUrl={reportApi.xlsxUrl('stock-ledger', params)} /> : undefined} />}
       <div className="toolbar">
         {onProductChange && <ProductSelect value={product} onChange={onProductChange} goodsOnly allowClear={false} placeholder="Chọn mặt hàng cần xem thẻ kho…" width={300} />}
         <WarehouseSelect value={warehouseId} onChange={setWarehouseId} width={160} />
         <DateRangeFilter value={range} onChange={setRange} />
-        <span style={{ marginLeft: 'auto' }} />
-        {params && <ReportActions xlsxUrl={reportApi.xlsxUrl('stock-ledger', params)} canPrint={!inDrawer} />}
+        {!pageTitle && (
+          <>
+            <span style={{ marginLeft: 'auto' }} />
+            {params && <ReportActions xlsxUrl={reportApi.xlsxUrl('stock-ledger', params)} canPrint={!inDrawer} />}
+          </>
+        )}
       </div>
       {allWh && product && <div className="muted small-note">Xem tất cả kho: không hiện dòng chuyển kho nội bộ (tự triệt tiêu). Chọn một kho để thấy cả chuyển kho.</div>}
       {!product ? (
@@ -119,9 +129,10 @@ export function StockLedgerView({
         </div>
       ) : (
         <div className="report-area">
-          <div className="print-only report-print-title">
-            THẺ KHO — {product.code} {product.name} · {allWh ? 'Tất cả kho' : (whs.data?.items.find((w) => w.id === warehouseId)?.name ?? '')} · {from ? formatDate(from) : 'từ đầu'} – {to ? formatDate(to) : 'nay'}
-          </div>
+          <PrintTitle
+            title={`THẺ KHO — ${product.code} ${product.name}`}
+            filters={[allWh ? 'Tất cả kho (không gồm chuyển kho nội bộ)' : `Kho: ${whs.data?.items.find((w) => w.id === warehouseId)?.name ?? ''}`, describeRange(range)]}
+          />
           <ReportTable<Row>
             columns={columns}
             rows={rows}

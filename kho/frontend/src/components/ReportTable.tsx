@@ -136,3 +136,15 @@ export function OpenHint({ what = 'xem chứng từ' }: { what?: string }) {
     </div>
   );
 }
+
+/** Tiêu đề khi In báo cáo: tên báo cáo + MỌI bộ lọc đang dùng + thời điểm in. */
+export function PrintTitle({ title, filters }: { title: string; filters: (string | false | null | undefined | 0)[] }) {
+  const f = filters.filter((x): x is string => typeof x === 'string' && x.length > 0);
+  return (
+    <div className="print-only report-print-title">
+      <div>{title}</div>
+      {f.length > 0 && <div className="print-filters">{f.join(' · ')}</div>}
+      <div className="print-filters">In lúc {new Date().toLocaleString('vi-VN')}</div>
+    </div>
+  );
+}

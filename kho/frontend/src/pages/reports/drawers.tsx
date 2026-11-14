@@ -5,11 +5,16 @@ import { DocumentView } from './DocumentView';
 import { StockLedgerView } from './StockLedgerView';
 import { TradeReportView } from './TradeReportView';
 import type { ProductPick } from '../../components/ProductSelect';
+import type { DebtSide } from '../../api/types';
+import { VoucherView } from '../vouchers/VoucherView';
+import { DebtLedgerView, type PartnerRef } from '../vouchers/DebtLedgerView';
 
 export type DrawerEntry =
   | { kind: 'document'; id: number; title?: string }
   | { kind: 'ledger'; product: ProductPick; warehouseId?: number; from?: string; to?: string }
-  | { kind: 'trade'; report: 'sales' | 'purchases'; product: ProductPick };
+  | { kind: 'trade'; report: 'sales' | 'purchases'; product: ProductPick }
+  | { kind: 'voucher'; id: number; title?: string }
+  | { kind: 'debt'; partner: PartnerRef; side: DebtSide; from?: string; to?: string };
 
 interface Ctx {
   push: (e: DrawerEntry) => void;
@@ -32,6 +37,10 @@ function titleOf(e: DrawerEntry): string {
       return e.title ?? 'Chứng từ';
     case 'ledger':
       return `Thẻ kho — ${e.product.code} ${e.product.name}`;
+    case 'voucher':
+      return e.title ?? 'Phiếu thu chi';
+    case 'debt':
+      return `Công nợ ${e.side === 'receivable' ? 'phải thu' : 'phải trả'} — ${e.partner.code} ${e.partner.name}`;
     case 'trade':
       return `${e.report === 'sales' ? 'Lịch sử bán' : 'Lịch sử mua'} — ${e.product.code} ${e.product.name}`;
   }
@@ -90,6 +99,8 @@ export function DrawerStackProvider({ children }: { children: ReactNode }) {
           {e.kind === 'document' && <DocumentView id={e.id} />}
           {e.kind === 'ledger' && <StockLedgerView product={e.product} initialWarehouseId={e.warehouseId} initialFrom={e.from} initialTo={e.to} inDrawer />}
           {e.kind === 'trade' && <TradeReportView kind={e.report} fixedProduct={e.product} inDrawer />}
+          {e.kind === 'voucher' && <VoucherView id={e.id} />}
+          {e.kind === 'debt' && <DebtLedgerView partner={e.partner} side={e.side} initialFrom={e.from} initialTo={e.to} />}
         </Drawer>
       ))}
     </DrawerCtx.Provider>

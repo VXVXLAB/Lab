@@ -35,4 +35,8 @@ export const paths = {
   newDocument: (type: string) => `/chung-tu/moi?loai=${type}`,
   /** Mở một phiếu thu/chi (giai đoạn 3). */
   voucher: (id: number | string) => `/phieu-thu-chi/${id}`,
+  /** Lập phiếu thu/chi mới; điền sẵn đối tác / chứng từ liên quan nếu có. */
+  newVoucher: (type: 'receipt' | 'payment', pre: { partner_id?: number; document_id?: number } = {}) =>
+    `/phieu-thu-chi/moi?loai=${type}${pre.partner_id ? `&partner_id=${pre.partner_id}` : ''}${pre.document_id ? `&document_id=${pre.document_id}` : ''}`,
+  guide: '/huong-dan',
 } as const;

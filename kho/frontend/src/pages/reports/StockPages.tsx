@@ -13,7 +13,8 @@ import { DateInput } from '../../components/DateInput';
 import { DateRangeFilter, rangeOf, type DateRangeValue } from '../../components/DateRangeFilter';
 import { PageHeader } from '../../components/PageHeader';
 import type { ProductPick } from '../../components/ProductSelect';
-import { OpenHint, ReportActions, ReportTable } from '../../components/ReportTable';
+import { OpenHint, PrintTitle, ReportActions, ReportTable } from '../../components/ReportTable';
+import { useAllGroups, useWarehouses } from '../../api/hooks';
 import { GroupSelect, WarehouseSelect } from '../../components/WarehouseSelect';
 import { formatDate, formatQty, toApiDate, todayVn } from '../../lib/format';
 import { useDebounced } from '../../lib/useDebounced';
@@ -25,6 +26,7 @@ const pick = (r: { product_id: number; code: string; name: string; unit: string 
 /** Tồn kho: mỗi mã một dòng, mỗi kho một cột + tổng (REQ-009/010/020/022/063/075). Bấm số ⇒ thẻ kho. */
 export function StockSummaryPage() {
   const drawers = useDrawers();
+  const groups = useAllGroups();
   const [asOf, setAsOf] = useState<Dayjs | null>(todayVn());
   const [groupId, setGroupId] = useState<number | undefined>();
   const [warehouseId, setWarehouseId] = useState<number | undefined>();
@@ -104,7 +106,15 @@ export function StockSummaryPage() {
         </Tooltip>
       </div>
       <div className="report-area">
-        <div className="print-only report-print-title">BÁO CÁO TỒN KHO đến ngày {formatDate(asOf)}</div>
+        <PrintTitle
+          title={`BÁO CÁO TỒN KHO đến hết ngày ${formatDate(asOf)}`}
+          filters={[
+            warehouseId ? `Kho: ${d?.warehouses[0]?.name ?? ''}` : 'Cả 4 kho',
+            groupId && `Nhóm: ${groups.data?.items.find((g) => g.id === groupId)?.name ?? ''}`,
+            dq && `Tìm: "${dq}"`,
+            onlyData ? 'Chỉ mã có phát sinh' : 'Gồm cả mã chưa phát sinh',
+          ]}
+        />
         <ReportTable<StockSummaryItem>
           columns={columns}
           rows={d?.items ?? []}
@@ -132,8 +142,9 @@ export function StockLedgerPage() {
   }, [pq.data, pid]);
   return (
     <div className="list-page">
-      <PageHeader title="Thẻ kho — chi tiết nhập xuất tồn" sub="Mỗi chứng từ một dòng, ghi rõ mua của ai / bán cho ai. Bấm dòng để xem phiếu." />
       <StockLedgerView
+        pageTitle="Thẻ kho — chi tiết nhập xuất tồn"
+        pageSub="Mỗi chứng từ một dòng, ghi rõ mua của ai / bán cho ai. Bấm dòng để xem phiếu."
         product={product}
         onProductChange={(p) => {
           setProduct(p);
@@ -150,6 +161,8 @@ export function StockLedgerPage() {
 /** Tổng hợp nhập xuất tồn theo kỳ (REQ-064). Bấm mã ⇒ thẻ kho đúng kỳ. */
 export function StockNxtPage() {
   const drawers = useDrawers();
+  const groups = useAllGroups();
+  const whs = useWarehouses();
   const [range, setRange] = useState<DateRangeValue>({ preset: 'month', range: [null, null] });
   const [groupId, setGroupId] = useState<number | undefined>();
   const [warehouseId, setWarehouseId] = useState<number | undefined>();
@@ -191,9 +204,15 @@ export function StockNxtPage() {
       </div>
       {!warehouseId && <div className="muted small-note">Xem tất cả kho: chuyển kho nội bộ không tính vào nhập/xuất (tự triệt tiêu).</div>}
       <div className="report-area">
-        <div className="print-only report-print-title">
-          TỔNG HỢP NHẬP XUẤT TỒN {formatDate(params.from)} – {formatDate(params.to)}
-        </div>
+        <PrintTitle
+          title="TỔNG HỢP NHẬP XUẤT TỒN"
+          filters={[
+            `Từ ${formatDate(params.from)} đến ${formatDate(params.to)}`,
+            warehouseId ? `Kho: ${whs.data?.items.find((w) => w.id === warehouseId)?.name ?? ''}` : 'Tất cả kho (không gồm chuyển kho nội bộ)',
+            groupId && `Nhóm: ${groups.data?.items.find((g) => g.id === groupId)?.name ?? ''}`,
+            dq && `Tìm: "${dq}"`,
+          ]}
+        />
         <ReportTable<StockNxtItem>
           columns={columns}
           rows={d?.items ?? []}

@@ -1,5 +1,5 @@
 import { api, buildUrl, type QueryParams } from './client';
-import type { DraftDemandItem, Settings, StockLedger, StockNxt, StockSummary, TradeReport } from './types';
+import type { CashBook, DebtLedger, DebtSide, DebtSummary, DraftDemandItem, Settings, StockLedger, StockNxt, StockSummary, TradeReport } from './types';
 
 export interface StockSummaryParams { as_of?: string; warehouse_id?: number; group_id?: number; q?: string; only_with_data?: boolean }
 export interface NxtParams { from?: string; to?: string; warehouse_id?: number; group_id?: number; q?: string }
@@ -7,6 +7,10 @@ export interface LedgerParams { product_id: number; from?: string; to?: string; 
 export interface TradeParams {
   from?: string; to?: string; partner_id?: number; product_id?: number; group_id?: number; warehouse_id?: number; q?: string; include_returns?: boolean;
 }
+
+export interface DebtSummaryParams { side: DebtSide; from?: string; to?: string; q?: string; include_zero?: boolean }
+export interface DebtLedgerParams { partner_id: number; side: DebtSide; from?: string; to?: string }
+export interface CashBookParams { account_id?: number; kind?: 'cash' | 'bank'; from?: string; to?: string }
 
 const q = (p: object): QueryParams => {
   const out: QueryParams = {};
@@ -21,6 +25,9 @@ export const reportApi = {
   stockLedger: (p: LedgerParams) => api.get<StockLedger>('/reports/stock-ledger', q(p)),
   sales: (p: TradeParams) => api.get<TradeReport>('/reports/sales', q(p)),
   purchases: (p: TradeParams) => api.get<TradeReport>('/reports/purchases', q(p)),
+  debtSummary: (p: DebtSummaryParams) => api.get<DebtSummary>('/reports/debt-summary', q(p)),
+  debtLedger: (p: DebtLedgerParams) => api.get<DebtLedger>('/reports/debt-ledger', q(p)),
+  cashBook: (p: CashBookParams) => api.get<CashBook>('/reports/cash-book', q(p)),
   draftDemand: (onlyShortage: boolean) => api.get<{ items: DraftDemandItem[] }>('/reports/draft-demand', { only_shortage: onlyShortage }),
   xlsxUrl: (name: string, p: object) => buildUrl(`/reports/${name}`, { ...q(p), format: 'xlsx' }),
 };

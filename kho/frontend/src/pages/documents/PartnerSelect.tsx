@@ -14,6 +14,8 @@ export interface PartnerLite {
   name: string;
   phone?: string;
   address?: string;
+  is_customer?: boolean;
+  is_supplier?: boolean;
 }
 
 interface Props {
@@ -119,7 +121,7 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
         record={null}
         initial={search ? { name: search } : undefined}
         onClose={() => setAdding(false)}
-        onSaved={(p: Partner) => onChange?.({ id: p.id, code: p.code, name: p.name, phone: p.phone, address: p.address })}
+        onSaved={(p: Partner) => onChange?.({ id: p.id, code: p.code, name: p.name, phone: p.phone, address: p.address, is_customer: p.is_customer, is_supplier: p.is_supplier })}
       />
       )}
     </Space.Compact>

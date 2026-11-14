@@ -11,6 +11,7 @@ import {
   ShopOutlined,
   ShoppingCartOutlined,
   SolutionOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons';
 import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { ProductGroupsPage, WarehousesPage } from './pages/catalog/SimpleCatalogPage';
@@ -18,10 +19,13 @@ import { ProductsPage } from './pages/catalog/ProductsPage';
 import { PartnersPage } from './pages/catalog/PartnersPage';
 import { CashAccountsPage } from './pages/catalog/CashAccountsPage';
 import { UsersPage } from './pages/catalog/UsersPage';
-import { Placeholder } from './components/Placeholder';
 import { DocumentListPage } from './pages/documents/DocumentListPage';
 import { DocumentRoute } from './pages/documents/DocumentEditor';
 import { paths } from './paths';
+import { CashBookPage, DebtSummaryPage } from './pages/vouchers/MoneyPages';
+import { VoucherListPage } from './pages/vouchers/VoucherListPage';
+import { VoucherRoute } from './pages/vouchers/VoucherEditor';
+import { GuidePage } from './pages/GuidePage';
 import { StockLedgerPage, StockNxtPage, StockSummaryPage } from './pages/reports/StockPages';
 import { PurchasesReportPage, ReorderPage, ReportsHub, SalesHistoryPage, SalesReportPage } from './pages/reports/OtherReportPages';
 import { CompanySettingsPage } from './pages/catalog/CompanySettingsPage';
@@ -45,7 +49,6 @@ export interface MenuGroup {
   adminOnly?: boolean;
 }
 
-const soon = (title: string, note?: string) => <Placeholder title={title} note={note} />;
 
 export const menu: MenuGroup[] = [
   {
@@ -91,8 +94,8 @@ export const menu: MenuGroup[] = [
     label: 'Công nợ',
     icon: <SolutionOutlined />,
     items: [
-      { path: paths.receivable, label: 'Phải thu khách hàng', element: soon('Công nợ phải thu khách hàng') },
-      { path: paths.payable, label: 'Phải trả nhà cung cấp', element: soon('Công nợ phải trả nhà cung cấp') },
+      { path: paths.receivable, label: 'Phải thu khách hàng', element: <DebtSummaryPage key="r" side="receivable" /> },
+      { path: paths.payable, label: 'Phải trả nhà cung cấp', element: <DebtSummaryPage key="p" side="payable" /> },
     ],
   },
   {
@@ -100,9 +103,9 @@ export const menu: MenuGroup[] = [
     label: 'Quỹ & Ngân hàng',
     icon: <BankOutlined />,
     items: [
-      { path: paths.receipts, label: 'Thu tiền', element: soon('Phiếu thu tiền') },
-      { path: paths.payments, label: 'Chi tiền', element: soon('Phiếu chi tiền') },
-      { path: paths.cashBook, label: 'Sổ quỹ / Sổ ngân hàng', element: soon('Sổ quỹ tiền mặt / Sổ tiền gửi ngân hàng') },
+      { path: paths.receipts, label: 'Thu tiền', element: <VoucherListPage key="r" type="receipt" /> },
+      { path: paths.payments, label: 'Chi tiền', element: <VoucherListPage key="p" type="payment" /> },
+      { path: paths.cashBook, label: 'Sổ quỹ / Sổ ngân hàng', element: <CashBookPage /> },
     ],
   },
   {
@@ -134,12 +137,18 @@ export const menu: MenuGroup[] = [
       { path: paths.company, label: 'Thông tin công ty', element: <CompanySettingsPage />, adminOnly: true },
     ],
   },
+  {
+    key: 'huong-dan',
+    label: 'Hướng dẫn',
+    icon: <QuestionCircleOutlined />,
+    screen: { path: paths.guide, label: 'Hướng dẫn sử dụng', element: <GuidePage /> },
+  },
 ];
 
 /** Màn không nằm trên menu (mở từ chỗ khác). */
 export const hiddenScreens: ScreenDef[] = [
   { path: '/chung-tu/:id', label: 'Chứng từ', element: <DocumentRoute /> },
-  { path: '/phieu-thu-chi/:id', label: 'Phiếu thu chi', element: soon('Xem / sửa phiếu thu chi') },
+  { path: '/phieu-thu-chi/:id', label: 'Phiếu thu chi', element: <VoucherRoute /> },
   { path: paths.salesReport, label: 'Chi tiết bán hàng', element: <SalesReportPage /> },
   { path: paths.salesHistory, label: 'Lịch sử bán theo mặt hàng', element: <SalesHistoryPage /> },
   { path: paths.purchasesReport, label: 'Chi tiết mua hàng', element: <PurchasesReportPage /> },

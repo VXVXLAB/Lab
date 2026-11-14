@@ -44,6 +44,14 @@ export function presetRange(p: Preset): [Dayjs | null, Dayjs | null] {
   }
 }
 
+/** Câu mô tả khoảng ngày cho tiêu đề in: "Từ 01/04/2026 đến 31/05/2026" / "Toàn bộ thời gian". */
+export function describeRange(v: DateRangeValue): string {
+  const [f, t] = rangeOf(v);
+  if (!f && !t) return 'Toàn bộ thời gian';
+  if (f && t) return `Từ ${formatDate(f)} đến ${formatDate(t)}`;
+  return f ? `Từ ${formatDate(f)}` : `Đến ${formatDate(t)}`;
+}
+
 /** Khoảng ngày thực tế đang chọn. */
 export function rangeOf(v: DateRangeValue): [Dayjs | null, Dayjs | null] {
   return v.preset === 'custom' ? v.range : presetRange(v.preset);

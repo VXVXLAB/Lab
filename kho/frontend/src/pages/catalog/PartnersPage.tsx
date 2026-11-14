@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
-import { Checkbox, Col, Form, Input, Row, Switch, Tag } from 'antd';
+import { Button, Checkbox, Col, Form, Input, Row, Switch, Tag, Tooltip } from 'antd';
+import { SolutionOutlined } from '@ant-design/icons';
+import { useDrawers } from '../reports/drawers';
 import type { ColumnsType } from 'antd/es/table';
 import { useQueryClient } from '@tanstack/react-query';
 import { partnersApi } from '../../api/catalog';
@@ -34,6 +36,7 @@ function emptyPartner(type: PartnerType): PartnerBody {
 
 /** Một màn cho cả Khách hàng và Nhà cung cấp (một đối tác có thể vừa là KH vừa là NCC). */
 export function PartnersPage({ type }: { type: PartnerType }) {
+  const drawers = useDrawers();
   const mode = MODE[type];
   const ed = useEditor<Partner>();
   const rec = ed.record;
@@ -86,7 +89,19 @@ export function PartnersPage({ type }: { type: PartnerType }) {
         searchPlaceholder="Tìm mã, tên, điện thoại, mã số thuế…"
         describe={(r) => `${r.code} – ${r.name}`}
         columns={columns}
-        minWidth={1040}
+        minWidth={1100}
+        extraActionsWidth={32}
+        extraActions={(r) => (
+          <Tooltip title={type === 'customer' ? 'Xem công nợ phải thu' : 'Xem công nợ phải trả'}>
+            <Button
+              type="text"
+              size="small"
+              icon={<SolutionOutlined />}
+              aria-label="Xem công nợ"
+              onClick={() => drawers.push({ kind: 'debt', partner: { id: r.id, code: r.code, name: r.name }, side: type === 'customer' ? 'receivable' : 'payable' })}
+            />
+          </Tooltip>
+        )}
         onCreate={ed.openCreate}
         onEdit={ed.openEdit}
         onDelete={(r) => partnersApi.remove(r.id)}

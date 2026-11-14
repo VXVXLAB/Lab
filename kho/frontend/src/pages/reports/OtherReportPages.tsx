@@ -29,8 +29,7 @@ export function SalesReportPage() {
   useMenuHighlight(paths.reports, 'Chi tiết bán hàng');
   return (
     <div className="list-page">
-      <PageHeader title="Chi tiết bán hàng" sub="Từng dòng hàng đã bán (phiếu đã ghi sổ). Bấm dòng để xem phiếu." />
-      <TradeReportView kind="sales" />
+      <TradeReportView kind="sales" pageTitle="Chi tiết bán hàng" pageSub="Từng dòng hàng đã bán (phiếu đã ghi sổ). Bấm dòng để xem phiếu." />
     </div>
   );
 }
@@ -39,8 +38,7 @@ export function PurchasesReportPage() {
   useMenuHighlight(paths.reports, 'Chi tiết mua hàng');
   return (
     <div className="list-page">
-      <PageHeader title="Chi tiết mua hàng" sub="Từng dòng hàng đã nhập mua (phiếu đã ghi sổ). Bấm dòng để xem phiếu." />
-      <TradeReportView kind="purchases" />
+      <TradeReportView kind="purchases" pageTitle="Chi tiết mua hàng" pageSub="Từng dòng hàng đã nhập mua (phiếu đã ghi sổ). Bấm dòng để xem phiếu." />
     </div>
   );
 }
@@ -49,8 +47,7 @@ export function SalesHistoryPage() {
   useMenuHighlight(paths.reports, 'Lịch sử bán theo mặt hàng');
   return (
     <div className="list-page">
-      <PageHeader title="Lịch sử bán hàng theo mặt hàng" sub="Chọn mặt hàng để xem đã bán cho ai, ngày nào, giá bao nhiêu (mọi thời gian)." />
-      <TradeReportView kind="sales" initialPreset="all" />
+      <TradeReportView kind="sales" initialPreset="all" pageTitle="Lịch sử bán hàng theo mặt hàng" pageSub="Chọn mặt hàng để xem đã bán cho ai, ngày nào, giá bao nhiêu (mọi thời gian)." />
     </div>
   );
 }
@@ -62,9 +59,10 @@ export function ReorderPage() {
   const [onlyShort, setOnlyShort] = useState(true);
   const q = useQuery({ queryKey: qk.report('draft-demand', { onlyShort }), queryFn: () => reportApi.draftDemand(onlyShort) });
   const items = q.data?.items ?? [];
-  const [sel, setSel] = useState<number[] | null>(null);
+  // Nhớ các mã người dùng BỎ chọn ⇒ dữ liệu tự làm mới (SSE) không làm mất lựa chọn; mã mới thiếu tự được chọn.
+  const [unselected, setUnselected] = useState<Set<number>>(() => new Set());
   const shortIds = useMemo(() => items.filter((i) => i.shortage > 0).map((i) => i.product_id), [items]);
-  const selected = sel ?? shortIds;
+  const selected = shortIds.filter((id) => !unselected.has(id));
 
   const createPurchase = () => {
     const chosen = items.filter((i) => selected.includes(i.product_id) && i.shortage > 0);
@@ -124,7 +122,10 @@ export function ReorderPage() {
           pagination={false}
           rowSelection={{
             selectedRowKeys: selected,
-            onChange: (keys) => setSel(keys.map(Number)),
+            onChange: (keys) => {
+              const k = new Set(keys.map(Number));
+              setUnselected(new Set(shortIds.filter((id) => !k.has(id))));
+            },
             getCheckboxProps: (r) => ({ disabled: r.shortage <= 0 }),
           }}
           expandable={{
@@ -184,9 +185,10 @@ export function ReportsHub() {
     {
       title: 'Công nợ – Quỹ',
       cards: [
-        { title: 'Công nợ phải thu', desc: 'Khách hàng còn nợ: đầu kỳ, phát sinh, cuối kỳ; sổ chi tiết từng khách.', icon: <SolutionOutlined />, soon: true },
-        { title: 'Công nợ phải trả', desc: 'Còn nợ nhà cung cấp: đầu kỳ, phát sinh, cuối kỳ.', icon: <SolutionOutlined />, soon: true },
-        { title: 'Sổ quỹ / sổ ngân hàng', desc: 'Thu, chi, tồn quỹ từng ngày.', icon: <WalletOutlined />, soon: true },
+        { title: 'Công nợ phải thu', desc: 'Khách hàng còn nợ: đầu kỳ, phát sinh, đã thu, cuối kỳ; bấm để xem sổ chi tiết từng khách.', to: paths.receivable, icon: <SolutionOutlined /> },
+        { title: 'Công nợ phải trả', desc: 'Còn nợ nhà cung cấp: đầu kỳ, phát sinh, đã trả, cuối kỳ.', to: paths.payable, icon: <SolutionOutlined /> },
+        { title: 'Sổ quỹ / sổ ngân hàng', desc: 'Thu, chi, tồn quỹ tiền mặt và tài khoản ngân hàng theo ngày.', to: paths.cashBook, icon: <WalletOutlined /> },
+        { title: 'Phiếu thu / phiếu chi', desc: 'Danh sách phiếu thu, phiếu chi (tiền mặt và ngân hàng), tổng tiền theo bộ lọc.', to: paths.receipts, icon: <WalletOutlined /> },
       ],
     },
   ];
