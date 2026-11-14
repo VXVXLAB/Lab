@@ -6,6 +6,7 @@ import { useAuth, useCurrentUser } from '../auth/AuthContext';
 import { useLiveStatus } from '../lib/events';
 import { ROLE_LABEL } from '../lib/labels';
 import { storage } from '../lib/storage';
+import { useMenuOverride } from '../lib/menuHighlight';
 import { allScreens, menu } from '../routes';
 
 const { Sider, Header, Content } = Layout;
@@ -38,10 +39,15 @@ export function AppLayout() {
   const isAdmin = user.role === 'admin';
 
   const screens = useMemo(() => allScreens(), []);
+  const override = useMenuOverride();
   const current = useMemo(() => {
+    if (override) {
+      const s = screens.find((x) => x.path === override.path);
+      if (s) return { ...s, label: override.title };
+    }
     const p = location.pathname;
     return screens.find((s) => s.path === p) ?? screens.find((s) => s.path !== '/' && s.path.includes(':') && p.startsWith(s.path.split(':')[0] ?? '#'));
-  }, [location.pathname, screens]);
+  }, [location.pathname, screens, override]);
 
   const [openKeys, setOpenKeys] = useState<string[]>(() => (current?.groupKey ? [current.groupKey] : []));
   useEffect(() => {
@@ -103,7 +109,7 @@ export function AppLayout() {
           mode="inline"
           inlineIndent={16}
           items={items}
-          selectedKeys={current ? [current.path] : []}
+          selectedKeys={current ? [override?.path ?? current.path] : []}
           openKeys={collapsed ? undefined : openKeys}
           onOpenChange={(k) => setOpenKeys(k)}
           className="app-menu"

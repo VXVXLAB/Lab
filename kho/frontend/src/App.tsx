@@ -1,4 +1,5 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { createBrowserRouter, Navigate, RouterProvider, type RouteObject } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App as AntApp, ConfigProvider, Result, Spin } from 'antd';
 import viVN from 'antd/locale/vi_VN';
@@ -33,7 +34,13 @@ function NotFound() {
   return <Result status="404" title="Không có màn hình này" subTitle="Hãy chọn chức năng ở menu bên trái." />;
 }
 
-function AuthedApp() {
+function AdminOnly({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  return user?.role === 'admin' ? <>{children}</> : <Forbidden />;
+}
+
+/** Gốc: chưa đăng nhập ⇒ màn đăng nhập (giữ nguyên đường dẫn để đăng nhập xong quay lại đúng chỗ). */
+function Root() {
   const { state, user } = useAuth();
   if (state.status === 'loading') {
     return (
@@ -45,33 +52,35 @@ function AuthedApp() {
   if (!user) return <LoginPage />;
   return (
     <EventsProvider key={user.id}>
-      <Routes>
-        <Route element={<AppLayout />}>
-          {allScreens().map((s) => (
-            <Route
-              key={s.path}
-              path={s.path}
-              element={s.adminOnly && user.role !== 'admin' ? <Forbidden /> : s.element}
-            />
-          ))}
-          <Route path="/dang-nhap" element={<Navigate to="/" replace />} />
-          <Route path="*" element={<NotFound />} />
-        </Route>
-      </Routes>
+      <AppLayout />
     </EventsProvider>
   );
 }
+
+const children: RouteObject[] = [
+  ...allScreens().map(
+    (s): RouteObject =>
+      s.path === '/'
+        ? { index: true, element: s.element }
+        : { path: s.path, element: s.adminOnly ? <AdminOnly>{s.element}</AdminOnly> : s.element },
+  ),
+  { path: '/dang-nhap', element: <Navigate to="/" replace /> },
+  { path: '*', element: <NotFound /> },
+];
+
+// Data router: cần cho useBlocker (chặn rời trang khi phiếu chưa lưu).
+const router = createBrowserRouter([{ path: '/', element: <Root />, children }], {
+  future: { v7_relativeSplatPath: true },
+});
 
 export default function App() {
   return (
     <ConfigProvider locale={viVN} theme={theme}>
       <AntApp message={{ maxCount: 3, top: 56 }}>
         <QueryClientProvider client={queryClient}>
-          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-            <AuthProvider>
-              <AuthedApp />
-            </AuthProvider>
-          </BrowserRouter>
+          <AuthProvider>
+            <RouterProvider router={router} future={{ v7_startTransition: true }} />
+          </AuthProvider>
         </QueryClientProvider>
       </AntApp>
     </ConfigProvider>

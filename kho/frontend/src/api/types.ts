@@ -281,3 +281,109 @@ export interface CatalogChangedEvent extends ServerEventBase {
 }
 
 export type ServerEvent = DocumentChangedEvent | VoucherChangedEvent | CatalogChangedEvent;
+
+// ---------- Chứng từ kho: chi tiết ----------
+export interface DocumentLine {
+  id: number;
+  line_no: number;
+  product_id: number;
+  product_code: string;
+  product_name: string;
+  is_service: boolean;
+  description: string;
+  unit: string;
+  qty: number;
+  unit_price: number | null;
+  amount: number;
+  note: string;
+}
+
+export interface DocumentFull {
+  id: number;
+  doc_type: DocType;
+  doc_type_name: string;
+  doc_no: string | null;
+  draft_no: string;
+  display_no: string;
+  doc_date: string;
+  status: DocStatus;
+  partner_id: number | null;
+  partner_code: string | null;
+  partner_name: string | null;
+  partner_address: string | null;
+  partner_phone: string | null;
+  warehouse_id: number;
+  warehouse_code: string;
+  warehouse_name: string;
+  to_warehouse_id: number | null;
+  to_warehouse_code: string | null;
+  to_warehouse_name: string | null;
+  note: string;
+  total_amount: number;
+  version: number;
+  created_by: number;
+  created_by_name: string;
+  updated_by: number;
+  updated_by_name: string;
+  posted_by: number | null;
+  posted_by_name: string | null;
+  posted_at: string | null;
+  created_at: string;
+  updated_at: string;
+  lines: DocumentLine[];
+  warnings: LossWarning[];
+  old_debt: number | null;
+  total_debt: number | null;
+}
+
+export interface DocumentLineBody {
+  product_id: number;
+  description: string;
+  unit: string;
+  qty: number | null;
+  unit_price: number | null;
+  note: string;
+}
+
+export interface DocumentBody {
+  doc_type: DocType;
+  doc_date: string;
+  partner_id: number | null;
+  warehouse_id: number | null;
+  to_warehouse_id: number | null;
+  note: string;
+  lines: DocumentLineBody[];
+  version?: number;
+  confirm_loss?: boolean;
+}
+
+export interface DocumentListParams {
+  type?: string;
+  status?: DocStatus;
+  partner_id?: number;
+  warehouse_id?: number;
+  product_id?: number;
+  q?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export interface DocumentCheck {
+  stock_shortages: Shortage[];
+  loss_lines: LossWarning[];
+  can_post: boolean;
+}
+
+export type HistoryAction = 'created' | 'updated' | 'posted' | 'unposted' | 'deleted';
+
+export interface DocumentHistoryEntry {
+  id: number;
+  at: string;
+  user_id: number;
+  user_name: string;
+  action: HistoryAction;
+  before: DocumentFull | null;
+  after: DocumentFull | null;
+}

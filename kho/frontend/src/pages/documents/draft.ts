@@ -1,0 +1,130 @@
+// Mô hình phiếu đang soạn trên máy (trước khi lưu) và chuyển đổi qua lại với dữ liệu máy chủ.
+import type { Dayjs } from 'dayjs';
+import type { DocType, DocumentBody, DocumentFull, DocumentLineBody, Product } from '../../api/types';
+import { fromApiDate, toApiDate } from '../../lib/format';
+import type { PartnerLite } from './PartnerSelect';
+
+export interface ProductLite {
+  id: number;
+  code: string;
+  name: string;
+  unit: string;
+  is_service: boolean;
+  sale_price?: number;
+  purchase_price?: number;
+}
+
+export interface LineDraft {
+  key: string;
+  product: ProductLite | null;
+  /** Chữ đang gõ ở ô Mã hàng (khi chưa chọn được mã) */
+  codeText: string;
+  description: string;
+  unit: string;
+  qty: number | null;
+  unit_price: number | null;
+  note: string;
+}
+
+export interface HeaderDraft {
+  doc_date: Dayjs | null;
+  partner: PartnerLite | null;
+  warehouse_id: number | null;
+  to_warehouse_id: number | null;
+  note: string;
+}
+
+let seq = 0;
+export const newKey = () => `l${Date.now().toString(36)}${(seq++).toString(36)}`;
+
+export function emptyLine(): LineDraft {
+  return { key: newKey(), product: null, codeText: '', description: '', unit: '', qty: null, unit_price: null, note: '' };
+}
+
+export function isBlank(l: LineDraft): boolean {
+  return !l.product && !l.codeText.trim();
+}
+
+/** Luôn có đúng một dòng trống ở cuối để gõ tiếp. */
+export function withTrailingBlank(lines: LineDraft[]): LineDraft[] {
+  const trimmed = [...lines];
+  while (trimmed.length > 1 && isBlank(trimmed[trimmed.length - 1]!) && isBlank(trimmed[trimmed.length - 2]!)) trimmed.pop();
+  const last = trimmed[trimmed.length - 1];
+  return !last || !isBlank(last) ? [...trimmed, emptyLine()] : trimmed;
+}
+
+export function fromProduct(p: Product): ProductLite {
+  return {
+    id: p.id,
+    code: p.code,
+    name: p.name,
+    unit: p.unit,
+    is_service: p.is_service,
+    sale_price: p.sale_price,
+    purchase_price: p.purchase_price,
+  };
+}
+
+export function draftFromDoc(d: DocumentFull): { header: HeaderDraft; lines: LineDraft[] } {
+  return {
+    header: {
+      doc_date: fromApiDate(d.doc_date),
+      partner: d.partner_id
+        ? { id: d.partner_id, code: d.partner_code ?? '', name: d.partner_name ?? '', phone: d.partner_phone ?? '', address: d.partner_address ?? '' }
+        : null,
+      warehouse_id: d.warehouse_id,
+      to_warehouse_id: d.to_warehouse_id,
+      note: d.note,
+    },
+    lines: withTrailingBlank(
+      d.lines.map((l) => ({
+        key: newKey(),
+        product: { id: l.product_id, code: l.product_code, name: l.product_name, unit: l.unit, is_service: l.is_service },
+        codeText: l.product_code,
+        description: l.description,
+        unit: l.unit,
+        qty: l.qty,
+        unit_price: l.unit_price,
+        note: l.note,
+      })),
+    ),
+  };
+}
+
+export function lineAmount(l: LineDraft): number {
+  if (l.qty === null || l.unit_price === null) return 0;
+  return Math.round(l.qty * l.unit_price);
+}
+
+/** Dòng thật sự gửi lên (bỏ dòng trống), kèm vị trí trong lưới để báo lỗi đúng dòng. */
+export function sentLines(lines: LineDraft[]): LineDraft[] {
+  return lines.filter((l) => !isBlank(l));
+}
+
+export function toBody(type: DocType, h: HeaderDraft, lines: LineDraft[]): DocumentBody {
+  return {
+    doc_type: type,
+    doc_date: toApiDate(h.doc_date) ?? '',
+    partner_id: h.partner?.id ?? null,
+    warehouse_id: h.warehouse_id,
+    to_warehouse_id: type === 'transfer' ? h.to_warehouse_id : null,
+    note: h.note.trim(),
+    lines: sentLines(lines).map(
+      (l): DocumentLineBody => ({
+        product_id: l.product?.id ?? 0,
+        description: l.description.trim(),
+        unit: l.unit,
+        qty: l.qty,
+        unit_price: type === 'transfer' ? null : l.unit_price,
+        note: l.note,
+      }),
+    ),
+  };
+}
+
+/** Chuỗi so sánh để biết phiếu có thay đổi chưa lưu. */
+export function fingerprint(type: DocType, h: HeaderDraft, lines: LineDraft[]): string {
+  const b = toBody(type, h, lines);
+  const unresolved = sentLines(lines).filter((l) => !l.product).map((l) => l.codeText);
+  return JSON.stringify([b, unresolved]);
+}

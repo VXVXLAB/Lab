@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { forwardRef, useRef, useState, type CSSProperties } from 'react';
 import { Input, Tooltip, type InputRef } from 'antd';
 import { formatMoney, formatQty, parseVnNumber } from '../lib/format';
 
@@ -18,6 +18,11 @@ export interface NumberInputProps {
   onBlur?: () => void;
   status?: 'error' | 'warning';
   'aria-label'?: string;
+  /** Định danh ô trong lưới phiếu (để chuyển con trỏ bằng phím) */
+  dataCell?: string;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  /** Kích thước gọn cho lưới */
+  variant?: 'outlined' | 'borderless';
 }
 
 function roundTo(n: number, digits: number): number {
@@ -32,7 +37,7 @@ function roundTo(n: number, digits: number): number {
  * Vào ô ⇒ bôi đen toàn bộ để gõ đè.
  */
 export const NumberInput = forwardRef<InputRef, NumberInputProps>(function NumberInput(
-  { value, onChange, kind = 'money', allowNegative = false, style, onBlur, suffix, status, ...rest },
+  { value, onChange, kind = 'money', allowNegative = false, style, onBlur, suffix, status, dataCell, onKeyDown, ...rest },
   ref,
 ) {
   const digits = kind === 'qty' ? 3 : 2;
@@ -42,11 +47,9 @@ export const NumberInput = forwardRef<InputRef, NumberInputProps>(function Numbe
   const [invalid, setInvalid] = useState(false);
   const justFocused = useRef(false);
 
-  // Giá trị từ ngoài đổi (form reset, tải bản ghi) khi không gõ ⇒ hiển thị lại.
-  useEffect(() => {
-    if (!focused) setText(fmt(value));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, focused]);
+  // Không gõ ⇒ luôn hiển thị theo giá trị (tính ngay trong lần vẽ, không chờ effect — để bôi đen ngay khi
+  // con trỏ được đưa vào ô từ bàn phím không bị mất).
+  const shown = focused ? text : fmt(value);
 
   const commit = (raw: string) => {
     const n = parseVnNumber(raw);
@@ -72,11 +75,12 @@ export const NumberInput = forwardRef<InputRef, NumberInputProps>(function Numbe
         ref={ref}
         inputMode="decimal"
         autoComplete="off"
-        value={text}
+        value={shown}
         status={invalid ? 'error' : status}
         style={{ textAlign: 'right', ...style }}
         suffix={suffix ? <span className="num-suffix">{suffix}</span> : undefined}
         onFocus={(e) => {
+          setText(fmt(value));
           setFocused(true);
           // Bôi đen ngay (đồng bộ) để gõ đè — không dùng setTimeout vì người gõ nhanh sẽ bị mất số đầu.
           e.target.select();
@@ -87,8 +91,10 @@ export const NumberInput = forwardRef<InputRef, NumberInputProps>(function Numbe
           if (justFocused.current) e.preventDefault();
           justFocused.current = false;
         }}
-        onKeyDown={() => {
+        data-cell={dataCell}
+        onKeyDown={(e) => {
           justFocused.current = false;
+          onKeyDown?.(e);
         }}
         onChange={(e) => {
           setText(e.target.value);
@@ -98,7 +104,6 @@ export const NumberInput = forwardRef<InputRef, NumberInputProps>(function Numbe
           // Rời ô: hiển thị lại giá trị hợp lệ cuối cùng (gõ sai thì quay về số cũ).
           setFocused(false);
           setInvalid(false);
-          setText(fmt(value));
           onBlur?.();
         }}
       />

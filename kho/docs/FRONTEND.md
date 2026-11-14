@@ -20,7 +20,8 @@ tải lại trang ở `:8080`, không phải khởi động lại máy chủ. D�
 
 ```
 main.tsx                 điểm vào (nạp dayjs vi trước)
-App.tsx                  ConfigProvider(vi_VN, theme) → AntApp → QueryClient → Router → Auth → Events → Routes
+App.tsx                  ConfigProvider(vi_VN, theme) → AntApp → QueryClient → Auth → data router (createBrowserRouter,
+                         cần cho useBlocker) → Root (đăng nhập?) → Events → AppLayout → màn hình
 theme.ts                 token màu/cỡ chữ/bảng (một chỗ)
 styles.css               CSS toàn cục (khung, bảng, ô thống kê, trang danh sách); không CSS-in-JS riêng
 paths.ts                 MỌI đường dẫn màn hình (paths.sales, paths.document(id)…) — không viết chuỗi URL ở nơi khác
@@ -30,6 +31,7 @@ api/
                          lỗi mạng ⇒ câu tiếng Việt; `api.get/post/put/del`
   types.ts               kiểu dữ liệu đúng docs/API.md (danh mục, chứng từ, cảnh báo, thiếu hàng, dashboard, sự kiện SSE)
   catalog.ts             hàm gọi danh mục, người dùng, dashboard, báo cáo tồn (dựng trên `api`)
+  documents.ts           chứng từ kho: list/get/create/update/post/unpost/remove/check/history/exportUrl
   queryKeys.ts           khóa cache — xem "Cache & cập nhật trực tiếp"
 auth/                    AuthContext (useAuth, useCurrentUser), LoginPage
 layout/AppLayout.tsx     khung: menu trái (thu gọn được, tự thu gọn < 992px), thanh trên (đường dẫn, trạng thái kết nối,
@@ -41,15 +43,24 @@ lib/
   labels.ts              nhãn tiếng Việt cho doc_type, role, loại tài khoản tiền
   storage.ts             localStorage bọc try/catch (chỉ tiện ích từng máy)
   useDebounced.ts        useDebounced, useElementHeight
+  menuHighlight.ts       useMenuHighlight(path, title): màn mở từ chỗ khác (phiếu) báo mục menu cần tô sáng + tiêu đề
 components/
-  NumberInput.tsx        ô số kiểu Việt Nam (dùng cho MỌI ô tiền/số lượng)
+  NumberInput.tsx        ô số kiểu Việt Nam (dùng cho MỌI ô tiền/số lượng); hiển thị tính ngay khi vẽ (không qua effect)
+  DateInput.tsx          ô ngày gõ tắt (25/9/2026, 25/9, 250926, 2509, 25) + nút lịch; KHÔNG bật lịch khi vào ô
   EntityFormModal.tsx    hộp thoại thêm/sửa chuẩn (Enter, Ctrl+S, Esc, lỗi theo ô)
   CatalogList.tsx        trang danh sách chuẩn (tìm, lọc, phân trang, phím, xóa/ngừng dùng) + StatusText, activeColumn
   PageHeader, Kbd, Placeholder
 pages/
   dashboard/DashboardPage.tsx
   catalog/               Products, Partners (một màn, hai chế độ customer/supplier), SimpleCatalog (Kho, Nhóm hàng),
-                         CashAccounts, Users, rules.ts, useEditor.ts
+                         CashAccounts, Users, rules.ts, useEditor.ts; PartnersPage xuất PartnerFormModal (dùng lại khi thêm nhanh)
+  documents/
+    docTypes.ts          cấu hình 6 loại phiếu (nhãn, đối tác, kho nhận, có giá?, giá mặc định, phiếu xuất?, có nợ?, cảnh báo lỗ?)
+    DocumentListPage     danh sách theo loại + màn "Phiếu tạm đang treo" (draftsOnly)
+    DocumentEditor       route /chung-tu/:id và /chung-tu/moi?loai=… (DocumentRoute giữ trình soạn khi phiếu mới được lưu)
+    draft.ts             mô hình phiếu đang soạn (HeaderDraft, LineDraft), chuyển qua lại với Document, fingerprint (đã sửa?)
+    LineGrid             lưới dòng hàng; ProductCodeInput ô mã hàng + danh sách gợi ý; PartnerSelect ô đối tác (+F4 thêm nhanh)
+    PrintSheet           bản in A4/A5 (in qua trình duyệt, #print-root + @media print); HistoryDrawer lịch sử sửa (diff dễ đọc)
 ```
 
 ## Quy ước
@@ -91,6 +102,31 @@ và tự cuộn ngang bên trong. Trạng thái dùng `StatusText` (chấm màu 
 (Ghi sổ, Phiếu tạm, Công nợ, Tồn kho, Ngừng sử dụng…), xác nhận xóa nói rõ đối tượng và "không khôi phục được",
 thông báo thành công ngắn (1,5 giây), lỗi nói cách khắc phục.
 
+## Chứng từ (giai đoạn 2)
+
+- Một trình soạn cho 6 loại; khác nhau chỉ qua `docTypes.ts`. Danh sách theo loại ở `paths.sales/…`, phiếu mới
+  `paths.newDocument(type)` (= `/chung-tu/moi?loai=sale`), mở phiếu `paths.document(id)`.
+- **Bàn phím trong phiếu**: Enter đi Ngày → Đối tác → Kho → (Kho nhận) → Ghi chú → dòng 1. Ở lưới: Mã (gõ mã hoặc một
+  phần tên, nhiều từ được: "kiswel 3.2"; Enter lấy; gõ đủ mã + Enter không cần chờ danh sách) → Số lượng → Đơn giá → dòng sau
+  (luôn có một dòng trống ở cuối). Dòng dịch vụ (`DV`/`DICHVU`): Mã → Diễn giải → Đơn giá (được âm, được để trống).
+  ↑↓ đổi dòng cùng cột, Ctrl+Delete xóa dòng, Ctrl+Insert chèn dòng. Ctrl+S Lưu tạm / Lưu thay đổi, F9 Ghi sổ (tự lưu trước),
+  F8 Sửa phiếu đã ghi sổ, Ctrl+P xem trước bản in, F2 phiếu mới cùng loại, F4 (ở ô đối tác) thêm đối tác mới.
+- **Giá & tồn**: chọn mã ⇒ điền giá mặc định ngay (giá bán / giá mua theo loại); `price-info` (theo ngày phiếu) cho cột Tồn
+  (kho đang chọn / tổng), gợi ý "giá mua …" và cảnh báo "Bán lỗ" (phiếu bán). Phiếu xuất đánh dấu "Thiếu x — tồn y" khi
+  gộp SL theo mã vượt tồn của kho (phiếu đã ghi sổ đang sửa: cộng lại SL cũ của chính nó). Phiếu tạm đã lưu còn gọi
+  `/check` (chính xác, tính cả các ngày sau) và hiện ở chân phiếu.
+- **Lỗi máy chủ**: `LOSS_WARNING` ⇒ hộp xác nhận liệt kê dòng, đồng ý thì gửi lại với `confirm_loss`; `INSUFFICIENT_STOCK` ⇒
+  hộp thoại `message` từng mã (+ gợi ý phiếu vẫn là phiếu tạm / Hàng cần đặt); `VALIDATION` có `line_no` ⇒ tô đỏ đúng dòng
+  và đặt con trỏ; `VERSION_CONFLICT` ⇒ giải thích + "Tải bản mới", các dòng đang gõ được giữ trong khung vàng (Thêm lại /
+  Chép ra Excel); `IN_USE` khi xóa ⇒ nêu số phiếu thu/chi.
+- **Hai máy**: SSE làm mới `['document', id]`; trình soạn so `version`: không có thay đổi chưa lưu ⇒ tự nạp bản mới + báo
+  ngắn; đang sửa dở ⇒ dải cảnh báo "Phiếu vừa được X sửa lúc …" (không ghi đè chữ đang gõ); phiếu bị xóa ⇒ báo và khóa.
+- **Chặn rời trang** khi có thay đổi chưa lưu: `useBlocker` (điều hướng trong app) + `beforeunload` (đóng tab).
+- **In**: luôn in dữ liệu đã lưu (có thay đổi chưa lưu ⇒ nhắc lưu trước). Phiếu tạm in tiêu đề "PHIẾU TẠM (chưa ghi sổ)",
+  phiếu đã ghi sổ in tiêu đề chính thức như file xuất của máy chủ. Thông tin công ty ở `PrintSheet.tsx` (`COMPANY`) là chỗ
+  giữ sẵn. Excel/Word tải từ `/api/documents/{id}/export`.
+- Kho mặc định của phiếu mới = kho dùng lần trước cho loại phiếu đó trên máy này (`localStorage`).
+
 ## Cache & cập nhật trực tiếp
 
 Khóa (`api/queryKeys.ts`) có phần tử đầu là "miền" để làm mới theo tiền tố:
@@ -114,6 +150,9 @@ Màn mới **phải** đặt khóa theo quy ước này thì mới tự cập nh
 4. Danh sách dùng `CatalogList` hoặc cùng quy ước (ô tìm F3, bảng có phím, `PageHeader`); ô tiền/số lượng dùng `NumberInput`.
 
 ## Kiểm tra trên trình duyệt
+
+Giai đoạn 2: ảnh ở `frontend/screenshots/stage2/` (kèm PDF in thử, file xlsx/docx tải về).
+
 
 Ảnh chụp 1366×768 (và máy tính bảng 820×1180) ở `frontend/screenshots/stage1/`. Đã chạy bằng Playwright (Chromium) với
 máy chủ thật: đăng nhập sai/đúng, thêm/sửa/xóa từng danh mục bằng bàn phím, lỗi trùng mã, thiếu ĐVT, bỏ cả KH/NCC,

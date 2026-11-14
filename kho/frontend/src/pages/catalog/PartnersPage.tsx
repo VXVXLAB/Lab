@@ -36,8 +36,6 @@ function emptyPartner(type: PartnerType): PartnerBody {
 export function PartnersPage({ type }: { type: PartnerType }) {
   const mode = MODE[type];
   const ed = useEditor<Partner>();
-  const [form] = Form.useForm<PartnerBody>();
-  const qc = useQueryClient();
   const rec = ed.record;
   const extraParams = useMemo(() => ({ type }), [type]);
 
@@ -97,15 +95,46 @@ export function PartnersPage({ type }: { type: PartnerType }) {
           return partnersApi.update(id, { ...body, active: false });
         }}
       />
-      <EntityFormModal<PartnerBody>
+      <PartnerFormModal
         open={ed.open}
+        type={type}
+        record={rec}
+        onClose={ed.close}
+      />
+    </>
+  );
+}
+
+/** Hộp thoại thêm/sửa đối tác — dùng ở danh mục và "thêm nhanh" ngay trong phiếu. */
+export function PartnerFormModal({
+  open,
+  type,
+  record: rec,
+  onClose,
+  onSaved,
+  initial,
+}: {
+  open: boolean;
+  type: PartnerType;
+  record: Partner | null;
+  onClose: () => void;
+  onSaved?: (p: Partner) => void;
+  /** Giá trị gợi ý khi thêm mới (vd. tên vừa gõ ở ô tìm) */
+  initial?: Partial<PartnerBody>;
+}) {
+  const mode = MODE[type];
+  const [form] = Form.useForm<PartnerBody>();
+  const qc = useQueryClient();
+  return (
+      <EntityFormModal<PartnerBody>
+        open={open}
         width={680}
         title={rec ? `Sửa ${mode.noun} ${rec.code}` : `Thêm ${mode.noun}`}
         form={form}
-        initialValues={rec ? { ...rec } : emptyPartner(type)}
-        onClose={ed.close}
+        initialValues={rec ? { ...rec } : { ...emptyPartner(type), ...initial }}
+        onClose={onClose}
         fieldMap={{ is_supplier: 'is_customer' }}
-        onSubmit={(v) => {
+        onSubmit={async (v) => {
           const body: PartnerBody = {
             code: normalizeCode(v.code),
             name: v.name.trim(),
@@ -119,7 +148,8 @@ export function PartnersPage({ type }: { type: PartnerType }) {
             opening_payable: (form.getFieldValue('opening_payable') as number | null) ?? 0,
             active: v.active,
           };
-          return rec ? partnersApi.update(rec.id, body) : partnersApi.create(body);
+          const saved = await (rec ? partnersApi.update(rec.id, body) : partnersApi.create(body));
+          onSaved?.(saved);
         }}
         onSaved={() => void qc.invalidateQueries({ queryKey: qk.catalog('partner') })}
       >
@@ -198,6 +228,5 @@ export function PartnersPage({ type }: { type: PartnerType }) {
           <Switch checkedChildren="Có" unCheckedChildren="Không" />
         </Form.Item>
       </EntityFormModal>
-    </>
   );
 }

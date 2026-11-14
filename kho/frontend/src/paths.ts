@@ -26,6 +26,8 @@ export const paths = {
   users: '/he-thong/nguoi-dung',
   /** Mở một chứng từ kho (giai đoạn 2). */
   document: (id: number | string) => `/chung-tu/${id}`,
+  /** Lập chứng từ mới theo loại (sale, purchase…). */
+  newDocument: (type: string) => `/chung-tu/moi?loai=${type}`,
   /** Mở một phiếu thu/chi (giai đoạn 3). */
   voucher: (id: number | string) => `/phieu-thu-chi/${id}`,
 } as const;

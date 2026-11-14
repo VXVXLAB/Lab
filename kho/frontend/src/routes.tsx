@@ -19,6 +19,8 @@ import { PartnersPage } from './pages/catalog/PartnersPage';
 import { CashAccountsPage } from './pages/catalog/CashAccountsPage';
 import { UsersPage } from './pages/catalog/UsersPage';
 import { Placeholder } from './components/Placeholder';
+import { DocumentListPage } from './pages/documents/DocumentListPage';
+import { DocumentRoute } from './pages/documents/DocumentEditor';
 import { paths } from './paths';
 
 export { paths };
@@ -54,9 +56,9 @@ export const menu: MenuGroup[] = [
     label: 'Bán hàng',
     icon: <ShoppingCartOutlined />,
     items: [
-      { path: paths.sales, label: 'Phiếu bán', element: soon('Phiếu bán hàng') },
-      { path: paths.salesReturns, label: 'Khách trả hàng', element: soon('Phiếu nhập hàng bán bị trả lại') },
-      { path: paths.drafts, label: 'Phiếu tạm đang treo', element: soon('Phiếu tạm đang treo', 'Tạm thời xem 10 phiếu tạm mới nhất ở màn Tổng quan.') },
+      { path: paths.sales, label: 'Phiếu bán', element: <DocumentListPage key="sale" type="sale" /> },
+      { path: paths.salesReturns, label: 'Khách trả hàng', element: <DocumentListPage key="sale_return" type="sale_return" /> },
+      { path: paths.drafts, label: 'Phiếu tạm đang treo', element: <DocumentListPage key="drafts" draftsOnly /> },
     ],
   },
   {
@@ -64,8 +66,8 @@ export const menu: MenuGroup[] = [
     label: 'Mua hàng',
     icon: <ShopOutlined />,
     items: [
-      { path: paths.purchases, label: 'Phiếu nhập', element: soon('Phiếu nhập mua hàng') },
-      { path: paths.purchaseReturns, label: 'Trả hàng NCC', element: soon('Phiếu xuất trả hàng nhà cung cấp') },
+      { path: paths.purchases, label: 'Phiếu nhập', element: <DocumentListPage key="purchase" type="purchase" /> },
+      { path: paths.purchaseReturns, label: 'Trả hàng NCC', element: <DocumentListPage key="purchase_return" type="purchase_return" /> },
       { path: paths.reorder, label: 'Hàng cần đặt', element: soon('Hàng cần đặt (từ phiếu bán tạm)') },
     ],
   },
@@ -76,8 +78,8 @@ export const menu: MenuGroup[] = [
     items: [
       { path: paths.stock, label: 'Tồn kho', element: soon('Tồn kho') },
       { path: paths.stockLedger, label: 'Thẻ kho / NXT', element: soon('Thẻ kho – chi tiết nhập xuất tồn') },
-      { path: paths.transfers, label: 'Chuyển kho', element: soon('Phiếu chuyển kho nội bộ') },
-      { path: paths.opening, label: 'Tồn đầu kỳ', element: soon('Phiếu nhập tồn đầu kỳ') },
+      { path: paths.transfers, label: 'Chuyển kho', element: <DocumentListPage key="transfer" type="transfer" /> },
+      { path: paths.opening, label: 'Tồn đầu kỳ', element: <DocumentListPage key="opening" type="opening" /> },
     ],
   },
   {
@@ -129,7 +131,7 @@ export const menu: MenuGroup[] = [
 
 /** Màn không nằm trên menu (mở từ chỗ khác). */
 export const hiddenScreens: ScreenDef[] = [
-  { path: '/chung-tu/:id', label: 'Chứng từ', element: soon('Xem / sửa chứng từ') },
+  { path: '/chung-tu/:id', label: 'Chứng từ', element: <DocumentRoute /> },
   { path: '/phieu-thu-chi/:id', label: 'Phiếu thu chi', element: soon('Xem / sửa phiếu thu chi') },
 ];
 
