@@ -1,4 +1,4 @@
-// Câu chuyện 15 — Kiểm lại F-05 / F-07 (vòng 2): "gõ vài chữ rồi Enter" phải chọn ĐÚNG mục người dùng định chọn, trên mọi
+// Câu chuyện 15 — Kiểm lại F-05 / F-07 (vòng 2), F-11…F-15, F-17 (vòng 3): "gõ vài chữ rồi Enter" phải chọn ĐÚNG mục người dùng định chọn, trên mọi
 // ô tìm (phiếu bán, phiếu nhập, phiếu thu, danh mục khách/NCC/hàng, danh sách phiếu, danh sách phiếu thu, thẻ kho),
 // với nhiều tên, nhiều tốc độ gõ, có và không có độ trễ mạng; bộ nhớ đệm lạnh (lần đầu) và nóng (gõ lại tên đã tìm).
 // Mỗi test gom mọi trường hợp sai rồi so một lần, để báo cáo thấy hết các trường hợp lệch.
@@ -252,10 +252,9 @@ test.describe('Câu chuyện 15: tìm rồi Enter trên mọi ô tìm', () => {
     expect(listRes.vouchers.wrong).toEqual([]);
   });
 
-  // PHÁT HIỆN F-15 (BAO_CAO_E2E.md, thấp): ở danh sách Phiếu bán và Phiếu thu, dán số phiếu rồi Enter, Enter ngay khi mạng chậm
-  // thì thường KHÔNG mở gì (không mở nhầm — an toàn — nhưng hai lần Enter bị mất), trái với cách sửa F-05 đã nêu
-  // ("Enter 2 lần ⇒ mở luôn dòng đầu"). Mỗi trường hợp dán + mạng chậm làm 3 lần ⇒ kết quả không phụ thuộc may rủi.
-  test.fail('REQ-037 REQ-060 F-15 Danh sách Phiếu bán / Phiếu thu: Enter, Enter luôn mở được phiếu vừa gõ/dán (mọi tốc độ, mạng chậm)', async () => {
+  // F-15 (vòng 2: dán số phiếu rồi Enter, Enter khi mạng chậm thường không mở gì) — ĐÃ SỬA ở vòng 3, kiểm lại nghiêm: mỗi
+  // trường hợp dán + mạng chậm làm 3 lần, không lần nào được trượt.
+  test('REQ-037 REQ-060 F-15 Danh sách Phiếu bán / Phiếu thu: Enter, Enter luôn mở được phiếu vừa gõ/dán (mọi tốc độ, mạng chậm)', async () => {
     const missed = [...listRes.docs.missed, ...listRes.vouchers.missed];
     expect(missed, `${missed.length}/${listRes.docs.total + listRes.vouchers.total} lần không mở`).toEqual([]);
   });
@@ -306,24 +305,31 @@ test.describe('Câu chuyện 15: tìm rồi Enter trên mọi ô tìm', () => {
     expect(wrong).toEqual([]);
   });
 
-  // PHÁT HIỆN F-12 (BAO_CAO_E2E.md, câu hỏi/khả dụng): cách xếp hạng đã chốt (API.md §2.3) đặt "tên chứa cụm từ ở đầu một từ"
-  // (mức 2, khớp được cả MỘT PHẦN từ) trên "mọi từ là từ nguyên" (mức 3). Gõ đủ hai từ "minh phu" thì "Công ty Minh Phước"
-  // đứng trước "Đại lý Minh Phú" và được chọn khi Enter.
-  test.fail('REQ-025 F-12 Gõ đủ từ "minh phu" rồi Enter chọn "Đại lý Minh Phú" (khớp nguyên từ) chứ không phải "Minh Phước"', async () => {
-    await freshPage('/chung-tu/moi?loai=sale');
-    await page.locator('#partner').focus();
-    await page.keyboard.type('minh phu', { delay: 60 });
-    await page.keyboard.press('Enter');
-    const got = await settle(async () => (await page.locator('.hf-partner .ant-select-selection-item').innerText().catch(() => '')).split(' – ')[0], 'DLMP');
-    await ui.shot(page, 'F12-minh-phu-chon-minh-phuoc');
-    expect(got).toBe('DLMP');
+  const partnerPick = async () => ((await page.locator('.hf-partner .ant-select-selection-item').innerText().catch(() => '')) || '(chưa chọn)').split(' – ')[0];
+  const optCode = (t) => t.trim().split(/\n| – /)[0].trim();
+  const openOpts = () => page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option');
+
+  // F-12 (vòng 2: "minh phu" chọn "Minh Phước") — ĐÃ SỬA ở vòng 3 (khớp nguyên từ xếp trên khớp một phần). Kiểm cả thứ tự
+  // gợi ý lẫn mục được chọn, ở cả gõ chậm và dán.
+  test('REQ-025 F-12 Gõ đủ từ "minh phu" rồi Enter chọn "Đại lý Minh Phú" (khớp nguyên từ) chứ không phải "Minh Phước"', async () => {
+    const res = [];
+    for (const how of ['gõ', 'dán']) {
+      await freshPage('/chung-tu/moi?loai=sale');
+      await page.locator('#partner').focus();
+      if (how === 'gõ') await page.keyboard.type('minh phu', { delay: 60 });
+      else await page.keyboard.insertText('minh phu');
+      await expect(page.locator('[data-search-pending]')).toHaveCount(0);
+      const first = optCode(await openOpts().first().innerText());
+      await page.keyboard.press('Enter');
+      res.push(`${how}: đầu danh sách ${first}, chọn ${await settle(partnerPick, 'DLMP')}`);
+    }
+    await ui.shot(page, 'F12-minh-phu-chon-minh-phu');
+    expect(res).toEqual(['gõ: đầu danh sách DLMP, chọn DLMP', 'dán: đầu danh sách DLMP, chọn DLMP']);
   });
 
-  // PHÁT HIỆN F-11 (BAO_CAO_E2E.md), trường hợp (b): danh sách gợi ý KHÔNG đổi sau khi gõ (vd. công ty mới chỉ có một khách
-  // hàng — đúng như CSDL mới của câu chuyện 10 khi chạy riêng): danh sách hiện đúng khách nhưng không mục nào sáng, Enter
-  // KHÔNG chọn gì và xóa luôn chữ đã gõ. Ở đây giả lập "chỉ có một khách" bằng cách trả danh sách ban đầu (chưa gõ gì)
-  // đúng bằng kết quả tìm — máy chủ thật trả y như vậy khi danh mục chỉ có một khách.
-  test.fail('REQ-018 REQ-UX F-11 Danh mục chỉ có một khách: bán cho khách rồi lập Khách trả hàng, gõ "minh tam", Enter chọn khách và sang ô Kho', async () => {
+  // F-11 (b) (vòng 2: danh mục chỉ có một khách ⇒ Enter không chọn gì) — ĐÃ SỬA ở vòng 3. Giả lập "chỉ có một khách" bằng
+  // cách trả danh sách ban đầu (chưa gõ gì) đúng bằng kết quả tìm — máy chủ thật trả y như vậy khi danh mục chỉ có một khách.
+  test('REQ-018 REQ-UX F-11 Danh mục chỉ có một khách: bán cho khách rồi lập Khách trả hàng, gõ "minh tam", Enter chọn khách và sang ô Kho', async () => {
     const api = await Api.login();
     const only = await api.get('/partners?q=minh%20tam&type=customer&active=true&page_size=30');
     expect(only.items.map((x) => x.code)).toEqual(['MINHTAM']);
@@ -335,35 +341,32 @@ test.describe('Câu chuyện 15: tìm rồi Enter trên mọi ô tìm', () => {
     await leaveEditor();
     await page.route(/\/api\/partners\?/, one);
     try {
-      // phiếu bán cho Minh Tâm (chọn khách bằng ↓ Enter như người dùng), lưu tạm
       await page.goto('/chung-tu/moi?loai=sale');
       await expect(page.getByText('PHIẾU MỚI — chưa lưu', { exact: true })).toBeVisible();
       await ui.pickPartner(page, 'minh tam', 'Xây dựng Minh Tâm');
       await ui.focusBlankCode(page);
       await ui.typeLine(page, { code: 'GL26', qty: 1 });
       await ui.saveDraft(page);
-      // ngay sau đó (trong 30 giây) lập phiếu khách trả hàng cho chính khách đó, trong cùng cửa sổ
       await ui.menu(page, 'Bán hàng', 'Khách trả hàng');
       await ui.newDocByF2(page, /^Khách trả hàng/);
       await page.locator('#partner').focus();
       await page.keyboard.type('minh tam', { delay: 40 });
       await expect(page.locator('[data-search-pending]')).toHaveCount(0);
-      await expect(page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option').first()).toContainText('Xây dựng Minh Tâm');
+      await expect(openOpts().first()).toContainText('Xây dựng Minh Tâm');
       await page.waitForTimeout(500); // người dùng nhìn danh sách rồi mới Enter
       await page.keyboard.press('Enter');
-      await page.waitForTimeout(800); // để mọi xử lý sau Enter chạy xong rồi mới đọc
-      const chosen = (await page.locator('.hf-partner .ant-select-selection-item').textContent().catch(() => '')) || '(chưa chọn)';
-      const focusId = await page.evaluate(() => document.activeElement?.id);
-      await ui.shot(page, 'F11-mot-khach-enter-khong-chon');
-      expect({ chosen, focusId }).toEqual({ chosen: 'MINHTAM – Công ty TNHH Xây dựng Minh Tâm', focusId: 'warehouse' });
+      await expect.poll(partnerPick).toBe('MINHTAM');
+      await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('warehouse');
+      await ui.shot(page, 'F11-mot-khach-enter-chon');
     } finally {
       await page.unroute(/\/api\/partners\?/, one);
     }
   });
 
-  // PHÁT HIỆN F-11 (BAO_CAO_E2E.md), trường hợp (a), nặng: phiếu ĐÃ chọn khách, người dùng gõ tên khách khác, đợi danh sách hiện rồi Enter ⇒ phiếu
-  // VẪN giữ khách cũ (không báo gì). Chỉ khi Enter thật nhanh (< 0,1 s) mới đổi được. Ghi sổ sẽ vào công nợ khách cũ.
-  test.fail('REQ-025 REQ-UX F-11 Đổi khách / mặt hàng đã chọn: gõ tên mới, đợi danh sách hiện, Enter ⇒ nhận mục mới (phiếu bán 3/3, thẻ kho)', async () => {
+  // F-11 (a) (vòng 2, nặng: đổi khách đã chọn bằng gõ + Enter vẫn giữ khách cũ vì khách cũ bị ghim đầu gợi ý) — ĐÃ SỬA ở
+  // vòng 3. Kiểm thêm theo quyết định của vòng 3: khi đang gõ, danh sách KHÔNG có mục đang chọn; ↓ rồi Enter nhận đúng mục
+  // đã dời tới; gõ chữ không có kết quả rồi Enter ⇒ chữ gõ còn nguyên, lựa chọn cũ không đổi.
+  test('REQ-025 REQ-UX F-11 Đổi khách / mặt hàng đã chọn: gõ tên mới, đợi danh sách hiện, Enter ⇒ nhận mục mới (phiếu bán 3/3, thẻ kho)', async () => {
     const res = [];
     for (let i = 0; i < 3; i++) {
       await freshPage('/chung-tu/moi?loai=sale');
@@ -371,16 +374,38 @@ test.describe('Câu chuyện 15: tìm rồi Enter trên mọi ô tìm', () => {
       await page.locator('#partner').focus();
       await page.keyboard.type('thanh cong', { delay: 60 });
       await expect(page.locator('[data-search-pending]')).toHaveCount(0);
-      const opts = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option');
-      await expect(opts.filter({ hasText: 'Xưởng cơ khí Thành Công' })).toBeVisible();
-      // ghi lại thứ tự gợi ý: khách đang chọn (cũ) bị đặt lên đầu danh sách
-      if (i === 0) test.info().annotations.push({ type: 'thứ tự gợi ý', description: (await opts.allInnerTexts()).map((t) => t.split('\n')[0]).join(' | ') });
+      await expect(openOpts().filter({ hasText: 'Xưởng cơ khí Thành Công' })).toBeVisible();
+      const shown = (await openOpts().allInnerTexts()).map(optCode);
+      expect(shown, 'đang gõ thì không ghim khách đang chọn (ANPHU)').not.toContain('ANPHU');
       await page.keyboard.press('Enter');
-      await page.waitForTimeout(800); // để mọi xử lý sau Enter chạy xong rồi mới đọc
-      res.push((await page.locator('.hf-partner .ant-select-selection-item').innerText()).split(' – ')[0]);
+      res.push(await settle(partnerPick, 'THANHCONG'));
     }
-    await ui.shot(page, 'F11-doi-khach-van-giu-khach-cu');
-    // cùng lỗi ở ô chọn mặt hàng của Thẻ kho: đã chọn KT40, gõ GL26, đợi danh sách, Enter
+    // ↓ dời mục sáng xuống mục thứ hai rồi Enter ⇒ nhận đúng mục thứ hai
+    await freshPage('/chung-tu/moi?loai=sale');
+    await ui.pickPartner(page, 'an phu', 'Cơ khí An Phú');
+    await page.locator('#partner').focus();
+    await page.keyboard.type('thanh cong', { delay: 60 });
+    await expect(page.locator('[data-search-pending]')).toHaveCount(0);
+    const second = optCode(await openOpts().nth(1).innerText());
+    expect(second).not.toBe('THANHCONG');
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-active')).toContainText(second);
+    await page.keyboard.press('Enter');
+    res.push(`↓: ${await settle(partnerPick, second)}`);
+    // không có kết quả ⇒ chữ gõ còn nguyên, khách không đổi
+    await page.locator('#partner').focus();
+    await page.keyboard.type('zzqx khong co', { delay: 30 });
+    await expect(page.locator('[data-search-pending]')).toHaveCount(0);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800); // để mọi xử lý sau Enter chạy xong rồi mới đọc
+    const typed = await page.locator('#partner').inputValue();
+    await ui.shot(page, 'F11-khong-ket-qua-giu-chu');
+    // (khi ô còn chữ gõ, antd ẩn mục đang chọn; Esc bỏ chữ gõ rồi mới đọc được khách đang chọn)
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#partner')).toHaveValue('');
+    res.push(`không kết quả: ${await partnerPick()}, chữ "${typed}"`);
+    await ui.shot(page, 'F11-doi-khach');
+    // ô chọn mặt hàng của Thẻ kho: đã chọn KT40, gõ GL26, đợi danh sách, Enter
     await leaveEditor();
     await page.goto('/kho/the-kho');
     const combo = page.locator('.toolbar .ant-select').first().getByRole('combobox');
@@ -389,55 +414,149 @@ test.describe('Câu chuyện 15: tìm rồi Enter trên mọi ô tìm', () => {
     await expect(page.locator('[data-search-pending]')).toHaveCount(0);
     await page.keyboard.press('Enter');
     await expect.poll(stockCardPick).toBe('KT40');
+    await page.keyboard.press('Escape'); // F-17: danh sách còn mở sau khi chọn
     await combo.focus();
     await page.keyboard.type('GL26', { delay: 60 });
     await expect(page.locator('[data-search-pending]')).toHaveCount(0);
-    await expect(page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option').filter({ hasText: 'GL26' })).toBeVisible();
+    await expect(openOpts().filter({ hasText: 'GL26' })).toBeVisible();
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(800);
-    res.push(await stockCardPick());
-    expect(res).toEqual(['THANHCONG', 'THANHCONG', 'THANHCONG', 'GL26']);
+    res.push(await settle(stockCardPick, 'GL26'));
+    expect(res).toEqual(['THANHCONG', 'THANHCONG', 'THANHCONG', `↓: ${second}`, `không kết quả: ${second}, chữ "zzqx khong co"`, 'GL26']);
   });
 
-  // PHÁT HIỆN F-14 (BAO_CAO_E2E.md, thấp): người dùng tải lại trang (trình duyệt đã hỏi "rời trang?", họ đồng ý) ⇒ phiếu gõ dở
-  // vẫn hiện lại kèm thông báo "Đã khôi phục … (phiên đăng nhập trước bị ngắt)" — sai lý do, phiên không hề bị ngắt.
-  test.fail('REQ-UX F-14 Tải lại trang khi đang gõ phiếu: không báo sai "phiên đăng nhập trước bị ngắt"', async () => {
+  // PHÁT HIỆN F-17 (BAO_CAO_E2E.md, vòng 3): ô chọn mặt hàng ở bộ lọc (Thẻ kho, Lịch sử bán theo mặt hàng): gõ mã rồi Enter
+  // chọn đúng, nhưng danh sách gợi ý KHÔNG đóng — nó hiện lại toàn bộ danh mục, che bảng kết quả, mục đầu ("DV – Dịch vụ" /
+  // "AA-MOI") được tô sáng; Enter thêm lần nữa (thói quen "Enter, Enter") đổi lựa chọn sang mục đầu đó. Mã nguồn có ghi ý
+  // định "đóng danh sách" (searchGuard) nhưng thực tế không đóng. Trước vòng 3 danh sách đóng sau Enter.
+  test.fail('REQ-012 REQ-021 REQ-UX F-17 Ô chọn mặt hàng ở bộ lọc: Enter chọn xong thì danh sách đóng; Enter lần nữa không đổi lựa chọn', async () => {
+    const res = {};
+    await leaveEditor();
+    // Thẻ kho
+    await page.goto('/kho/the-kho');
+    let combo = page.locator('.toolbar .ant-select').first().getByRole('combobox');
+    await combo.focus();
+    await page.keyboard.type('GL26', { delay: 40 });
+    await expect(page.locator('[data-search-pending]')).toHaveCount(0);
+    await page.keyboard.press('Enter');
+    await expect.poll(stockCardPick).toBe('GL26');
+    await page.waitForTimeout(800); // người dùng nhìn kết quả
+    res['thẻ kho: danh sách còn mở'] = await openOpts().count() > 0;
+    await ui.shot(page, 'F17-the-kho-danh-sach-con-mo');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800);
+    res['thẻ kho: sau Enter thứ hai'] = await stockCardPick();
+    // Lịch sử bán theo mặt hàng
+    await ui.menu(page, 'Báo cáo');
+    await page.getByRole('button', { name: /Lịch sử bán theo mặt hàng/ }).click();
+    await expect(page.getByRole('heading', { name: 'Lịch sử bán hàng theo mặt hàng' })).toBeVisible();
+    const sel = page.locator('.toolbar .ant-select').nth(2);
+    combo = sel.getByRole('combobox');
+    await combo.focus();
+    await page.keyboard.type('GL26', { delay: 40 });
+    await expect(page.locator('[data-search-pending]')).toHaveCount(0);
+    await page.keyboard.press('Enter');
+    await expect(sel.locator('.ant-select-selection-item')).toContainText('GL26');
+    await page.waitForTimeout(800);
+    res['lịch sử bán: danh sách còn mở'] = await openOpts().count() > 0;
+    await ui.shot(page, 'F17-lich-su-ban-danh-sach-con-mo');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800);
+    res['lịch sử bán: sau Enter thứ hai'] = ((await sel.locator('.ant-select-selection-item').innerText().catch(() => '')) || '(chưa chọn)').split(' – ')[0];
+    await page.keyboard.press('Escape');
+    expect(res).toEqual({
+      'thẻ kho: danh sách còn mở': false,
+      'thẻ kho: sau Enter thứ hai': 'GL26',
+      'lịch sử bán: danh sách còn mở': false,
+      'lịch sử bán: sau Enter thứ hai': 'GL26',
+    });
+  });
+
+  // F-14 (vòng 2: tải lại trang thì báo sai "phiên đăng nhập trước bị ngắt") — ĐÃ SỬA ở vòng 3: tải lại trang báo đúng câu
+  // "từ lần mở trước", không nhắc tới phiên đăng nhập. (Trường hợp phiên hết thật được kiểm ở tests/14, F-04.)
+  test('REQ-UX F-14 Tải lại trang khi đang gõ phiếu: báo "Đã khôi phục … từ lần mở trước", không nhắc phiên đăng nhập', async () => {
     await freshPage('/chung-tu/moi?loai=sale');
     await ui.pickPartner(page, 'an phu', 'Cơ khí An Phú');
     await ui.focusBlankCode(page);
     await ui.typeLine(page, { code: 'GL26', qty: 2 });
     await page.reload(); // hộp "rời trang?" của trình duyệt được chấp nhận (page.on('dialog'))
     await expect(page.getByText('PHIẾU MỚI — chưa lưu', { exact: true })).toBeVisible();
-    await page.waitForTimeout(1000); // thông báo (nếu có) hiện ngay khi mở phiếu
+    await expect(page.locator('.ant-message-notice').filter({ hasText: /khôi phục/ })).toBeVisible();
     const notes = await page.locator('.ant-message-notice').allInnerTexts();
-    await ui.shot(page, 'F14-bao-sai-phien-bi-ngat');
-    expect(notes.filter((t) => /phiên đăng nhập trước bị ngắt/.test(t))).toEqual([]);
+    await ui.shot(page, 'F14-tai-lai-trang');
+    expect(notes.map((t) => t.trim()).filter((t) => /khôi phục|[Pp]hiên/.test(t))).toEqual(['Đã khôi phục các dòng đang gõ dở từ lần mở trước — kiểm tra rồi bấm Lưu.']);
+    expect((await ui.readLines(page)).map((l) => `${l.code}:${l.qty}`)).toEqual(['GL26:2']);
+    await expect.poll(partnerPick).toBe('ANPHU');
   });
 
-  // PHÁT HIỆN F-07 còn lại (đổi tên thành F-13): tìm MẶT HÀNG ngoài lưới phiếu (Danh mục hàng hóa, Thẻ kho, Tồn kho…) vẫn chỉ
-  // khớp chuỗi liền — "que 3.2", "cap 35", "kim tin 4.0" không ra gì, trong khi ô Mã hàng của phiếu và ô đối tác đều khớp nhiều từ.
-  test.fail('REQ-012 REQ-020 F-13 Tìm mặt hàng nhiều từ ở Danh mục hàng hóa, Thẻ kho, Tồn kho ("que 3.2", "cap 35", "kim tin 4.0")', async () => {
-    const res = {};
+  // F-13 (vòng 2: tìm mặt hàng nhiều từ ngoài lưới phiếu không ra gì) — ĐÃ SỬA ở vòng 3: tách theo khoảng trắng, thứ tự bất kỳ.
+  // Không chỉ "có kết quả": mọi dòng phải chứa đủ các từ, và mặt hàng mong đợi phải có mặt.
+  test('REQ-012 REQ-020 F-13 Tìm mặt hàng nhiều từ ở Danh mục hàng hóa, Thẻ kho, Tồn kho ("que 3.2", "3.2 que", "cap 35", "kim tin 4.0")', async () => {
+    const fold = (t) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+    const bad = [];
+    const allHave = (q, rows) => rows.length > 0 && rows.every((r) => fold(q).split(/\s+/).every((t) => fold(r).includes(t)));
+    const check = (where, q, rows, want) => {
+      const toks = fold(q).split(/\s+/);
+      if (!rows.some((r) => r.includes(want))) bad.push(`${where} "${q}": thiếu ${want} (${rows.length} dòng)`);
+      for (const r of rows) if (!toks.every((t) => fold(r).includes(t))) bad.push(`${where} "${q}": dòng không đủ từ: ${r.slice(0, 60)}`);
+    };
+    const CASES = [['que 3.2', 'KT32-5'], ['3.2 que', 'KT32-5'], ['cap 35', 'CAP35'], ['35 cap', 'CAP35'], ['kim tin 4.0', 'KT40']];
     await leaveEditor();
     await ui.menu(page, 'Danh mục', 'Hàng hóa, dịch vụ');
-    for (const q of ['que 3.2', 'cap 35', 'kim tin 4.0']) {
+    const catRows = page.locator('.ant-table-tbody tr.ant-table-row');
+    for (const [q, want] of CASES) {
       await page.getByPlaceholder(/Tìm mã, tên hàng/).fill(q);
-      await expect.poll(async () => page.locator('.ant-table-tbody tr.ant-table-row').count(), { timeout: 3000 }).toBeGreaterThan(0).catch(() => undefined);
-      res[`danh mục: ${q}`] = await page.locator('.ant-table-tbody tr.ant-table-row').count();
+      await expect.poll(async () => allHave(q, await catRows.allInnerTexts()), { timeout: 4000 }).toBe(true).catch(() => undefined); // lọc xong
+      check('danh mục', q, await catRows.allInnerTexts(), want);
     }
     await ui.menu(page, 'Kho', 'Tồn kho');
-    for (const q of ['que 3.2', 'cap 35']) {
+    const stRows = page.locator('.report-table .ant-table-tbody tr.ant-table-row');
+    for (const [q, want] of CASES) {
       await page.getByPlaceholder('Tìm mã, tên hàng…').fill(q);
-      await expect.poll(async () => page.locator('.report-table .ant-table-tbody tr.ant-table-row').count(), { timeout: 3000 }).toBeGreaterThan(0).catch(() => undefined);
-      res[`tồn kho: ${q}`] = await page.locator('.report-table .ant-table-tbody tr.ant-table-row').count();
+      await expect.poll(async () => allHave(q, await stRows.allInnerTexts()), { timeout: 4000 }).toBe(true).catch(() => undefined); // lọc xong
+      check('tồn kho', q, await stRows.allInnerTexts(), want);
     }
-    await ui.menu(page, 'Kho', 'Thẻ kho / NXT');
-    const combo = page.locator('.toolbar .ant-select').first().getByRole('combobox');
-    await combo.focus();
-    await page.keyboard.type('kim tin 4.0', { delay: 30 });
-    await expect(page.locator('[data-search-pending]')).toHaveCount(0);
-    res['thẻ kho: kim tin 4.0'] = await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option').count();
-    await page.keyboard.press('Escape');
-    expect(Object.values(res).every((n) => n > 0), JSON.stringify(res)).toBe(true);
+    for (const [q, want] of CASES) {
+      await page.goto('/kho/the-kho');
+      const combo = page.locator('.toolbar .ant-select').first().getByRole('combobox');
+      await combo.focus();
+      await page.keyboard.type(q, { delay: 30 });
+      await expect(page.locator('[data-search-pending]')).toHaveCount(0);
+      check('thẻ kho', q, await openOpts().allInnerTexts(), want);
+      if (q === 'kim tin 4.0') {
+        await page.keyboard.press('Enter');
+        if ((await settle(stockCardPick, 'KT40')) !== 'KT40') bad.push('thẻ kho "kim tin 4.0" Enter không chọn KT40');
+      }
+      await page.keyboard.press('Escape');
+    }
+    expect(bad).toEqual([]);
+  });
+
+  // Vòng 3 (quyết định của nhóm): ngày gõ NGAY sau khi mở phiếu thu/chi hay phiếu kho phải được giữ (vòng 2 ghi nhận: gõ
+  // ngày ~0,1 s sau khi mở phiếu thu thì đôi khi ngày bị đặt lại). Mỗi loại làm 3 lần, không chờ con trỏ hay dữ liệu tải xong.
+  test('REQ-060 REQ-025 Ngày gõ ngay khi vừa mở phiếu thu / phiếu chi / phiếu bán được giữ nguyên', async () => {
+    const res = [];
+    const dates = ['03/11/2026', '04/11/2026', '05/11/2026'];
+    for (const [url, sel] of [
+      ['/phieu-thu-chi/moi?loai=receipt', '#voucher_date'],
+      ['/phieu-thu-chi/moi?loai=payment', '#voucher_date'],
+      ['/chung-tu/moi?loai=sale', '#doc_date'],
+    ]) {
+      for (const date of dates) {
+        await leaveEditor();
+        await page.goto(url);
+        const d = page.locator(sel);
+        await d.click(); // ngay khi ô ngày hiện ra
+        await page.keyboard.press('Control+A');
+        await page.keyboard.type(date, { delay: 15 });
+        await page.keyboard.press('Tab');
+        await page.waitForTimeout(1500); // phiếu tải xong hết mọi thứ
+        res.push(`${url} ${date} → ${await d.inputValue()}`);
+      }
+    }
+    await ui.shot(page, 'ngay-go-ngay-khi-mo-phieu');
+    await leaveEditor();
+    expect(res).toEqual(
+      ['/phieu-thu-chi/moi?loai=receipt', '/phieu-thu-chi/moi?loai=payment', '/chung-tu/moi?loai=sale'].flatMap((u) => dates.map((dt) => `${u} ${dt} → ${dt}`)),
+    );
   });
 });

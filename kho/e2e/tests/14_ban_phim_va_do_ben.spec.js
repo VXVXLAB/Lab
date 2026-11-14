@@ -204,6 +204,8 @@ test.describe('Câu chuyện 14: bàn phím, chặn rời trang, phiên hết h�
     await expect(p.getByRole('button', { name: 'Tài khoản', exact: true })).toBeVisible();
   };
   const RESTORED = /Đã khôi phục các dòng đang gõ dở/;
+  // Vòng 3 (F-14): phiên hết thật ⇒ đúng câu này (không phải câu "từ lần mở trước" dành cho tải lại trang)
+  const SESSION_RESTORED = 'Phiên đăng nhập đã hết. Đã khôi phục các dòng đang gõ dở — kiểm tra rồi bấm Lưu.';
   let w4; // cửa sổ của lan dùng cho các bước F-04
   let draftUrl;
 
@@ -214,7 +216,7 @@ test.describe('Câu chuyện 14: bàn phím, chặn rời trang, phiên hết h�
     await killLan();
     await p.keyboard.press('Control+s');
     await reLogin(p, 'lan', 'lan123456');
-    await ui.toast(p, RESTORED);
+    await expect(p.locator('.ant-message-notice').filter({ hasText: RESTORED })).toHaveText(SESSION_RESTORED);
     await expect.poll(async () => (await ui.readLines(p)).map((l) => `${l.code}:${ui.vnNum(l.qty)}`)).toEqual([`${QUE.code}:2`, 'COS10:1']);
     await expect(p.locator('.hf-partner .ant-select-selection-item')).toContainText(THANHCONG.name);
     await expect(p.getByLabel('Ghi chú', { exact: true })).toHaveValue('Khách gọi đặt thêm');
@@ -245,7 +247,7 @@ test.describe('Câu chuyện 14: bàn phím, chặn rời trang, phiên hết h�
     await killLan();
     await p.keyboard.press('Control+s');
     await reLogin(p, 'lan', 'lan123456');
-    await ui.toast(p, RESTORED);
+    await expect(p.locator('.ant-message-notice').filter({ hasText: RESTORED })).toHaveText(SESSION_RESTORED);
     await expect.poll(async () => (await ui.readLines(p)).map((l) => l.code)).toEqual([QUE.code, 'COS10', 'CN249SS08']);
     // người dùng quyết định bỏ phần gõ thêm
     await ui.clickMenu(p, 'Bán hàng', 'Phiếu bán');
@@ -289,7 +291,7 @@ test.describe('Câu chuyện 14: bàn phím, chặn rời trang, phiên hết h�
     await killLan();
     await p.keyboard.press('Control+s');
     await reLogin(p, 'lan', 'lan123456');
-    await ui.toast(p, RESTORED);
+    await expect(p.locator('.ant-message-notice').filter({ hasText: RESTORED })).toHaveText(SESSION_RESTORED);
     await expect(p.locator('[data-vcell$=":desc"]').first()).toHaveValue('Thu nợ cũ');
     await expect(p.getByLabel('Số tiền dòng 1')).toHaveValue('300.000');
     await expect(p.getByLabel('Ghi chú / lý do')).toHaveValue('Thu nợ');

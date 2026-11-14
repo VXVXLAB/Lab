@@ -48,16 +48,15 @@ test('REQ-UX Phản hồi 4xx chỉ là mã nghiệp vụ đã thiết kế: kh�
       if (st === 401 && url === '/api/auth/login' && /Màn đăng nhập/.test(i.test)) return false; // cố ý sai mật khẩu
       if (st === 401 && /Phiên|F-04/.test(i.test)) return false; // cố ý làm hết phiên
       if ((st === 409 || st === 422) && /^\/api\/(documents\/\d+(\/post)?|vouchers\/\d+)$/.test(url)) return false; // thiếu hàng, bán lỗ, xung đột
-      if (st === 404 && /^\/api\/products\/lookup\?/.test(url)) return false; // tra mã chính xác khi gõ dở — phát hiện F-16, kiểm riêng bên dưới
       return true;
     })
     .map((i) => `${i.test} (${i.machine}): ${i.text} ${i.url}`);
   expect(bad).toEqual([]);
 });
 
-// PHÁT HIỆN F-16 (BAO_CAO_E2E.md, thấp): gõ mã hàng từng chữ trong lưới phiếu, mỗi tiền tố ("K", "KT", "KT4"…) được tra
-// "mã chính xác" và nhận 404 ⇒ mỗi lần gõ chậm là một dòng lỗi đỏ trong console. Người dùng không thấy, nhưng là lỗi console.
-test.fail('REQ-UX F-16 Gõ mã hàng trong lưới phiếu không sinh phản hồi 404 (tra mã khi chưa gõ xong)', async () => {
+// F-16 (vòng 2: gõ mã hàng từng chữ ⇒ mỗi tiền tố tra "mã chính xác" nhận 404) — ĐÃ SỬA ở vòng 3 (?optional=1). Test trên
+// đã không còn ngoại lệ nào cho 404; test này giữ lại để báo riêng nếu tra mã sinh 404 trở lại.
+test('REQ-UX F-16 Gõ mã hàng trong lưới phiếu không sinh phản hồi 404 (tra mã khi chưa gõ xong)', async () => {
   const lookups = readIssues().filter((i) => http4xx(i) && /status of 404/.test(i.text) && /\/api\/products\/lookup\?/.test(i.url || ''));
   expect(lookups.map((i) => `${i.test}: ${(i.url || '').replace(/^.*\/api/, '/api')}`)).toEqual([]);
 });

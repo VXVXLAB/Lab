@@ -186,14 +186,15 @@ test.describe('Câu chuyện 13: file Excel/Word của phiếu sửa tiếp đư
     });
   }
 
-  // PHÁT HIỆN F-09 (BAO_CAO_E2E.md): khách không có địa chỉ nhưng có điện thoại ⇒ bản in và file xuất ghi
-  // "Địa chỉ:  · ĐT: 0918 777 888" (nhãn Địa chỉ trống, dấu "·" treo) trên phiếu gửi khách.
-  test.fail('REQ-073 Khách không có địa chỉ: không in dòng "Địa chỉ:" trống với dấu "·" treo', async () => {
+  // F-09 (vòng 2: khách không có địa chỉ ⇒ "Địa chỉ:  · ĐT: …" trên bản in và file xuất) — ĐÃ SỬA ở vòng 3: phần trống
+  // bị bỏ. Kiểm cả ba (in, Excel, Word): không dòng nào bắt đầu bằng "Địa chỉ:" trống hay "·" treo, và ĐT vẫn có.
+  test('REQ-073 F-09 Khách không có địa chỉ: không in dòng "Địa chỉ:" trống với dấu "·" treo', async () => {
     await page.goto(`/chung-tu/${extra.sale}`);
     await expect(page.getByText('ĐÃ GHI SỔ', { exact: true })).toBeVisible();
     const r = await printAndExports(page, '13-khach-khong-dia-chi');
     await ui.shot(page, 'F09-dia-chi-trong');
-    const bad = [r.print, r.xlsx, r.docx].map((m) => m.info.find((l) => /^Địa chỉ:\s*·/.test(l)) ?? null);
+    const bad = [r.print, r.xlsx, r.docx].map((m) => m.info.find((l) => /Địa chỉ:\s*(·|$)|·\s*$|^\s*·/.test(l)) ?? null);
     expect(bad).toEqual([null, null, null]);
+    for (const m of [r.print, r.xlsx, r.docx]) expect(m.info.join(' | ')).toContain('0918 777 888');
   });
 });

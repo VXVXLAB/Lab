@@ -84,12 +84,22 @@ async function selectByTyping(page, combo, text, optionRe) {
   // nhìn thấy rồi mới Enter. (Ô lọc tại máy, như Kho/Nhóm, không có cờ chờ.)
   await expect(page.locator('[data-search-pending]')).toHaveCount(0);
   await expect(dd.locator('.ant-select-item-option').first()).toContainText(optionRe ?? text);
-  // PHÁT HIỆN F-11 (b): khi danh sách gợi ý không đổi sau khi gõ (vd. CSDL chỉ có một khách — chạy riêng một câu chuyện trên
-  // CSDL mới), không mục nào được tô sáng và Enter KHÔNG chọn gì. Người dùng thấy không có mục sáng thì bấm ↓ rồi Enter —
-  // làm như vậy ở đây; lỗi được kiểm nghiêm ở tests/15.
-  if ((await dd.locator('.ant-select-item-option-active').count()) === 0) await combo.press('ArrowDown');
-  await expect(dd.locator('.ant-select-item-option-active')).toContainText(optionRe ?? text);
+  // (đọc trước khi Enter: sau khi chọn, ô có thể không còn khớp bộ định vị — vd. lọc theo chữ "Mặt hàng…")
+  const inForm = await combo.evaluate((el) => !!el.closest('[data-enter-scope]'));
+  const input = await combo.elementHandle();
+  // F-11 (b) đã sửa ở vòng 3: Enter chọn kết quả đầu tiên kể cả khi không mục nào sáng — không bấm ↓ hộ người dùng nữa.
   await combo.press('Enter');
+  // PHÁT HIỆN F-17 (BAO_CAO_E2E.md): ở ô chọn mặt hàng/khách của bộ lọc (báo cáo, thẻ kho — không nằm trong biểu mẫu
+  // có "ô kế tiếp"), chọn xong bằng Enter thì danh sách VẪN MỞ, che bảng, mục đầu ("DV – Dịch vụ") sáng ⇒ Enter lần nữa
+  // đổi lựa chọn. Người dùng thấy danh sách còn mở thì bấm Esc (giữ nguyên lựa chọn) — làm như vậy ở đây; lỗi được
+  // kiểm nghiêm (test.fail) ở tests/15.
+  if (!inForm) {
+    await expect(page.locator('[data-search-owner]')).toHaveCount(0);
+    if (await dd.isVisible()) {
+      await input.press('Escape');
+      await expect(dd).toHaveCount(0);
+    }
+  }
 }
 
 /** Danh sách thả xuống của đúng ô chọn này (theo aria-controls). */
@@ -286,9 +296,7 @@ async function enterVoucher(page, { type, account = 'TM', date, partner, partner
   await expect(page.getByRole('heading', { name: type === 'receipt' ? /^Phiếu thu tiền/ : /^Phiếu chi tiền/ })).toBeVisible();
   await page.locator('body').press('F2');
   await expect(page.getByText('PHIẾU MỚI — chưa lưu', { exact: true })).toBeVisible();
-  // phiếu mới đặt con trỏ vào ô đối tác khi đã sẵn sàng — chờ như người dùng thấy con trỏ rồi mới gõ.
-  // (Gõ ngày chỉ ~0,1 s sau khi mở phiếu thì đôi khi ngày bị bỏ qua — tốc độ máy, không phải người; xem báo cáo.)
-  await expect(page.locator('#partner')).toBeFocused();
+  // Vòng 3: KHÔNG chờ con trỏ vào ô đối tác nữa — ngày gõ ngay sau khi mở phiếu phải được giữ (đã sửa ở vòng 3).
   await page.locator('.acc-choice label').filter({ hasText: `${account} ·` }).click();
   if (date) {
     const d = page.locator('#voucher_date');
