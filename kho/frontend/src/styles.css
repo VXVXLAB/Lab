@@ -197,6 +197,7 @@ td.col-code { font-weight: 500; font-variant-numeric: tabular-nums; white-space:
 .line-grid td.act { padding-top: 4px; text-align: center; }
 .grid-tools { display: flex; align-items: center; gap: 10px; padding: 4px 8px 8px; }
 .grid-tools .hint { color: #6b7280; font-size: 12px; }
+.grid-tools .ant-checkbox-wrapper { white-space: nowrap; }
 
 .product-dropdown { position: fixed; z-index: 1100; width: 680px; max-height: 330px; overflow: auto; background: #fff; border: 1px solid #c9ced6; border-radius: 4px; box-shadow: 0 6px 20px rgba(16,40,80,.18); font-size: 13.5px; }
 .product-dropdown table { width: 100%; border-collapse: collapse; }
@@ -254,11 +255,85 @@ td.col-code { font-weight: 500; font-variant-numeric: tabular-nums; white-space:
 .ps-foot { margin-top: 10px; font-size: .8em; color: #555; }
 #print-root { display: none; }
 @media print {
-  body > *:not(#print-root) { display: none !important; }
-  #print-root { display: block !important; }
+  body:not(.printing-report) > *:not(#print-root) { display: none !important; }
+  body:not(.printing-report) #print-root { display: block !important; }
   html, body, #root { height: auto !important; background: #fff !important; }
   .print-sheet { font-size: 12.5pt; }
   #print-root.size-A5 .print-sheet { font-size: 10pt; }
   .ps-lines th { background: #f0f0f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .ps-lines tr { page-break-inside: avoid; }
+}
+
+/* ======================= Báo cáo (giai đoạn 3) ======================= */
+.report-area { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.report-table { background: #fff; border: 1px solid #dde2e9; border-radius: 4px; outline: none; overflow: hidden; }
+.report-table.fill { flex: 1; min-height: 0; }
+.report-table:focus-visible { box-shadow: 0 0 0 2px rgba(29,95,168,.35); }
+.report-table .ant-table-summary td, .sum-row td { background: #eef2f7 !important; font-weight: 600; border-top: 2px solid #c9ced6 !important; }
+.ant-table-tbody > tr.row-opening > td { background: #f4f7fb !important; }
+.report-actions { display: inline-flex; gap: 6px; }
+.small-note { font-size: 12.5px; margin: -4px 0 6px; }
+.report-empty { flex: 1; display: grid; place-items: center; background: #fff; border: 1px dashed #c9ced6; border-radius: 4px; min-height: 240px; }
+.qty-link { cursor: pointer; padding: 1px 4px; border-radius: 3px; font-variant-numeric: tabular-nums; }
+.qty-link:hover { background: #d6e6f8; color: #1d5fa8; text-decoration: underline; }
+.link-text { color: #1d5fa8; }
+.row-link:hover .link-text { text-decoration: underline; }
+.code-link { cursor: pointer; color: #1d5fa8; }
+.code-link:hover { text-decoration: underline; }
+.service-code { color: #00796b; }
+.print-only { display: none; }
+.drawer-depth { color: #8a909a; font-weight: 400; font-size: 13px; }
+.drawer-esc { font-size: 12px; }
+.detail-drawer .ant-drawer-body .toolbar { margin-bottom: 4px; }
+.detail-drawer .hint-bar { margin-top: 0; }
+.sub-table { margin: 2px 0 2px 24px; border-collapse: collapse; font-size: 13.5px; }
+.sub-table td { padding: 3px 14px 3px 0; }
+.sub-table .num { text-align: right; }
+.row-tools { display: inline-flex; opacity: 0; transition: opacity .1s; }
+.line-grid tr:hover .row-tools, .line-grid tr:focus-within .row-tools { opacity: 1; }
+.line-grid td.act { white-space: nowrap; }
+.sum-all { font-size: 14.5px; }
+
+/* Xem nhanh phiếu trong ngăn kéo */
+.doc-view { display: flex; flex-direction: column; gap: 10px; }
+.dv-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.dv-type { font-size: 17px; font-weight: 600; }
+.dv-no b { font-size: 15px; }
+.dv-info { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; background: #f7f9fb; border: 1px solid #e1e4e8; border-radius: 4px; padding: 8px 12px; }
+.dv-info span:first-child { display: block; color: #6b7280; font-size: 12.5px; }
+.dv-meta { grid-column: 1 / -1; font-size: 12.5px; }
+.dv-sums { display: flex; justify-content: flex-end; gap: 28px; }
+.dv-sums > div { display: flex; flex-direction: column; align-items: flex-end; }
+.dv-sums span { color: #4a5160; font-size: 12.5px; }
+.dv-sums b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.link-cell { padding: 0 !important; height: auto !important; font-weight: 600; }
+
+/* Trang Báo cáo */
+.hub { max-width: 1180px; }
+.hub section { margin-bottom: 18px; }
+.hub h3 { font-size: 15px; margin: 6px 0 8px; color: #4a5160; }
+.hub-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.hub-card { display: flex; gap: 12px; text-align: left; font: inherit; color: inherit; background: #fff; border: 1px solid #dde2e9; border-radius: 6px; padding: 12px 14px; cursor: pointer; }
+.hub-card:hover:not(:disabled), .hub-card:focus-visible { border-color: #1d5fa8; box-shadow: 0 2px 8px rgba(29,95,168,.12); outline: none; }
+.hub-card.soon { cursor: default; opacity: .65; }
+.hub-icon { font-size: 22px; color: #1d5fa8; padding-top: 2px; }
+.hub-card b { display: block; font-size: 15px; }
+.hub-desc { display: block; color: #4a5160; font-size: 13px; margin-top: 2px; }
+.hub-soon { display: inline-block; margin-top: 4px; font-size: 12px; color: #9a5b00; }
+
+.settings-card { max-width: 760px; background: #fff; border: 1px solid #dde2e9; border-radius: 4px; padding: 16px 18px; }
+.user-btn { background: none; border: none; cursor: pointer; padding: 2px 6px; border-radius: 4px; font: inherit; color: inherit; text-align: right; }
+.user-btn:hover { background: #f2f4f7; }
+
+/* In báo cáo: chỉ vùng báo cáo, đủ mọi dòng */
+@media print {
+  body.printing-report #root { display: block !important; }
+  body.printing-report .app-sider, body.printing-report .app-header, body.printing-report .toolbar,
+  body.printing-report .page-header, body.printing-report .hint-bar, body.printing-report .small-note { display: none !important; }
+  body.printing-report .app, body.printing-report .app-content, body.printing-report .list-page { height: auto !important; overflow: visible !important; padding: 0 !important; }
+  body.printing-report .print-only { display: block; font-weight: 700; font-size: 14pt; text-align: center; margin-bottom: 6px; }
+  body.printing-report .ant-table-body { max-height: none !important; overflow: visible !important; }
+  body.printing-report .report-table { border: none; height: auto !important; }
+  body.printing-report .ant-table { font-size: 10pt; }
+  body.printing-report .report-area { zoom: .9; }
 }

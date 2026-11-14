@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
-import { AutoComplete, Empty, Form, Input, Segmented, Select, Skeleton, Switch, Table, Tag } from 'antd';
+import { AutoComplete, Button, Empty, Form, Input, Segmented, Select, Skeleton, Switch, Table, Tag, Tooltip } from 'antd';
+import { FileSearchOutlined, HistoryOutlined } from '@ant-design/icons';
+import { useDrawers } from '../reports/drawers';
 import type { ColumnsType } from 'antd/es/table';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { productGroupsApi, productsApi, reportsApi } from '../../api/catalog';
+import { productGroupsApi, productsApi } from '../../api/catalog';
 import { errorMessage } from '../../api/client';
 import { qk } from '../../api/queryKeys';
-import type { PriceInfo, Product, ProductBody, ProductGroup } from '../../api/types';
+import type { PriceInfo, Product, ProductBody, ProductGroup, ProductWithStock } from '../../api/types';
 import { activeColumn, CatalogList, foldVietnamese } from '../../components/CatalogList';
 import { EntityFormModal } from '../../components/EntityFormModal';
 import { NumberInput } from '../../components/NumberInput';
@@ -85,6 +87,7 @@ function StockPanel({ product }: { product: Product }) {
 }
 
 export function ProductsPage() {
+  const drawers = useDrawers();
   const ed = useEditor<Product>();
   const [form] = Form.useForm<ProductBody>();
   const qc = useQueryClient();
@@ -95,16 +98,7 @@ export function ProductsPage() {
   const groupItems: ProductGroup[] = groups.data?.items ?? [];
 
   // Tồn tổng của mọi mã trong một lần gọi (báo cáo tồn kho), ghép vào cột "Tồn".
-  const stock = useQuery({
-    queryKey: qk.report('stock-summary', { only_with_data: false }),
-    queryFn: () => reportsApi.stockSummary({ only_with_data: false }),
-    staleTime: 30_000,
-  });
-  const stockMap = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const it of stock.data?.items ?? []) m.set(it.product_id, it.total);
-    return m;
-  }, [stock.data]);
+  // Tồn tổng (đến hết hôm nay) đi kèm danh sách: with_stock=true
 
   const extraParams = useMemo(
     () => ({ group_id: groupId, is_service: kind === 'all' ? undefined : kind === 'service' }),
@@ -134,8 +128,8 @@ export function ProductsPage() {
       align: 'right',
       render: (_, r) => {
         if (r.is_service) return <span className="muted">–</span>;
-        const n = stockMap.get(r.id);
-        if (n === undefined) return <span className="muted">{stock.isLoading ? '…' : '0'}</span>;
+        const n = (r as ProductWithStock).total_stock;
+        if (n === undefined) return <span className="muted">…</span>;
         return <span className={n <= 0 ? 'neg' : undefined}>{formatQty(n)}</span>;
       },
     },
@@ -154,12 +148,25 @@ export function ProductsPage() {
         entity="product"
         title="Hàng hóa, dịch vụ"
         noun="mặt hàng"
-        fetchList={productsApi.list}
+        fetchList={productsApi.listWithStock}
         extraParams={extraParams}
         searchPlaceholder="Tìm mã, tên hàng (gõ không dấu được)"
         describe={(r) => `${r.code} – ${r.name}`}
         columns={columns}
-        minWidth={1060}
+        minWidth={1120}
+        extraActionsWidth={64}
+        extraActions={(r) =>
+          r.is_service ? null : (
+            <>
+              <Tooltip title="Thẻ kho">
+                <Button type="text" size="small" icon={<FileSearchOutlined />} aria-label="Thẻ kho" onClick={() => drawers.push({ kind: 'ledger', product: { id: r.id, code: r.code, name: r.name, unit: r.unit } })} />
+              </Tooltip>
+              <Tooltip title="Lịch sử bán (bán cho ai, giá bao nhiêu)">
+                <Button type="text" size="small" icon={<HistoryOutlined />} aria-label="Lịch sử bán" onClick={() => drawers.push({ kind: 'trade', report: 'sales', product: { id: r.id, code: r.code, name: r.name, unit: r.unit } })} />
+              </Tooltip>
+            </>
+          )
+        }
         filters={
           <>
             <Select<number>

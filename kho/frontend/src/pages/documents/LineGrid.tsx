@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Button, Tooltip } from 'antd';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import type { PriceInfo, Product } from '../../api/types';
+import { DeleteOutlined, FileSearchOutlined, HistoryOutlined, PlusOutlined } from '@ant-design/icons';
+import { Checkbox } from 'antd';
+import type { PriceInfoWh, Product } from '../../api/types';
 import { NumberInput } from '../../components/NumberInput';
-import { formatMoney, formatQty } from '../../lib/format';
+import { formatDate, formatMoney, formatQty } from '../../lib/format';
 import type { DocTypeConfig } from './docTypes';
-import { emptyLine, fromProduct, isBlank, lineAmount, withTrailingBlank, type LineDraft } from './draft';
+import { emptyLine, fromProduct, isBlank, lineAmount, withTrailingBlank, type LineDraft, type ProductLite } from './draft';
 import { ProductCodeInput } from './ProductCodeInput';
 
-export type Col = 'code' | 'desc' | 'qty' | 'price';
+export type Col = 'code' | 'desc' | 'qty' | 'price' | 'note';
 
 export interface LineHint {
   /** Thiếu hàng (phiếu xuất): số thiếu và tồn hiện có */
-  shortage?: { short: number; available: number };
+  shortage?: { short: number; available: number; required?: number; date?: string; docDate?: string; message?: string };
   /** Bán lỗ: giá vốn so sánh */
   loss?: number;
   /** Lỗi máy chủ trả về cho dòng này */
@@ -25,8 +26,13 @@ interface Props {
   onChange: (lines: LineDraft[]) => void;
   readOnly: boolean;
   warehouseId: number | null;
-  priceInfo: (productId: number) => PriceInfo | undefined;
-  stockTotal: (productId: number) => number | undefined;
+  priceInfo: (productId: number) => PriceInfoWh | undefined;
+  /** Hiện cột ghi chú từng dòng */
+  showNote: boolean;
+  onToggleNote: (v: boolean) => void;
+  /** F6 thẻ kho, F7 lịch sử bán/mua của mã ở dòng đang đứng */
+  onShowLedger?: (p: ProductLite) => void;
+  onShowHistory?: (p: ProductLite) => void;
   hints: Record<string, LineHint>;
   /** Yêu cầu đặt con trỏ từ ngoài (vd. sau lỗi máy chủ) */
   focusRequest?: { key: string; col: Col; n: number } | null;
@@ -37,7 +43,7 @@ interface Props {
  * Bàn phím: Enter đi Mã → SL → Đơn giá → dòng sau (dịch vụ: Mã → Diễn giải → Đơn giá);
  * ↑↓ đổi dòng cùng cột; Ctrl+Delete xóa dòng; Ctrl+Insert chèn dòng phía trên.
  */
-export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInfo, stockTotal, hints, focusRequest }: Props) {
+export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInfo, showNote, onToggleNote, onShowLedger, onShowHistory, hints, focusRequest }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<{ key: string; col: Col } | null>(null);
 
@@ -78,6 +84,19 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
     focus(nl.key, 'code');
   };
 
+  const moveLine = (key: string, dir: 1 | -1, col: Col) => {
+    const idx = lines.findIndex((l) => l.key === key);
+    const j = idx + dir;
+    const cur = lines[idx];
+    const other = lines[j];
+    if (!cur || !other || isBlank(cur) || isBlank(other)) return;
+    const next = [...lines];
+    next[idx] = other;
+    next[j] = cur;
+    onChange(next);
+    focus(key, col);
+  };
+
   const pick = (l: LineDraft, p: Product) => {
     let price: number | null = null;
     if (cfg.hasPrice) {
@@ -111,6 +130,16 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
   };
 
   const onCellKey = (l: LineDraft, col: Col) => (e: KeyboardEvent<HTMLInputElement>) => {
+    if ((e.key === 'F6' || e.key === 'F7') && l.product && !l.product.is_service) {
+      e.preventDefault();
+      (e.key === 'F6' ? onShowLedger : onShowHistory)?.(l.product);
+      return;
+    }
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      moveLine(l.key, e.key === 'ArrowDown' ? 1 : -1, col);
+      return;
+    }
     if (e.key === 'Delete' && e.ctrlKey) {
       e.preventDefault();
       removeLine(l.key);
@@ -127,6 +156,7 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
         e.preventDefault();
         const target = lines.find((x) => x.key === nk);
         const c: Col = col === 'desc' && !target?.product?.is_service ? 'code' : col;
+        if (e.altKey) return;
         focus(nk, c);
       }
       return;
@@ -140,14 +170,14 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
       if (!isBlank(l) && l.product) focus(l.key, service ? 'desc' : 'qty');
       return;
     }
-    if (col === 'desc') {
+    if (col === 'desc' || col === 'qty') {
       if (cfg.hasPrice) focus(l.key, 'price');
+      else if (showNote) focus(l.key, 'note');
       else afterLast(l);
       return;
     }
-    if (col === 'qty') {
-      if (cfg.hasPrice) focus(l.key, 'price');
-      else afterLast(l);
+    if (col === 'price' && showNote) {
+      focus(l.key, 'note');
       return;
     }
     afterLast(l);
@@ -163,11 +193,12 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
           <col style={{ width: 150 }} />
           <col />
           <col style={{ width: 64 }} />
-          <col style={{ width: 110 }} />
-          {cfg.hasPrice && <col style={{ width: 128 }} />}
-          {cfg.hasPrice && <col style={{ width: 130 }} />}
+          <col style={{ width: 100 }} />
+          {cfg.hasPrice && <col style={{ width: 120 }} />}
+          {cfg.hasPrice && <col style={{ width: 122 }} />}
+          {showNote && <col style={{ width: 150 }} />}
           {showStock && <col style={{ width: 104 }} />}
-          {!readOnly && <col style={{ width: 36 }} />}
+          {!readOnly && <col style={{ width: 84 }} />}
         </colgroup>
         <thead>
           <tr>
@@ -178,6 +209,7 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
             <th className="num">Số lượng</th>
             {cfg.hasPrice && <th className="num">Đơn giá</th>}
             {cfg.hasPrice && <th className="num">Thành tiền</th>}
+            {showNote && <th>Ghi chú dòng</th>}
             {showStock && (
               <th className="num">
                 <Tooltip title="Tồn tại kho đang chọn (đến hết ngày phiếu) · tổng các kho">Tồn kho</Tooltip>
@@ -192,8 +224,8 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
             const service = !!l.product?.is_service;
             const h = hints[l.key] ?? {};
             const pi = l.product && !service ? priceInfo(l.product.id) : undefined;
-            const wh = pi && warehouseId ? pi.stock_by_warehouse.find((s) => s.warehouse_id === warehouseId) : undefined;
-            const total = l.product && !service ? (pi?.total_stock ?? stockTotal(l.product.id)) : undefined;
+            const whQty = pi ? (pi.warehouse_qty ?? pi.stock_by_warehouse.find((s) => s.warehouse_id === warehouseId)?.qty ?? 0) : undefined;
+            const total = pi?.total_stock;
             const amount = lineAmount(l);
             const rowCls = [
               blank ? 'row-blank' : '',
@@ -210,7 +242,15 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                 <td className="num stt">{blank ? '' : i + 1}</td>
                 <td>
                   {readOnly ? (
-                    <span className="ro code">{l.product?.code ?? l.codeText}</span>
+                    l.product && !service && onShowLedger ? (
+                      <Tooltip title="Xem thẻ kho mã này">
+                        <span className="ro code code-link" onClick={() => l.product && onShowLedger(l.product)}>
+                          {l.product.code}
+                        </span>
+                      </Tooltip>
+                    ) : (
+                      <span className="ro code">{l.product?.code ?? l.codeText}</span>
+                    )
                   ) : (
                     <ProductCodeInput
                       data-cell={`${l.key}:code`}
@@ -224,7 +264,7 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                       onOtherKey={onCellKey(l, 'code')}
                       allowService={cfg.allowService}
                       priceField={cfg.defaultPrice}
-                      stockOf={stockTotal}
+                      warehouseId={warehouseId}
                     />
                   )}
                 </td>
@@ -279,8 +319,15 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                     />
                   )}
                   {h.shortage && (
-                    <div className="line-note neg">
-                      Thiếu {formatQty(h.shortage.short)} — tồn {formatQty(h.shortage.available)}
+                    <div className="line-note neg" title={h.shortage.message}>
+                      {h.shortage.required === 0 ? (
+                        <>Làm âm kho {formatQty(h.shortage.short)}</>
+                      ) : (
+                        <>
+                          Thiếu {formatQty(h.shortage.short)} — tồn {formatQty(h.shortage.available)}
+                        </>
+                      )}
+                      {h.shortage.date && h.shortage.date !== h.shortage.docDate && <> (ngày {formatDate(h.shortage.date).slice(0, 5)})</>}
                     </div>
                   )}
                 </td>
@@ -315,11 +362,30 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                     {!l.product || (service && l.unit_price === null) ? '' : formatMoney(amount)}
                   </td>
                 )}
+                {showNote && (
+                  <td>
+                    {readOnly ? (
+                      <span className="ro">{l.note}</span>
+                    ) : (
+                      <input
+                        className="cell-input"
+                        data-cell={`${l.key}:note`}
+                        value={l.note}
+                        disabled={!l.product}
+                        placeholder={l.product ? 'ghi chú…' : ''}
+                        maxLength={500}
+                        onChange={(e) => update(l.key, { note: e.target.value })}
+                        onKeyDown={onCellKey(l, 'note')}
+                        onFocus={(e) => e.target.select()}
+                      />
+                    )}
+                  </td>
+                )}
                 {showStock && (
                   <td className="num stock">
                     {l.product && !service && (
                       <>
-                        <span className={wh && wh.qty <= 0 ? 'neg' : undefined}>{wh ? formatQty(wh.qty) : pi ? '0' : '…'}</span>
+                        <span className={whQty !== undefined && whQty <= 0 ? 'neg' : undefined}>{whQty === undefined ? '…' : formatQty(whQty)}</span>
                         <span className="stock-total-mini"> / {total === undefined ? '…' : formatQty(total)}</span>
                       </>
                     )}
@@ -327,6 +393,16 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                 )}
                 {!readOnly && (
                   <td className="act">
+                    {l.product && !service && (
+                      <span className="row-tools">
+                        <Tooltip title="Thẻ kho mã này (F6)">
+                          <Button type="text" size="small" tabIndex={-1} icon={<FileSearchOutlined />} aria-label="Thẻ kho" onClick={() => l.product && onShowLedger?.(l.product)} />
+                        </Tooltip>
+                        <Tooltip title={`Lịch sử ${cfg.type.startsWith('purchase') ? 'mua' : 'bán'} mã này (F7)`}>
+                          <Button type="text" size="small" tabIndex={-1} icon={<HistoryOutlined />} aria-label="Lịch sử" onClick={() => l.product && onShowHistory?.(l.product)} />
+                        </Tooltip>
+                      </span>
+                    )}
                     {!blank && (
                       <Tooltip title="Xóa dòng (Ctrl+Delete)">
                         <Button
@@ -352,8 +428,11 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
           <Button size="small" type="link" icon={<PlusOutlined />} onClick={() => afterLast(lines[lines.length - 1] ?? emptyLine())} tabIndex={-1}>
             Thêm dòng
           </Button>
+          <Checkbox checked={showNote} onChange={(e) => onToggleNote(e.target.checked)} tabIndex={-1}>
+            Ghi chú dòng
+          </Checkbox>
           <span className="hint">
-            Enter: Mã → Số lượng → Đơn giá → dòng sau · ↑↓ đổi dòng · Ctrl+Delete xóa dòng · Ctrl+Insert chèn dòng · gõ <b>DV</b> cho dòng dịch vụ/ghi chú
+            Enter: Mã → SL → Giá → dòng sau · Alt+↑↓ dời dòng · Ctrl+Del xóa · Ctrl+Ins chèn · F6 thẻ kho · F7 lịch sử · <b>DV</b> = dịch vụ
           </span>
         </div>
       )}

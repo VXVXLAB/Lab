@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { createPortal } from 'react-dom';
 import { productsApi } from '../../api/catalog';
 import { ApiError } from '../../api/client';
-import type { Product } from '../../api/types';
+import type { Product, ProductWithStock } from '../../api/types';
 import { foldVietnamese } from '../../components/CatalogList';
 import { formatMoney, formatQty } from '../../lib/format';
 
@@ -14,8 +14,8 @@ interface Props {
   onOtherKey?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   allowService: boolean;
   priceField: 'sale_price' | 'purchase_price' | null;
-  /** Tồn tổng theo mã (gợi ý trong danh sách) */
-  stockOf?: (productId: number) => number | undefined;
+  /** Kho của phiếu: danh sách gợi ý hiện tồn tại kho này / tổng */
+  warehouseId?: number | null;
   invalid?: boolean;
   placeholder?: string;
   disabled?: boolean;
@@ -38,14 +38,14 @@ function rank(p: Product, text: string): number {
   return 3;
 }
 
-async function search(text: string, allowService: boolean): Promise<Product[]> {
+async function search(text: string, allowService: boolean, warehouseId: number | null | undefined): Promise<ProductWithStock[]> {
   const t = text.trim();
   // Nhiều từ ("que 3.2", "kiswel 3.2"): máy chủ tìm theo chuỗi liền ⇒ hỏi theo từ dài nhất rồi lọc đủ mọi từ tại máy.
   const words = foldVietnamese(t).split(/\s+/).filter(Boolean);
   const longest = [...words].sort((a, b) => b.length - a.length)[0] ?? t;
   const multi = words.length > 1;
   const listP = productsApi
-    .list({ q: multi ? longest : t, active: true, page_size: multi ? 200 : 20, is_service: allowService ? undefined : false })
+    .listWithStock({ q: multi ? longest : t, active: true, page_size: multi ? 200 : 20, is_service: allowService ? undefined : false, warehouse_id: warehouseId })
     .then((r) =>
       multi ? { ...r, items: r.items.filter((p) => words.every((w) => foldVietnamese(`${p.code} ${p.name}`).includes(w))).slice(0, 20) } : r,
     );
@@ -57,7 +57,7 @@ async function search(text: string, allowService: boolean): Promise<Product[]> {
         throw e;
       });
   const [list, exact] = await Promise.all([listP, exactP]);
-  let items = list.items;
+  let items: ProductWithStock[] = list.items;
   if (exact && exact.active && (allowService || !exact.is_service) && !items.some((p) => p.id === exact.id)) items = [exact, ...items];
   return [...items].sort((a, b) => rank(a, t) - rank(b, t) || a.code.localeCompare(b.code));
 }
@@ -67,12 +67,12 @@ async function search(text: string, allowService: boolean): Promise<Product[]> {
  * ↑↓ chọn, Enter lấy. Gõ đủ mã rồi Enter ngay cũng được (không cần chờ danh sách).
  */
 export const ProductCodeInput = forwardRef<ProductCodeInputHandle, Props>(function ProductCodeInput(
-  { value, onTextChange, onPick, onOtherKey, allowService, priceField, stockOf, invalid, placeholder, disabled, ...rest },
+  { value, onTextChange, onPick, onOtherKey, allowService, priceField, warehouseId, invalid, placeholder, disabled, ...rest },
   ref,
 ) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
-  const [results, setResults] = useState<Product[]>([]);
+  const [results, setResults] = useState<ProductWithStock[]>([]);
   const [resultsFor, setResultsFor] = useState('');
   const [active, setActive] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -81,11 +81,11 @@ export const ProductCodeInput = forwardRef<ProductCodeInputHandle, Props>(functi
   const [rect, setRect] = useState<DOMRect | null>(null);
   useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus() }), []);
 
-  const run = async (text: string): Promise<Product[]> => {
+  const run = async (text: string): Promise<ProductWithStock[]> => {
     const my = ++seq.current;
     setLoading(true);
     try {
-      const r = await search(text, allowService);
+      const r = await search(text, allowService, warehouseId);
       if (my === seq.current) {
         setResults(r);
         setResultsFor(text);
@@ -205,12 +205,12 @@ export const ProductCodeInput = forwardRef<ProductCodeInputHandle, Props>(functi
                     <th>Tên hàng</th>
                     <th>ĐVT</th>
                     {priceField && <th className="num">{priceField === 'sale_price' ? 'Giá bán' : 'Giá mua'}</th>}
-                    <th className="num">Tồn</th>
+                    <th className="num">{warehouseId ? 'Tồn kho này / tổng' : 'Tồn'}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {results.map((p, i) => {
-                    const st = stockOf?.(p.id);
+                    const st = warehouseId ? p.warehouse_qty : p.total_stock;
                     return (
                       <tr key={p.id} className={i === active ? 'active' : undefined} onMouseEnter={() => setActive(i)} onClick={() => pick(p)}>
                         <td className="code">{p.code}</td>
@@ -218,7 +218,8 @@ export const ProductCodeInput = forwardRef<ProductCodeInputHandle, Props>(functi
                         <td>{p.unit}</td>
                         {priceField && <td className="num">{p.is_service ? '' : formatMoney(p[priceField])}</td>}
                         <td className={`num${st !== undefined && st <= 0 ? ' neg' : ''}`}>
-                          {p.is_service ? 'dịch vụ' : st === undefined ? '0' : formatQty(st)}
+                          {p.is_service ? 'dịch vụ' : st === undefined ? '…' : formatQty(st)}
+                          {!p.is_service && warehouseId && p.total_stock !== undefined && <span className="stock-total-mini"> / {formatQty(p.total_stock)}</span>}
                         </td>
                       </tr>
                     );

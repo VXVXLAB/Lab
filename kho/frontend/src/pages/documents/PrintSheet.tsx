@@ -1,13 +1,7 @@
 import type { DocumentFull } from '../../api/types';
 import { formatDate, formatDateTime, formatMoney, formatQty } from '../../lib/format';
 import { DOC_TYPES } from './docTypes';
-
-/** Thông tin đầu phiếu in. Chỗ giữ sẵn — sẽ thay bằng thông tin công ty thật khi bàn giao. */
-export const COMPANY = {
-  name: 'CÔNG TY …………………………………',
-  address: 'Địa chỉ: ……………………………………………',
-  phone: 'Điện thoại: ………………',
-};
+import { useSettings } from '../../api/hooks';
 
 const SIGNERS: Record<DocumentFull['doc_type'], string[]> = {
   sale: ['Người lập phiếu', 'Người giao hàng', 'Khách hàng', 'Thủ kho'],
@@ -24,16 +18,26 @@ const SIGNERS: Record<DocumentFull['doc_type'], string[]> = {
  */
 export function PrintSheet({ doc }: { doc: DocumentFull }) {
   const cfg = DOC_TYPES[doc.doc_type];
+  const co = useSettings().data;
   const draft = doc.status === 'draft';
   const no = draft ? doc.draft_no : (doc.doc_no ?? doc.display_no);
+  const hasNotes = doc.lines.some((l) => l.note);
   const goodsQty = doc.lines.filter((l) => !l.is_service).reduce((s, l) => s + l.qty, 0);
   return (
     <div className="print-sheet">
-      <div className="ps-company">
-        <div className="ps-company-name">{COMPANY.name}</div>
-        <div>{COMPANY.address}</div>
-        <div>{COMPANY.phone}</div>
-      </div>
+      {co && (co.company_name || co.company_address || co.company_phone || co.company_tax_code) && (
+        <div className="ps-company">
+          {co.company_name && <div className="ps-company-name">{co.company_name}</div>}
+          {co.company_address && <div>Địa chỉ: {co.company_address}</div>}
+          {(co.company_phone || co.company_tax_code) && (
+            <div>
+              {co.company_phone && <>Điện thoại: {co.company_phone}</>}
+              {co.company_phone && co.company_tax_code && <>&nbsp;&nbsp;&nbsp;&nbsp;</>}
+              {co.company_tax_code && <>MST: {co.company_tax_code}</>}
+            </div>
+          )}
+        </div>
+      )}
       <div className="ps-title">{draft ? 'PHIẾU TẠM (chưa ghi sổ)' : cfg.printTitle}</div>
       {draft && <div className="ps-subtitle">{cfg.name} — chưa ghi sổ, chưa trừ/cộng kho, chưa vào công nợ</div>}
       <div className="ps-meta">
@@ -86,6 +90,7 @@ export function PrintSheet({ doc }: { doc: DocumentFull }) {
             <th style={{ width: '11%' }}>Số lượng</th>
             {cfg.hasPrice && <th style={{ width: '13%' }}>Đơn giá</th>}
             {cfg.hasPrice && <th style={{ width: '14%' }}>Thành tiền</th>}
+            {hasNotes && <th style={{ width: '14%' }}>Ghi chú</th>}
           </tr>
         </thead>
         <tbody>
@@ -98,6 +103,7 @@ export function PrintSheet({ doc }: { doc: DocumentFull }) {
               <td className="r">{formatQty(l.qty, true)}</td>
               {cfg.hasPrice && <td className="r">{l.unit_price === null ? '' : formatMoney(l.unit_price)}</td>}
               {cfg.hasPrice && <td className="r">{l.unit_price === null ? '' : formatMoney(l.amount)}</td>}
+              {hasNotes && <td>{l.note}</td>}
             </tr>
           ))}
           <tr className="ps-sum">
@@ -105,6 +111,7 @@ export function PrintSheet({ doc }: { doc: DocumentFull }) {
             <td className="r">{cfg.hasPrice ? '' : formatQty(goodsQty, true)}</td>
             {cfg.hasPrice && <td />}
             {cfg.hasPrice && <td className="r">{formatMoney(doc.total_amount)}</td>}
+            {hasNotes && <td />}
           </tr>
         </tbody>
       </table>

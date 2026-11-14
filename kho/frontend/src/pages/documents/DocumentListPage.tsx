@@ -19,6 +19,7 @@ import { useDebounced, useElementHeight } from '../../lib/useDebounced';
 import { paths } from '../../paths';
 import { DOC_TYPES, DOC_TYPE_LIST } from './docTypes';
 import { PartnerSelect, type PartnerLite } from './PartnerSelect';
+import { WarehouseSelect } from '../../components/WarehouseSelect';
 
 type Preset = 'all' | 'today' | 'week' | 'month' | 'lastMonth' | 'year' | 'custom';
 const PRESETS: { value: Preset; label: string }[] = [
@@ -101,6 +102,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
   const [partner, setPartner] = useState<PartnerLite | null>(null);
   const [productId, setProductId] = useState<number | undefined>(undefined);
   const [typeFilter, setTypeFilter] = useState<DocType | undefined>(undefined);
+  const [warehouseId, setWarehouseId] = useState<number | undefined>(undefined);
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 250);
   const [page, setPage] = useState(1);
@@ -124,18 +126,19 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
       status: status === 'all' ? undefined : status,
       partner_id: partner?.id,
       product_id: productId,
+      warehouse_id: warehouseId,
       q: dq || undefined,
       from: toApiDate(from),
       to: toApiDate(to),
       page,
       page_size: PAGE_SIZE,
     }),
-    [type, typeFilter, status, partner, productId, dq, from?.valueOf(), to?.valueOf(), page], // eslint-disable-line react-hooks/exhaustive-deps
+    [type, typeFilter, status, partner, productId, warehouseId, dq, from?.valueOf(), to?.valueOf(), page], // eslint-disable-line react-hooks/exhaustive-deps
   );
   useEffect(() => {
     setPage(1);
     setActiveIdx(-1);
-  }, [type, typeFilter, status, partner, productId, dq, preset, range]);
+  }, [type, typeFilter, status, partner, productId, warehouseId, dq, preset, range]);
 
   const query = useQuery({
     queryKey: [...qk.documents, params],
@@ -144,7 +147,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
   });
   const rows = query.data?.items ?? [];
   const total = query.data?.total ?? 0;
-  const pageSum = rows.reduce((s, r) => s + r.total_amount, 0);
+  const sumAll = query.data?.sum_total_amount ?? 0;
   const current = activeIdx >= 0 ? rows[activeIdx] : undefined;
 
   const open = (r: DocumentSummary) => navigate(paths.document(r.id));
@@ -348,6 +351,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
           />
         )}
         <ProductFilter value={productId} onChange={setProductId} />
+        <WarehouseSelect value={warehouseId} onChange={setWarehouseId} width={150} />
       </div>
       <div className="table-wrap" ref={tableRef} tabIndex={0} onKeyDown={onTableKey} aria-label={`Danh sách ${title}`}>
         <Table<DocumentSummary>
@@ -385,7 +389,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
                 {showPrice && rows.length > 0 && (
                   <>
                     {' '}
-                    · Cộng tiền trang này: <b>{formatMoney(pageSum)}</b>
+                    · Cộng tiền {t > rows.length ? `cả ${t} phiếu` : ''}: <b className="sum-all">{formatMoney(sumAll)}</b>
                   </>
                 )}
               </span>

@@ -38,6 +38,9 @@ export interface CatalogListProps<T extends { id: number; active: boolean }> {
   createLabel?: string;
   /** Bề rộng tối thiểu của bảng; màn hẹp hơn thì bảng tự cuộn ngang bên trong (trang không cuộn). */
   minWidth?: number;
+  /** Nút thêm ở cột thao tác (vd. thẻ kho, lịch sử bán) */
+  extraActions?: (row: T) => ReactNode;
+  extraActionsWidth?: number;
 }
 
 const PAGE_SIZE = 50;
@@ -75,6 +78,8 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
     clientFilter,
     createLabel = 'Thêm mới',
     minWidth = 760,
+    extraActions,
+    extraActionsWidth = 0,
   } = props;
   const { modal, message } = App.useApp();
   const qc = useQueryClient();
@@ -251,11 +256,12 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
   const actionCol: ColumnType<T> = {
     key: '__actions',
     title: '',
-    width: onDelete ? 84 : 48,
+    width: (onDelete ? 84 : 48) + extraActionsWidth,
     align: 'center',
     fixed: 'right',
     render: (_, row) => (
       <span className="row-actions" onClick={(e) => e.stopPropagation()}>
+        {extraActions?.(row)}
         <Tooltip title="Sửa (Enter)">
           <Button type="text" size="small" icon={<EditOutlined />} aria-label="Sửa" onClick={() => onEdit(row)} />
         </Tooltip>

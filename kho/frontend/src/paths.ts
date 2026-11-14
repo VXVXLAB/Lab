@@ -9,6 +9,7 @@ export const paths = {
   reorder: '/mua-hang/hang-can-dat',
   stock: '/kho/ton-kho',
   stockLedger: '/kho/the-kho',
+  stockNxt: '/kho/tong-hop-nxt',
   transfers: '/kho/chuyen-kho',
   opening: '/kho/ton-dau-ky',
   receivable: '/cong-no/phai-thu',
@@ -17,6 +18,9 @@ export const paths = {
   payments: '/quy/chi',
   cashBook: '/quy/so-quy',
   reports: '/bao-cao',
+  salesReport: '/bao-cao/ban-hang',
+  salesHistory: '/bao-cao/lich-su-ban',
+  purchasesReport: '/bao-cao/mua-hang',
   products: '/danh-muc/hang-hoa',
   productGroups: '/danh-muc/nhom-hang',
   customers: '/danh-muc/khach-hang',
@@ -24,6 +28,7 @@ export const paths = {
   warehouses: '/danh-muc/kho',
   cashAccounts: '/danh-muc/tai-khoan-tien',
   users: '/he-thong/nguoi-dung',
+  company: '/he-thong/thong-tin-cong-ty',
   /** Mở một chứng từ kho (giai đoạn 2). */
   document: (id: number | string) => `/chung-tu/${id}`,
   /** Lập chứng từ mới theo loại (sale, purchase…). */

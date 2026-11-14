@@ -94,7 +94,21 @@ export function enterToNext(onLastEnter?: () => void) {
     const t = e.target as HTMLElement;
     if (t.tagName === 'TEXTAREA') return;
     if (t.tagName === 'BUTTON' && !t.classList.contains('ant-switch')) return; // công tắc: Enter đi tiếp, Space bật/tắt
-    if (t.getAttribute('aria-expanded') === 'true') return; // Select/DatePicker đang mở
+    if (t.getAttribute('aria-expanded') === 'true') {
+      // Danh sách chọn đang mở: để antd lấy mục đang sáng, rồi đi tiếp luôn — MỘT lần Enter là chọn + sang ô sau.
+      const active = document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-active');
+      if (t.getAttribute('role') === 'combobox' && active) {
+        const list = focusables(e.currentTarget);
+        const next = list[list.indexOf(t) + 1];
+        window.setTimeout(() => {
+          if (next) {
+            next.focus();
+            if (next instanceof HTMLInputElement && next.type !== 'checkbox') next.select();
+          } else onLastEnter?.();
+        }, 0);
+      }
+      return;
+    }
     if (t.closest('.ant-picker') && document.querySelector('.ant-picker-dropdown:not(.ant-picker-dropdown-hidden)')) return;
     const root = e.currentTarget;
     const list = focusables(root);

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { App, Button, Layout, Menu, Tooltip, type MenuProps } from 'antd';
-import { LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import { App, Button, Dropdown, Layout, Menu, Tooltip, type MenuProps } from 'antd';
+import { DownOutlined, KeyOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import { ChangePasswordModal } from '../auth/ChangePasswordModal';
+import { DrawerStackProvider } from '../pages/reports/drawers';
 import { useAuth, useCurrentUser } from '../auth/AuthContext';
 import { useLiveStatus } from '../lib/events';
 import { ROLE_LABEL } from '../lib/labels';
@@ -37,6 +39,7 @@ export function AppLayout() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(() => storage.get(COLLAPSE_KEY) === '1');
   const isAdmin = user.role === 'admin';
+  const [pwOpen, setPwOpen] = useState(false);
 
   const screens = useMemo(() => allScreens(), []);
   const override = useMenuOverride();
@@ -129,18 +132,35 @@ export function AppLayout() {
           </div>
           <div className="header-right">
             <LiveIndicator />
-            <span className="user">
-              <b>{user.full_name}</b>
-              {ROLE_LABEL[user.role] !== user.full_name && <span className="role">{ROLE_LABEL[user.role]}</span>}
-            </span>
-            <Button icon={<LogoutOutlined />} onClick={askLogout}>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'pw', icon: <KeyOutlined />, label: 'Đổi mật khẩu' },
+                  { type: 'divider' },
+                  { key: 'out', icon: <LogoutOutlined />, label: 'Đăng xuất', danger: true },
+                ],
+                onClick: ({ key }) => (key === 'pw' ? setPwOpen(true) : askLogout()),
+              }}
+            >
+              <button type="button" className="user user-btn" aria-label="Tài khoản">
+                <b>
+                  {user.full_name} <DownOutlined style={{ fontSize: 10 }} />
+                </b>
+                {ROLE_LABEL[user.role] !== user.full_name && <span className="role">{ROLE_LABEL[user.role]}</span>}
+              </button>
+            </Dropdown>
+            <Button icon={<LogoutOutlined />} onClick={askLogout} className="logout-btn">
               Đăng xuất
             </Button>
           </div>
         </Header>
         <Content className="app-content">
-          <Outlet />
+          <DrawerStackProvider>
+            <Outlet />
+          </DrawerStackProvider>
         </Content>
+        <ChangePasswordModal open={pwOpen} onClose={() => setPwOpen(false)} />
       </Layout>
     </Layout>
   );

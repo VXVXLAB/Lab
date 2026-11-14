@@ -22,6 +22,9 @@ import { Placeholder } from './components/Placeholder';
 import { DocumentListPage } from './pages/documents/DocumentListPage';
 import { DocumentRoute } from './pages/documents/DocumentEditor';
 import { paths } from './paths';
+import { StockLedgerPage, StockNxtPage, StockSummaryPage } from './pages/reports/StockPages';
+import { PurchasesReportPage, ReorderPage, ReportsHub, SalesHistoryPage, SalesReportPage } from './pages/reports/OtherReportPages';
+import { CompanySettingsPage } from './pages/catalog/CompanySettingsPage';
 
 export { paths };
 
@@ -68,7 +71,7 @@ export const menu: MenuGroup[] = [
     items: [
       { path: paths.purchases, label: 'Phiếu nhập', element: <DocumentListPage key="purchase" type="purchase" /> },
       { path: paths.purchaseReturns, label: 'Trả hàng NCC', element: <DocumentListPage key="purchase_return" type="purchase_return" /> },
-      { path: paths.reorder, label: 'Hàng cần đặt', element: soon('Hàng cần đặt (từ phiếu bán tạm)') },
+      { path: paths.reorder, label: 'Hàng cần đặt', element: <ReorderPage /> },
     ],
   },
   {
@@ -76,8 +79,9 @@ export const menu: MenuGroup[] = [
     label: 'Kho',
     icon: <DatabaseOutlined />,
     items: [
-      { path: paths.stock, label: 'Tồn kho', element: soon('Tồn kho') },
-      { path: paths.stockLedger, label: 'Thẻ kho / NXT', element: soon('Thẻ kho – chi tiết nhập xuất tồn') },
+      { path: paths.stock, label: 'Tồn kho', element: <StockSummaryPage /> },
+      { path: paths.stockLedger, label: 'Thẻ kho / NXT', element: <StockLedgerPage /> },
+      { path: paths.stockNxt, label: 'Tổng hợp NXT', element: <StockNxtPage /> },
       { path: paths.transfers, label: 'Chuyển kho', element: <DocumentListPage key="transfer" type="transfer" /> },
       { path: paths.opening, label: 'Tồn đầu kỳ', element: <DocumentListPage key="opening" type="opening" /> },
     ],
@@ -105,7 +109,7 @@ export const menu: MenuGroup[] = [
     key: 'bao-cao',
     label: 'Báo cáo',
     icon: <BarChartOutlined />,
-    screen: { path: paths.reports, label: 'Báo cáo', element: soon('Báo cáo') },
+    screen: { path: paths.reports, label: 'Báo cáo', element: <ReportsHub /> },
   },
   {
     key: 'danh-muc',
@@ -125,7 +129,10 @@ export const menu: MenuGroup[] = [
     label: 'Hệ thống',
     icon: <SettingOutlined />,
     adminOnly: true,
-    items: [{ path: paths.users, label: 'Người dùng', element: <UsersPage />, adminOnly: true }],
+    items: [
+      { path: paths.users, label: 'Người dùng', element: <UsersPage />, adminOnly: true },
+      { path: paths.company, label: 'Thông tin công ty', element: <CompanySettingsPage />, adminOnly: true },
+    ],
   },
 ];
 
@@ -133,6 +140,9 @@ export const menu: MenuGroup[] = [
 export const hiddenScreens: ScreenDef[] = [
   { path: '/chung-tu/:id', label: 'Chứng từ', element: <DocumentRoute /> },
   { path: '/phieu-thu-chi/:id', label: 'Phiếu thu chi', element: soon('Xem / sửa phiếu thu chi') },
+  { path: paths.salesReport, label: 'Chi tiết bán hàng', element: <SalesReportPage /> },
+  { path: paths.salesHistory, label: 'Lịch sử bán theo mặt hàng', element: <SalesHistoryPage /> },
+  { path: paths.purchasesReport, label: 'Chi tiết mua hàng', element: <PurchasesReportPage /> },
 ];
 
 export function allScreens(): (ScreenDef & { groupKey?: string; groupLabel?: string })[] {

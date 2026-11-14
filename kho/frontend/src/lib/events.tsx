@@ -46,6 +46,8 @@ export function invalidateFor(qc: QueryClient, e: ServerEvent): void {
       inv(qk.documents);
       inv(qk.document(e.id));
       inv(['price-info']);
+      inv(['document-check']);
+      inv(qk.catalog('product')); // tồn trong danh sách gợi ý mã hàng (with_stock)
       inv(qk.reports);
       inv(qk.dashboard);
       break;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Dropdown, Input, Modal, Result, Segmented, Select, Skeleton, Space, Tooltip, type InputRef } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -16,11 +16,13 @@ import {
   SaveOutlined,
   CheckCircleOutlined,
 } from '@ant-design/icons';
-import { productsApi, reportsApi, warehousesApi } from '../../api/catalog';
+import { productsApi } from '../../api/catalog';
+import { useWarehouses } from '../../api/hooks';
+import { useDebounced } from '../../lib/useDebounced';
 import { ApiError, errorMessage } from '../../api/client';
 import { documentsApi } from '../../api/documents';
 import { qk } from '../../api/queryKeys';
-import type { DocType, DocumentFull, LossWarning, PriceInfo, Shortage, VersionConflictDetails, Warehouse } from '../../api/types';
+import type { DocType, DocumentFull, LossWarning, PriceInfoWh, Shortage, VersionConflictDetails, Warehouse } from '../../api/types';
 import { useCurrentUser } from '../../auth/AuthContext';
 import { DateInput } from '../../components/DateInput';
 import { Kbd } from '../../components/Kbd';
@@ -45,11 +47,13 @@ import {
   type LineDraft,
 } from './draft';
 import { HistoryDrawer } from './HistoryDrawer';
+import { useDrawers } from '../reports/drawers';
 import { LineGrid, type Col, type LineHint } from './LineGrid';
 import { PartnerSelect } from './PartnerSelect';
 import { PrintSheet } from './PrintSheet';
 
 const LAST_WH = 'kho.lastWarehouse';
+const NOTE_KEY = 'kho.showLineNote';
 
 /** Route /chung-tu/:id và /chung-tu/moi?loai=… — giữ nguyên trình soạn khi phiếu mới vừa được lưu (đổi URL sang id). */
 export function DocumentRoute() {
@@ -72,14 +76,6 @@ interface EditorProps {
   docId: number | null;
   newType: DocType | null;
   onCreated: (id: number) => void;
-}
-
-function useWarehouses() {
-  return useQuery({
-    queryKey: qk.catalogList('warehouse', { all: true }),
-    queryFn: () => warehousesApi.list({ page_size: 1000 }),
-    staleTime: 60_000,
-  });
 }
 
 function StatusBadge({ doc, editing, isNew }: { doc: DocumentFull | null; editing: boolean; isNew: boolean }) {
@@ -133,6 +129,10 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const [printOpen, setPrintOpen] = useState(false);
   const [printSize, setPrintSize] = useState<'A4' | 'A5'>('A4');
   const [focusReq, setFocusReq] = useState<{ key: string; col: Col; n: number } | null>(null);
+  const [showNoteSetting, setShowNote] = useState(() => storage.get(NOTE_KEY) === '1');
+  const showNote = showNoteSetting || lines.some((l) => l.note.trim());
+  const drawers = useDrawers();
+  const location = useLocation();
   const skipGuard = useRef(false);
   const headerRef = useRef<HTMLDivElement>(null);
   const partnerRef = useRef<{ focus: () => void } | null>(null);
@@ -161,6 +161,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   );
 
   const isNew = docId === null && !loaded;
+  const readOnlyBase = !editing || !!deletedBy;
   const fp = type ? fingerprint(type, header, lines) : '';
   const dirty = isNew
     ? sentLines(lines).length > 0 || !!header.partner || !!header.note.trim()
@@ -178,6 +179,38 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     const def = whItems.find((w) => w.active && w.id === last) ?? whItems.find((w) => w.active);
     if (def) setHeader((h) => ({ ...h, warehouse_id: def.id }));
   }, [isNew, header.warehouse_id, whItems]);
+
+  // Phiếu mới điền sẵn (vd. từ "Hàng cần đặt"): lấy mã, ĐVT, giá mặc định bằng một lần gọi
+  const prefilled = useRef(false);
+  useEffect(() => {
+    const st = location.state as { prefill?: { lines: { product_id: number; qty: number }[]; note?: string } } | null;
+    if (!isNew || prefilled.current || !st?.prefill?.lines.length || !cfg) return;
+    prefilled.current = true;
+    const pre = st.prefill;
+    void productsApi
+      .priceInfoBatch(pre.lines.map((l) => l.product_id))
+      .then((r) => {
+        const byId = new Map(r.items.map((p) => [p.product_id, p]));
+        const ls: LineDraft[] = pre.lines.flatMap((l) => {
+          const p = byId.get(l.product_id);
+          if (!p) return [];
+          return [
+            {
+              ...emptyLine(),
+              product: { id: p.product_id, code: p.code, name: p.name, unit: p.unit, is_service: p.is_service, sale_price: p.sale_price, purchase_price: p.purchase_price },
+              codeText: p.code,
+              unit: p.unit,
+              qty: l.qty,
+              unit_price: cfg.defaultPrice ? p[cfg.defaultPrice] : null,
+            },
+          ];
+        });
+        setLines(withTrailingBlank(ls));
+        if (pre.note) setHeader((h) => ({ ...h, note: pre.note ?? '' }));
+        message.info(`Đã điền sẵn ${ls.length} mã thiếu — chọn nhà cung cấp rồi lưu`, 3);
+      })
+      .catch((e: unknown) => message.error(errorMessage(e)));
+  }, [isNew, cfg, location.state, message]);
 
   // Dữ liệu máy chủ đổi (máy khác sửa / ghi sổ, hoặc SSE làm mới)
   useEffect(() => {
@@ -220,40 +253,50 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
-  // ---------- giá, tồn ----------
+  // ---------- giá, tồn: MỘT lần gọi cho cả phiếu ----------
   const dateStr = toApiDate(header.doc_date);
   const productIds = useMemo(
-    () => [...new Set(lines.filter((l) => l.product && !l.product.is_service).map((l) => l.product!.id))],
+    () => [...new Set(lines.filter((l) => l.product && !l.product.is_service).map((l) => l.product!.id))].sort((x, y) => x - y),
     [lines],
   );
-  const piQueries = useQueries({
-    queries: productIds.map((id) => ({
-      queryKey: qk.priceInfo(id, dateStr),
-      queryFn: () => productsApi.priceInfo(id, dateStr),
-      staleTime: 15_000,
-    })),
+  const piQ = useQuery({
+    queryKey: ['price-info', 'batch', productIds.join(','), dateStr ?? '', header.warehouse_id ?? 0],
+    queryFn: () => productsApi.priceInfoBatch(productIds, dateStr, header.warehouse_id),
+    enabled: productIds.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
   });
-  const piMap = new Map<number, PriceInfo>();
-  piQueries.forEach((q, i) => {
-    const id = productIds[i];
-    if (q.data && id !== undefined) piMap.set(id, q.data);
-  });
-  const stockSum = useQuery({
-    queryKey: qk.report('stock-summary', { only_with_data: false }),
-    queryFn: () => reportsApi.stockSummary({ only_with_data: false }),
-    staleTime: 30_000,
-  });
-  const stockTotals = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const it of stockSum.data?.items ?? []) m.set(it.product_id, it.total);
+  const piMap = useMemo(() => {
+    const m = new Map<number, PriceInfoWh>();
+    for (const it of piQ.data?.items ?? []) m.set(it.product_id, it);
     return m;
-  }, [stockSum.data]);
+  }, [piQ.data]);
+
+  // ---------- kiểm tra tồn / bán lỗ của nội dung ĐANG GÕ (máy chủ tính, kể cả xung đột các ngày sau) ----------
+  const checkBody = useMemo(() => {
+    if (!type || !cfg || readOnlyBase) return null;
+    const b = toBody(type, header, lines.filter((l) => l.product));
+    if (!b.lines.some((l) => l.qty) || !b.warehouse_id || !b.doc_date) return null;
+    if (cfg.partner && !b.partner_id) return null;
+    if (cfg.toWarehouse && !b.to_warehouse_id) return null;
+    return JSON.stringify({ ...b, id: loaded?.id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fp, type, loaded?.id, readOnlyBase]);
+  const checkKey = useDebounced(checkBody, 450);
+  const liveCheck = useQuery({
+    queryKey: ['document-check', checkKey],
+    queryFn: ({ signal }) => documentsApi.checkDraft(JSON.parse(checkKey ?? '{}') as Parameters<typeof documentsApi.checkDraft>[0], signal),
+    enabled: !!checkKey,
+    placeholderData: keepPreviousData,
+    retry: false,
+    staleTime: 10_000,
+  });
+  const check = checkBody ? liveCheck.data : undefined;
 
   const hints = useMemo(() => {
     const out: Record<string, LineHint> = {};
     if (!cfg) return out;
-    const need = new Map<number, number>();
-    for (const l of lines) if (l.product && !l.product.is_service && l.qty) need.set(l.product.id, (need.get(l.product.id) ?? 0) + l.qty);
+    const withProduct = lines.filter((l) => l.product);
     for (const l of lines) {
       const h: LineHint = {};
       if (lineErrors[l.key]) h.error = lineErrors[l.key];
@@ -261,26 +304,17 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       if (p && !p.is_service) {
         const pi = piMap.get(p.id);
         if (cfg.lossCheck && pi && pi.cost_source !== 'none' && l.unit_price !== null && l.unit_price < pi.cost_price) h.loss = pi.cost_price;
-        if (cfg.outgoing && editing && pi && header.warehouse_id) {
-          let avail = pi.stock_by_warehouse.find((s) => s.warehouse_id === header.warehouse_id)?.qty ?? 0;
-          // phiếu đã ghi sổ đang sửa: tồn hiện tại đã trừ chính phiếu này
-          if (loaded?.status === 'posted' && loaded.warehouse_id === header.warehouse_id)
-            avail += loaded.lines.filter((x) => x.product_id === p.id && !x.is_service).reduce((s, x) => s + x.qty, 0);
-          const n = need.get(p.id) ?? 0;
-          if (n > avail) h.shortage = { short: Math.round((n - avail) * 1000) / 1000, available: avail };
-        }
+        const sh = check?.stock_shortages.find((s) => s.product_id === p.id);
+        if (sh && editing) h.shortage = { short: sh.shortage, available: sh.available, required: sh.required, date: sh.date, message: sh.message, docDate: dateStr };
       }
       if (h.error || h.loss !== undefined || h.shortage) out[l.key] = h;
     }
+    for (const w of check?.loss_lines ?? []) {
+      const l = withProduct[w.line_no - 1];
+      if (l && out[l.key]?.loss === undefined) out[l.key] = { ...(out[l.key] ?? {}), loss: w.cost_price };
+    }
     return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, cfg, editing, header.warehouse_id, loaded, lineErrors, piQueries.map((q) => q.dataUpdatedAt).join()]);
-
-  const checkQ = useQuery({
-    queryKey: ['document', loaded?.id ?? 0, 'check'],
-    queryFn: () => documentsApi.check(loaded?.id ?? 0),
-    enabled: !!loaded && loaded.status === 'draft' && !dirty,
-  });
+  }, [lines, cfg, editing, lineErrors, piMap, check, dateStr]);
 
   const liveTotal = lines.reduce((s, l) => s + lineAmount(l), 0);
   const goodsQty = lines.filter((l) => l.product && !l.product.is_service).reduce((s, l) => s + (l.qty ?? 0), 0);
@@ -611,7 +645,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     if (loaded && !needSavedFirst('xuất file')) download(documentsApi.exportUrl(loaded.id, f));
   };
 
-  const readOnly = !editing || !!deletedBy;
+  const readOnly = readOnlyBase;
   const canPost = !readOnly && (!loaded || loaded.status === 'draft');
 
   useHotkeys({
@@ -928,7 +962,15 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
           readOnly={readOnly}
           warehouseId={header.warehouse_id}
           priceInfo={(id) => piMap.get(id)}
-          stockTotal={(id) => stockTotals.get(id)}
+          showNote={showNote}
+          onToggleNote={(v) => {
+            setShowNote(v);
+            storage.set(NOTE_KEY, v ? '1' : '0');
+          }}
+          onShowLedger={(p) => drawers.push({ kind: 'ledger', product: { id: p.id, code: p.code, name: p.name, unit: p.unit }, warehouseId: header.warehouse_id ?? undefined })}
+          onShowHistory={(p) =>
+            drawers.push({ kind: 'trade', report: type.startsWith('purchase') ? 'purchases' : 'sales', product: { id: p.id, code: p.code, name: p.name, unit: p.unit } })
+          }
           hints={hints}
           focusRequest={focusReq}
         />
@@ -937,21 +979,28 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       {/* ---------- chân phiếu ---------- */}
       <div className="doc-footer">
         <div className="doc-check">
-          {loaded?.status === 'draft' && !dirty && checkQ.data && (
-            checkQ.data.stock_shortages.length ? (
+          {!readOnly && check && (
+            check.stock_shortages.length ? (
               <div className="check-bad">
-                <b>Chưa ghi sổ được — thiếu hàng:</b>
+                <b>{loaded?.status === 'posted' ? 'Lưu thay đổi này sẽ làm thiếu hàng:' : 'Chưa ghi sổ được — thiếu hàng:'}</b>
                 <ul>
-                  {checkQ.data.stock_shortages.map((s, i) => (
-                    <li key={i}>
-                      {s.product_code} tại {s.warehouse_name}: tồn {formatQty(s.available)}, cần {formatQty(s.required)}, thiếu{' '}
-                      <b>{formatQty(s.shortage)}</b>
+                  {check.stock_shortages.map((s, i) => (
+                    <li key={i} title={s.message}>
+                      {s.required === 0 ? (
+                        s.message
+                      ) : (
+                        <>
+                          {s.product_code} tại {s.warehouse_name}
+                          {s.date !== dateStr && <> ngày {formatDate(s.date)}</>}: tồn {formatQty(s.available)}, cần {formatQty(s.required)}, thiếu{' '}
+                          <b>{formatQty(s.shortage)}</b>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>
               </div>
-            ) : checkQ.data.can_post ? (
-              <div className="check-ok">✓ Đủ hàng — ghi sổ được</div>
+            ) : check.can_post ? (
+              <div className="check-ok">✓ Đủ hàng — {loaded?.status === 'posted' ? 'lưu được' : 'ghi sổ được'}</div>
             ) : null
           )}
           {dirty && <div className="muted">Có thay đổi chưa lưu</div>}

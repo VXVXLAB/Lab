@@ -253,7 +253,7 @@ export interface StockSummary {
 }
 
 // ---------- Sự kiện thời gian thực (SSE) ----------
-export type CatalogEntity = 'warehouse' | 'product_group' | 'product' | 'partner' | 'cash_account' | 'user';
+export type CatalogEntity = 'warehouse' | 'product_group' | 'product' | 'partner' | 'cash_account' | 'user' | 'settings';
 export type ChangeAction = 'created' | 'updated' | 'posted' | 'unposted' | 'deleted';
 
 interface ServerEventBase {
@@ -386,4 +386,111 @@ export interface DocumentHistoryEntry {
   action: HistoryAction;
   before: DocumentFull | null;
   after: DocumentFull | null;
+}
+
+// ---------- Giai đoạn 3: báo cáo, cài đặt ----------
+export type ProductWithStock = Product & { total_stock?: number; warehouse_qty?: number };
+export type PriceInfoWh = PriceInfo & { warehouse_qty?: number };
+
+export interface DocumentPage extends Paged<DocumentSummary> {
+  sum_total_amount: number;
+}
+
+export interface Settings {
+  company_name: string;
+  company_address: string;
+  company_phone: string;
+  company_tax_code: string;
+  updated_by_name?: string;
+  updated_at?: string;
+}
+
+export interface StockNxtItem {
+  product_id: number;
+  code: string;
+  name: string;
+  unit: string;
+  group_name: string | null;
+  opening: number;
+  qty_in: number;
+  qty_out: number;
+  closing: number;
+}
+export interface StockNxt {
+  from: string;
+  to: string;
+  warehouse_id: number | null;
+  items: StockNxtItem[];
+  totals: { opening: number; qty_in: number; qty_out: number; closing: number };
+}
+
+export interface StockLedgerRow {
+  date: string;
+  doc_no: string;
+  document_id: number;
+  doc_type: DocType;
+  description: string;
+  partner_id: number | null;
+  partner_name: string | null;
+  warehouse_id: number;
+  warehouse_code: string;
+  product_code: string;
+  unit: string;
+  qty_in: number;
+  qty_out: number;
+  balance: number;
+  unit_price: number | null;
+}
+export interface StockLedger {
+  product: { id: number; code: string; name: string; unit: string };
+  from: string | null;
+  to: string | null;
+  warehouse_id: number | null;
+  opening: number;
+  rows: StockLedgerRow[];
+  total_in: number;
+  total_out: number;
+  closing: number;
+}
+
+export interface TradeRow {
+  date: string;
+  doc_no: string;
+  document_id: number;
+  doc_type: DocType;
+  partner_id: number;
+  partner_code: string;
+  partner_name: string;
+  warehouse_id: number;
+  warehouse_name: string;
+  line_no: number;
+  product_id: number;
+  product_code: string;
+  product_name: string;
+  is_service: boolean;
+  description: string;
+  unit: string;
+  qty: number;
+  unit_price: number | null;
+  amount: number;
+}
+export interface TradeReport {
+  kind: 'sales' | 'purchases';
+  from: string;
+  to: string;
+  rows: TradeRow[];
+  total_qty: number;
+  total_amount: number;
+  document_count: number;
+}
+
+export interface DraftDemandItem {
+  product_id: number;
+  product_code: string;
+  product_name: string;
+  unit: string;
+  qty_in_drafts: number;
+  total_stock: number;
+  shortage: number;
+  drafts: { document_id: number; draft_no: string; doc_date: string; partner_id: number | null; partner_name: string | null; qty: number }[];
 }

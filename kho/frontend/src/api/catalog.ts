@@ -9,6 +9,8 @@ import type {
   PartnerBody,
   PartnerListParams,
   PriceInfo,
+  PriceInfoWh,
+  ProductWithStock,
   Product,
   ProductBody,
   ProductGroup,
@@ -55,6 +57,12 @@ export const productsApi = {
   ...catalogResource<Product, ProductBody, ProductListParams>('/products'),
   lookup: (code: string) => api.get<Product>('/products/lookup', { code }),
   priceInfo: (id: number, date?: string) => api.get<PriceInfo>(`/products/${id}/price-info`, { date }),
+  /** Một lần gọi cho mọi mã của phiếu (tối đa 500). */
+  priceInfoBatch: (ids: number[], date?: string, warehouseId?: number | null) =>
+    api.get<{ items: PriceInfoWh[] }>('/products/price-info', { ids: ids.join(','), date, warehouse_id: warehouseId ?? undefined }),
+  /** Danh sách kèm tồn (đến hết hôm nay): total_stock, warehouse_qty nếu có warehouse_id. */
+  listWithStock: (params: ProductListParams & { warehouse_id?: number | null }, signal?: AbortSignal) =>
+    api.get<Paged<ProductWithStock>>('/products', toQuery({ ...params, with_stock: true, warehouse_id: params.warehouse_id ?? undefined }), signal),
 };
 export const partnersApi = catalogResource<Partner, PartnerBody, PartnerListParams>('/partners');
 export const cashAccountsApi = catalogResource<CashAccount, CashAccountBody>('/cash-accounts');

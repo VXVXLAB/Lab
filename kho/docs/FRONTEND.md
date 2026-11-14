@@ -31,7 +31,9 @@ api/
                          lỗi mạng ⇒ câu tiếng Việt; `api.get/post/put/del`
   types.ts               kiểu dữ liệu đúng docs/API.md (danh mục, chứng từ, cảnh báo, thiếu hàng, dashboard, sự kiện SSE)
   catalog.ts             hàm gọi danh mục, người dùng, dashboard, báo cáo tồn (dựng trên `api`)
-  documents.ts           chứng từ kho: list/get/create/update/post/unpost/remove/check/history/exportUrl
+  documents.ts           chứng từ kho: list (+sum_total_amount)/get/create/update/post/unpost/remove/check/checkDraft/history/exportUrl
+  reports.ts             reportApi (stock-summary, stock-nxt, stock-ledger, sales, purchases, draft-demand, xlsxUrl), settingsApi, authApi
+  hooks.ts               useWarehouses, useAllGroups, useSettings (truy vấn dùng chung)
   queryKeys.ts           khóa cache — xem "Cache & cập nhật trực tiếp"
 auth/                    AuthContext (useAuth, useCurrentUser), LoginPage
 layout/AppLayout.tsx     khung: menu trái (thu gọn được, tự thu gọn < 992px), thanh trên (đường dẫn, trạng thái kết nối,
@@ -47,6 +49,10 @@ lib/
 components/
   NumberInput.tsx        ô số kiểu Việt Nam (dùng cho MỌI ô tiền/số lượng); hiển thị tính ngay khi vẽ (không qua effect)
   DateInput.tsx          ô ngày gõ tắt (25/9/2026, 25/9, 250926, 2509, 25) + nút lịch; KHÔNG bật lịch khi vào ô
+  DateRangeFilter.tsx    khoảng ngày + mốc nhanh (hôm nay … năm nay, tất cả, khoảng ngày); rangeOf(value)
+  ProductSelect.tsx      chọn một mặt hàng (tìm máy chủ); WarehouseSelect.tsx: WarehouseSelect, GroupSelect
+  ReportTable.tsx        BẢNG BÁO CÁO CHUẨN: tiêu đề cố định, dòng tổng cố định, ↑↓/Enter/nhấp mở chi tiết;
+                         ReportActions (Xuất Excel đúng bộ lọc + In), OpenHint
   EntityFormModal.tsx    hộp thoại thêm/sửa chuẩn (Enter, Ctrl+S, Esc, lỗi theo ô)
   CatalogList.tsx        trang danh sách chuẩn (tìm, lọc, phân trang, phím, xóa/ngừng dùng) + StatusText, activeColumn
   PageHeader, Kbd, Placeholder
@@ -61,6 +67,11 @@ pages/
     draft.ts             mô hình phiếu đang soạn (HeaderDraft, LineDraft), chuyển qua lại với Document, fingerprint (đã sửa?)
     LineGrid             lưới dòng hàng; ProductCodeInput ô mã hàng + danh sách gợi ý; PartnerSelect ô đối tác (+F4 thêm nhanh)
     PrintSheet           bản in A4/A5 (in qua trình duyệt, #print-root + @media print); HistoryDrawer lịch sử sửa (diff dễ đọc)
+  reports/
+    drawers.tsx          DrawerStackProvider + useDrawers(): ngăn kéo chi tiết xếp chồng (document | ledger | trade)
+    DocumentView         xem nhanh phiếu (chỉ đọc) + "Mở phiếu để sửa"; StockLedgerView thẻ kho; TradeReportView bán/mua
+    StockPages           Tồn kho, Thẻ kho, Tổng hợp NXT; OtherReportPages: chi tiết bán/mua, lịch sử bán, Hàng cần đặt, trang Báo cáo
+  catalog/CompanySettingsPage   Thông tin công ty (admin); auth/ChangePasswordModal (menu người dùng ở thanh trên)
 ```
 
 ## Quy ước
@@ -127,6 +138,26 @@ thông báo thành công ngắn (1,5 giây), lỗi nói cách khắc phục.
   giữ sẵn. Excel/Word tải từ `/api/documents/{id}/export`.
 - Kho mặc định của phiếu mới = kho dùng lần trước cho loại phiếu đó trên máy này (`localStorage`).
 
+## Báo cáo và ngăn kéo chi tiết (giai đoạn 3)
+
+- **Mọi báo cáo** dùng `ReportTable` + `ReportActions` và nằm trong `.report-area` (để In chỉ in vùng này, khổ ngang,
+  đủ mọi dòng — `printReport()` trong `lib/download.ts`). Excel luôn là file của máy chủ với **đúng tham số đang lọc**
+  (`reportApi.xlsxUrl(name, params)`). Khi "Tất cả" thời gian ở báo cáo bán/mua/NXT phải gửi `from=2000-01-01`
+  (bỏ trống thì máy chủ mặc định tháng này).
+- **Mở chi tiết không rời trang**: `const drawers = useDrawers(); drawers.push({kind:'document', id})`,
+  `{kind:'ledger', product, warehouseId?, from?, to?}`, `{kind:'trade', report:'sales'|'purchases', product}`.
+  Ngăn kéo chồng lên nhau (mỗi tầng hẹp hơn 48px), **Esc đóng từng tầng** (bỏ qua khi có hộp thoại / danh sách chọn
+  đang mở). "Mở phiếu để sửa" đóng hết ngăn kéo rồi điều hướng. Giai đoạn 4 thêm `{kind:'voucher'}`, `{kind:'debt'}` ở đây.
+- Báo cáo tự cập nhật qua SSE (khóa `['reports', …]`); kiểm tra phiếu đang gõ dùng khóa `['document-check', …]`.
+- **Trình soạn phiếu**: `price-info?ids=` một lần cho cả phiếu (khóa `['price-info','batch',…]`); danh sách gợi ý mã
+  dùng `with_stock` (tồn kho của phiếu / tổng); gợi ý thiếu hàng / bán lỗ từ `POST /documents/check` (trễ 450ms, gửi
+  `id` khi sửa phiếu có sẵn ⇒ thấy cả xung đột sửa lùi ngày sau). `required = 0` (sửa lùi phiếu nhập) ⇒ hiện
+  "Làm âm kho x (ngày …)" và `message` của máy chủ. F6 thẻ kho, F7 lịch sử bán/mua của dòng đang đứng; Alt+↑/↓ dời dòng;
+  cột "Ghi chú dòng" bật/tắt (nhớ theo máy, tự hiện nếu phiếu có ghi chú).
+- **Ô chọn (Select/AutoComplete) trong biểu mẫu**: MỘT lần Enter vừa lấy mục đang sáng vừa sang ô kế tiếp
+  (`enterToNext`); nếu không có mục nào sáng thì Enter không làm gì.
+- Phiếu nhập từ "Hàng cần đặt": `navigate(paths.newDocument('purchase'), { state: { prefill: { lines:[{product_id, qty}], note } } })`.
+
 ## Cache & cập nhật trực tiếp
 
 Khóa (`api/queryKeys.ts`) có phần tử đầu là "miền" để làm mới theo tiền tố:
@@ -152,6 +183,7 @@ Màn mới **phải** đặt khóa theo quy ước này thì mới tự cập nh
 ## Kiểm tra trên trình duyệt
 
 Giai đoạn 2: ảnh ở `frontend/screenshots/stage2/` (kèm PDF in thử, file xlsx/docx tải về).
+Giai đoạn 3: `frontend/screenshots/stage3/` (thẻ kho mẫu của khách, tồn 4 kho, chồng ngăn kéo, file Excel từng báo cáo, PDF in thẻ kho).
 
 
 Ảnh chụp 1366×768 (và máy tính bảng 820×1180) ở `frontend/screenshots/stage1/`. Đã chạy bằng Playwright (Chromium) với
