@@ -1,0 +1,13 @@
+{
+  "name": "kho-e2e",
+  "private": true,
+  "description": "Kiểm thử nghiệm thu đầu-cuối (Playwright) cho phần mềm Quản lý Kho",
+  "scripts": {
+    "test": "./run.sh"
+  },
+  "dependencies": {
+    "exceljs": "4.4.0",
+    "jszip": "3.10.1",
+    "playwright": "file:/opt/node-tools/node_modules/playwright"
+  }
+}
