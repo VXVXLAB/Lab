@@ -298,8 +298,9 @@ type ProductFilter struct {
 // ListProducts liệt kê mặt hàng (q tìm theo mã/tên, không phân biệt dấu).
 func (s *Service) ListProducts(ctx context.Context, f ProductFilter) (util.Page[Product], error) {
 	var w util.Where
-	if f.Q != "" {
-		w.Add(`p.search_key LIKE ?`, util.LikePattern(f.Q))
+	ptokens := util.ProductTokens(f.Q)
+	if c := util.ProductMatchSQL(&w, "p", ptokens); c != "" {
+		w.Add(c)
 	}
 	if f.Active != nil {
 		w.Add(`p.active = ?`, *f.Active)
@@ -314,7 +315,12 @@ func (s *Service) ListProducts(ctx context.Context, f ProductFilter) (util.Page[
 	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM products p`+w.SQL(), w.Args...).Scan(&out.Total); err != nil {
 		return out, err
 	}
-	rows, err := s.Pool.Query(ctx, productSelect+w.SQL()+` ORDER BY p.code LIMIT `+w.Arg(f.PageSize)+` OFFSET `+w.Arg(f.Offset()), w.Args...)
+	// Có từ khóa ⇒ xếp theo mức khớp (trùng mã, mã bắt đầu, mọi từ trong tên) rồi theo mã.
+	order := ` ORDER BY p.code`
+	if len(ptokens) > 0 {
+		order = ` ORDER BY ` + util.ProductRankSQL(&w, "p", ptokens) + `, p.code`
+	}
+	rows, err := s.Pool.Query(ctx, productSelect+w.SQL()+order+` LIMIT `+w.Arg(f.PageSize)+` OFFSET `+w.Arg(f.Offset()), w.Args...)
 	if err != nil {
 		return out, err
 	}

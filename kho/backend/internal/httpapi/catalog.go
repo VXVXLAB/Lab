@@ -197,8 +197,27 @@ func (s *Server) catalogRoutes(r chi.Router) {
 	})
 }
 
+// lookupProduct: GET /products/lookup?code=X[&optional=1].
+// Mặc định: Product hoặc 404. optional=1: luôn 200 {"found": bool, "product": Product|null} (gõ từng chữ không sinh 404).
 func (s *Server) lookupProduct(w http.ResponseWriter, r *http.Request) {
+	opt, err := qBool(r, "optional")
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	p, err := s.Catalog.LookupProduct(r.Context(), s.Pool, r.URL.Query().Get("code"))
+	if opt != nil && *opt {
+		if err != nil {
+			if ae := apperr.From(err); ae.Code == apperr.CodeNotFound {
+				writeJSON(w, http.StatusOK, map[string]any{"found": false, "product": nil})
+				return
+			}
+			writeErr(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"found": true, "product": p})
+		return
+	}
 	if err != nil {
 		writeErr(w, r, err)
 		return

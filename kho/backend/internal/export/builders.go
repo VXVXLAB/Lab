@@ -84,12 +84,16 @@ func DocumentTable(d *docs.Document) Table {
 			line += " (" + str(d.PartnerCode) + ")"
 		}
 		t.Info = append(t.Info, line)
-		if str(d.PartnerAddress) != "" || str(d.PartnerPhone) != "" {
-			line := "Địa chỉ: " + str(d.PartnerAddress)
-			if str(d.PartnerPhone) != "" {
-				line += " · ĐT: " + str(d.PartnerPhone)
-			}
-			t.Info = append(t.Info, line)
+		// Bỏ phần trống: chỉ địa chỉ ⇒ "Địa chỉ: X"; chỉ ĐT ⇒ "ĐT: Y"; không có cả hai ⇒ không in dòng.
+		var parts []string
+		if a := str(d.PartnerAddress); a != "" {
+			parts = append(parts, "Địa chỉ: "+a)
+		}
+		if ph := str(d.PartnerPhone); ph != "" {
+			parts = append(parts, "ĐT: "+ph)
+		}
+		if len(parts) > 0 {
+			t.Info = append(t.Info, strings.Join(parts, " · "))
 		}
 	}
 	wh := cfg.warehouseLabel + ": " + d.WarehouseName

@@ -90,7 +90,14 @@ func (s *Service) TradeReport(ctx context.Context, kind string, p TradeParams) (
 		w.Add(`d.warehouse_id = ?`, *p.WarehouseID)
 	}
 	if p.Q != "" {
-		w.Add(`(pr.search_key LIKE ? OR COALESCE(pa.search_key,'') LIKE ? OR upper(d.doc_no) LIKE upper(?))`, util.LikePattern(p.Q), util.LikePattern(p.Q), "%"+p.Q+"%")
+		cond := `(upper(d.doc_no) LIKE upper(` + w.Arg("%"+p.Q+"%") + `)`
+		if pm := util.ProductMatchSQL(&w, "pr", util.ProductTokens(p.Q)); pm != "" {
+			cond += ` OR ` + pm
+		}
+		if pm := util.PartnerMatchSQL(&w, "pa", util.SearchTokens(p.Q)); pm != "" {
+			cond += ` OR COALESCE(` + pm + `, FALSE)`
+		}
+		w.Add(cond + `)`)
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT d.doc_date, d.doc_no, d.id, d.doc_type, d.partner_id, pa.code, pa.name, d.warehouse_id, w.name,
 			l.line_no, l.product_id, pr.code, pr.name, pr.is_service, l.description, l.unit,

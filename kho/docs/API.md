@@ -109,7 +109,8 @@ Năm danh mục có cùng bộ CRUD:
 Body POST/PUT: `{"code":"KHO5","name":"Kho Bình Dương","active":true}` (`active` mặc định `true`). Nhóm VTHH cùng dạng.
 
 ### 2.2 Mặt hàng — `/api/products`
-Lọc thêm: `group_id`, `is_service=true|false`. `q` tìm theo mã + tên (không dấu).
+Lọc thêm: `group_id`, `is_service=true|false`.
+`q` — tìm **theo từ**, tách theo **khoảng trắng** (dấu chấm, gạch trong một từ giữ nguyên: `3.2`, `er70s6-12` là một từ); bỏ dấu, không phân biệt hoa thường; **mọi từ** phải có mặt (liền trong từ đó) trong mã hoặc tên, thứ tự bất kỳ (`que 3.2`, `3.2 que`, `kim tin 4.0`, `cap 35`). Khi có `q`, xếp: trùng mã → mã bắt đầu bằng chuỗi gõ → mọi từ nằm trong tên → còn lại, rồi theo mã. Cùng cách khớp cho `q` của `/api/reports/stock-summary`, `/api/reports/stock-nxt`, phần mặt hàng trong `q` của `/api/reports/sales|purchases` (báo cáo vẫn sắp theo mã).
 `with_stock=true` (tùy chọn, kèm `warehouse_id`): mỗi item có thêm `total_stock` (tồn tổng mọi kho đến hết hôm nay) và, nếu có `warehouse_id`, `warehouse_qty` (tồn tại kho đó). Tồn của cả trang lấy bằng một truy vấn gộp. Không có `with_stock` ⇒ hình dạng như cũ (không có hai trường này).
 ```json
 {
@@ -121,8 +122,10 @@ Lọc thêm: `group_id`, `is_service=true|false`. `q` tìm theo mã + tên (khô
 Body: `{"code","name","unit","group_id","sale_price","purchase_price","is_service","active"}`.
 `unit` bắt buộc với hàng hóa; giá ≥ 0. Không đổi được `is_service` khi đã phát sinh chứng từ. Mã `DV` không xóa/đổi mã được; mã `DICHVU` dành riêng.
 
-#### `GET /api/products/lookup?code=K701832`
-Tìm **chính xác** theo mã, không phân biệt hoa thường; `DICHVU` / `dichvu` / `dịch vụ` ⇒ mã `DV`. → `Product` hoặc `404`.
+#### `GET /api/products/lookup?code=K701832[&optional=1]`
+Tìm **chính xác** theo mã, không phân biệt hoa thường; `DICHVU` / `dichvu` / `dịch vụ` ⇒ mã `DV`. → `Product` hoặc `404` (mặc định, không đổi).
+Với `optional=1` (hoặc `true`): **luôn 200** (dùng khi gõ mã từng chữ, không sinh 404):
+`{"found": true, "product": {Product}}` khi có, `{"found": false, "product": null}` khi không có. `code` rỗng vẫn 400; `optional` không phải true/false ⇒ 400.
 
 #### `GET /api/products/{id}/price-info?date=YYYY-MM-DD`
 Dùng khi nhập dòng phiếu: tự điền giá bán (REQ-026), cảnh báo lỗ tức thời (R4), xem tồn. `date` mặc định hôm nay (= ngày phiếu).
@@ -149,8 +152,8 @@ Bản hàng loạt: → `{"items": [PriceInfo…]}`, mỗi phần tử **giống
 ### 2.3 Đối tác — `/api/partners`
 Lọc thêm: `type=customer|supplier`.
 `q` — tìm **theo từ**: chuỗi được bỏ dấu, chữ thường, bỏ dấu câu (`–`, `,`, `.`…) rồi tách thành các từ; **mọi từ** phải có mặt (thứ tự bất kỳ) trong mã, tên, điện thoại hoặc MST (`viet han` và `han viet` đều ra "Thiết bị hàn Việt – Hàn"). Khi có `q`, kết quả **xếp theo mức khớp** rồi theo tên:
-0 mã trùng chuỗi gõ (bỏ khoảng trắng/dấu câu) · 1 tên bắt đầu bằng cụm từ · 2 tên chứa cụm từ ở đầu một từ · 3 mọi từ là từ nguyên trong tên · 4 mã bắt đầu bằng chuỗi gõ · 5 mọi từ nằm trong tên (một phần từ) · 6 còn lại (khớp qua mã/ĐT/MST).
-Ví dụ `thanh cong`: "Xưởng cơ khí Thành Công" (mức 2) đứng trước "TANTHANH – Công ty TNHH Thép Tân Thành" (mức 3, khớp rời "công ty"/"thành"). Không có `q` ⇒ sắp theo mã như cũ.
+0 mã trùng chuỗi gõ (bỏ khoảng trắng/dấu câu) · 1 tên bắt đầu bằng cụm từ (trọn từ ở cả hai đầu) · 2 tên chứa cụm từ (trọn từ) · 3 mọi từ là từ nguyên trong tên · 4 mã bắt đầu bằng chuỗi gõ · 5 mọi từ nằm trong tên (một phần từ) · 6 còn lại (khớp qua mã/ĐT/MST).
+Ví dụ `minh phu`: "Đại lý Minh Phú" (mức 2) đứng trên "Công ty Minh Phước" (mức 5, "phu" chỉ là một phần của "phuoc"). Ví dụ `thanh cong`: "Xưởng cơ khí Thành Công" (mức 2) đứng trước "TANTHANH – Công ty TNHH Thép Tân Thành" (mức 3, khớp rời "công ty"/"thành"). Không có `q` ⇒ sắp theo mã như cũ.
 Cùng cách khớp đối tác được dùng cho phần tên đối tác trong `q` của `/api/documents`, `/api/vouchers` và `/api/reports/debt-summary`.
 
 #### `GET /api/partners/{id}/balance?date=&exclude_document_id=&exclude_voucher_id=`
@@ -319,7 +322,7 @@ Body như `POST`/`PUT /api/documents` (không cần `version`), thêm `"id"` (t�
 ### 3.9 `GET /api/documents/{id}/export?format=xlsx|docx`
 File phiếu (mặc định `xlsx`). Phiếu tạm: tiêu đề **"PHIẾU TẠM (chưa ghi sổ)"**, tên file `PHIEU_TAM_TAM000025.xlsx`. Đã ghi sổ: tiêu đề theo loại (`PHIẾU XUẤT KHO BÁN HÀNG`, `PHIẾU NHẬP KHO MUA HÀNG`, `PHIẾU NHẬP HÀNG BÁN BỊ TRẢ LẠI`, `PHIẾU XUẤT TRẢ HÀNG NHÀ CUNG CẤP`, `PHIẾU CHUYỂN KHO NỘI BỘ`, `PHIẾU NHẬP TỒN ĐẦU KỲ`), tên file `XK00008.xlsx`.
 Nội dung: (thông tin công ty nếu có), thông tin phiếu, bảng `STT | Mã hàng | Tên hàng | ĐVT | Số lượng | Đơn giá | Thành tiền` — thêm cột thứ 8 `Ghi chú` (ghi chú từng dòng) **chỉ khi** ít nhất một dòng có `note` —, dòng `Cộng`, rồi (phiếu bán/mua) "Nợ cũ:" và "Tổng nợ (đến ngày dd/mm/yyyy):", ô ký tên.
-**Khớp bản in** (`PrintSheet`, theo mẫu khách): dòng "Số: <số phiếu> &nbsp; Ngày: dd/mm/yyyy" (phiếu tạm dùng số tạm); "<Khách hàng|Nhà cung cấp>: <tên> (<mã>)"; "Địa chỉ: … · ĐT: …"; nhãn kho theo loại phiếu — bán, trả NCC: "Xuất từ kho:"; mua, khách trả, tồn đầu: "Nhập vào kho:"; chuyển kho: "Kho xuất: X → Kho nhận: Y"; phụ đề phiếu tạm "<tên phiếu> — chưa ghi sổ, chưa trừ/cộng kho, chưa vào công nợ". Cột Mã hàng của dòng dịch vụ ghi **`DICHVU`** (mã trong API vẫn là `DV`); cột Tên hàng = diễn giải dòng nếu có, ngược lại tên hàng. Phiếu **chuyển kho không có cột Đơn giá/Thành tiền**, dòng Cộng là tổng SL. "Nợ cũ/Tổng nợ" chỉ ở phiếu bán và phiếu mua. Dòng "Ngày …… tháng …… năm ………", rồi ô ký theo loại phiếu — bán: Người lập phiếu, Người giao hàng, Khách hàng, Thủ kho; khách trả: Người lập phiếu, Khách hàng, Thủ kho; mua: Người lập phiếu, Người giao hàng, Thủ kho; trả NCC: Người lập phiếu, Người nhận hàng, Thủ kho; chuyển kho: Người lập phiếu, Thủ kho xuất, Thủ kho nhận; tồn đầu: Người lập phiếu, Thủ kho — mỗi ô kèm "(Ký, ghi rõ họ tên)"; dòng cuối "Xuất file lúc HH:MM dd/mm/yyyy · Ghi sổ bởi <tên>" (phiếu tạm: "· Phiếu tạm").
+**Khớp bản in** (`PrintSheet`, theo mẫu khách): dòng "Số: <số phiếu> &nbsp; Ngày: dd/mm/yyyy" (phiếu tạm dùng số tạm); "<Khách hàng|Nhà cung cấp>: <tên> (<mã>)"; "Địa chỉ: … · ĐT: …" (bỏ phần trống: chỉ có địa chỉ ⇒ "Địa chỉ: …", chỉ có ĐT ⇒ "ĐT: …", không có cả hai ⇒ không có dòng); nhãn kho theo loại phiếu — bán, trả NCC: "Xuất từ kho:"; mua, khách trả, tồn đầu: "Nhập vào kho:"; chuyển kho: "Kho xuất: X → Kho nhận: Y"; phụ đề phiếu tạm "<tên phiếu> — chưa ghi sổ, chưa trừ/cộng kho, chưa vào công nợ". Cột Mã hàng của dòng dịch vụ ghi **`DICHVU`** (mã trong API vẫn là `DV`); cột Tên hàng = diễn giải dòng nếu có, ngược lại tên hàng. Phiếu **chuyển kho không có cột Đơn giá/Thành tiền**, dòng Cộng là tổng SL. "Nợ cũ/Tổng nợ" chỉ ở phiếu bán và phiếu mua. Dòng "Ngày …… tháng …… năm ………", rồi ô ký theo loại phiếu — bán: Người lập phiếu, Người giao hàng, Khách hàng, Thủ kho; khách trả: Người lập phiếu, Khách hàng, Thủ kho; mua: Người lập phiếu, Người giao hàng, Thủ kho; trả NCC: Người lập phiếu, Người nhận hàng, Thủ kho; chuyển kho: Người lập phiếu, Thủ kho xuất, Thủ kho nhận; tồn đầu: Người lập phiếu, Thủ kho — mỗi ô kèm "(Ký, ghi rõ họ tên)"; dòng cuối "Xuất file lúc HH:MM dd/mm/yyyy · Ghi sổ bởi <tên>" (phiếu tạm: "· Phiếu tạm").
 Excel: số là ô số thật; ô Cộng = công thức `SUM(...)`; "Nợ cũ:" và "Tổng nợ …:" là ô nhãn (cột C) + **ô số riêng** (cột Thành tiền); ô Tổng nợ = công thức `Nợ cũ + Cộng`. Mọi ô công thức có **kết quả lưu sẵn dạng số** (trình xem không tính lại vẫn hiện đúng). Đơn giá/tiền có số lẻ hiển thị số lẻ (`#,##0.0#`), số chẵn hiển thị `#,##0`. Word: "Nợ cũ: 2.000.000", "Tổng nợ (đến ngày …): 5.990.000". Dòng dịch vụ: cột Tên hàng = diễn giải. File không khóa, không ảnh ⇒ người dùng thêm/bớt dòng cột được.
 Phiếu chính thức chỉ in được khi đã ghi sổ ⇒ hết tồn thì không ghi sổ ⇒ không có phiếu chính thức (REQ-031/032).
 

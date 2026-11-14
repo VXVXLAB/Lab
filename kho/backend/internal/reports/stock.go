@@ -111,7 +111,9 @@ func (s *Service) StockSummary(ctx context.Context, p StockSummaryParams) (*Stoc
 		w.Add(`p.group_id = ?`, *p.GroupID)
 	}
 	if p.Q != "" {
-		w.Add(`p.search_key LIKE ?`, util.LikePattern(p.Q))
+		if c := util.ProductMatchSQL(&w, "p", util.ProductTokens(p.Q)); c != "" {
+			w.Add(c)
+		}
 	}
 	if !p.OnlyWithData {
 		w.Add(`(p.active OR m.id IS NOT NULL)`)
@@ -252,7 +254,9 @@ func (s *Service) StockNXT(ctx context.Context, p NXTParams) (*NXT, error) {
 		w.Add(`p.group_id = ?`, *p.GroupID)
 	}
 	if p.Q != "" {
-		w.Add(`p.search_key LIKE ?`, util.LikePattern(p.Q))
+		if c := util.ProductMatchSQL(&w, "p", util.ProductTokens(p.Q)); c != "" {
+			w.Add(c)
+		}
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT p.id, p.code, p.name, p.unit, g.name,
 		COALESCE(sum(m.qty_in - m.qty_out) FILTER (WHERE m.doc_date < `+from+`), 0),
