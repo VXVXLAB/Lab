@@ -31,17 +31,19 @@ import { DateInput } from '../../components/DateInput';
 import { Kbd } from '../../components/Kbd';
 import { useServerEvent } from '../../lib/events';
 import { formatDate, formatDateTime, formatMoney, formatQty, fromApiDate, toApiDate, todayVn } from '../../lib/format';
-import { enterToNext, useHotkeys } from '../../lib/keyboard';
+import { enterToNext, useHotkeys, userIsTyping } from '../../lib/keyboard';
 import { storage } from '../../lib/storage';
 import { useMenuHighlight } from '../../lib/menuHighlight';
 import { unsavedStore } from '../../lib/unsavedStore';
 import { useNarrow } from '../../lib/useNarrow';
+import { MERGE_COLOR, MERGE_LABEL, conflictText, needsChoice, type MergeChoice, type MergeItem } from '../../lib/merge3';
+import { MergeChoicePicker } from '../../components/MergeChoicePicker';
 import { paths } from '../../paths';
 import { DOC_TYPES, isDocType } from './docTypes';
 import {
   draftFromDoc,
-  applyChanges,
-  diffLines,
+  applyLineMerge,
+  mergeLines,
   emptyLine,
   fingerprint,
   isBlank,
@@ -50,12 +52,10 @@ import {
   toBody,
   withTrailingBlank,
   type HeaderDraft,
-  type LineChange,
   type LineDraft,
 } from './draft';
 import { HistoryDrawer } from './HistoryDrawer';
 
-const CHANGE_LABEL = { added: 'Thêm mới', edited: 'Đã sửa', removed: 'Đã xóa' } as const;
 import { useDrawers } from '../reports/drawers';
 import { LineGrid, type Col, type LineHint } from './LineGrid';
 import { PartnerSelect } from './PartnerSelect';
@@ -135,7 +135,8 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const [headerErrors, setHeaderErrors] = useState<Record<string, string>>({});
   const [remote, setRemote] = useState<{ by: string; at: string } | null>(null);
   const [deletedBy, setDeletedBy] = useState<string | null>(null);
-  const [stash, setStash] = useState<LineChange[] | null>(null);
+  const [stash, setStash] = useState<MergeItem<LineDraft>[] | null>(null);
+  const [choices, setChoices] = useState<Record<string, MergeChoice>>({});
   const baseLinesRef = useRef<LineDraft[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
@@ -157,8 +158,8 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
 
   // ---------- nạp phiếu ----------
   const load = useCallback(
-    (d: DocumentFull) => {
-      const dr = draftFromDoc(d);
+    (d: DocumentFull, prepared?: ReturnType<typeof draftFromDoc>) => {
+      const dr = prepared ?? draftFromDoc(d);
       setHeader(dr.header);
       setLines(dr.lines);
       baseLinesRef.current = dr.lines;
@@ -208,12 +209,22 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     restoreChecked.current = true;
     const st = unsavedStore.load<Stored>(me.id, draftScope);
     if (!st || !st.lines?.length) return;
+    // dòng khôi phục nhận lại dòng gốc theo id dòng máy chủ (để lần gộp hai máy sau đó không coi là dòng mới)
+    const baseById = new Map(baseLinesRef.current.filter((b) => b.id !== undefined).map((b) => [b.id, b.key]));
+    const ls = withTrailingBlank(st.lines.map((l) => (l.id !== undefined && baseById.has(l.id) ? { ...l, key: baseById.get(l.id)! } : l)));
     setHeader({ ...st.header, doc_date: fromApiDate(st.header.doc_date) });
-    setLines(withTrailingBlank(st.lines));
+    setLines(ls);
     setEditing(st.editing);
     autoFill.current = false; // khôi phục là thay đổi thật của người dùng, không phải giá trị tự điền
-    message.info('Đã khôi phục các dòng đang gõ dở (phiên đăng nhập trước bị ngắt). Kiểm tra rồi bấm Lưu.', 5);
+    message.info(unsavedStore.restoredMessage(unsavedStore.reason(me.id, draftScope)), 5);
+    // phiếu mới khôi phục: con trỏ ở dòng trống cuối như khi mở một phiếu tạm (khách đã chọn sẵn)
+    if (docId === null && (st.header.partner || !cfg?.partner)) {
+      restoredFocus.current = true;
+      const last = ls[ls.length - 1];
+      if (last) setFocusReq({ key: last.key, col: 'code', n: Date.now() });
+    }
   };
+  const restoredFocus = useRef(false);
   const restoredNew = useRef(false);
   useEffect(() => {
     if (docId === null && !restoredNew.current) {
@@ -295,7 +306,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   // Con trỏ ban đầu
   useEffect(() => {
     const t = window.setTimeout(() => {
-      if (docId === null) {
+      if (docId === null && !restoredFocus.current && !userIsTyping()) {
         if (cfg?.partner) partnerRef.current?.focus();
         else whRef.current?.focus();
       }
@@ -469,12 +480,17 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
 
   const reloadKeepingMine = async () => {
     // chỉ giữ phần máy này đã thêm / sửa / xóa kể từ lúc nạp (F-01) — dòng không đổi thì không lặp lại
-    const mine = diffLines(baseLinesRef.current, lines);
-    setStash(mine.length ? mine : null);
+    // so ba bản (lúc nạp / máy này / bản máy kia vừa lưu) theo từng ô của từng dòng (F-10)
     if (!loaded) return;
+    const base = baseLinesRef.current;
+    const mine = lines;
     try {
       const fresh = await documentsApi.get(loaded.id);
-      load(fresh);
+      const dr = draftFromDoc(fresh);
+      const items = mergeLines(base, mine, dr.lines);
+      setStash(items.length ? items : null);
+      setChoices({});
+      load(fresh, dr);
     } catch (e) {
       modal.error({ title: 'Không tải được phiếu', content: errorMessage(e) });
     }
@@ -801,7 +817,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   };
 
   const stashText = (stash ?? [])
-    .map((c) => [CHANGE_LABEL[c.kind], c.line.product?.code ?? '', c.line.product?.is_service ? c.line.description : (c.line.product?.name ?? ''), c.line.qty ?? '', c.line.unit_price ?? ''].join('\t'))
+    .map((c) => [MERGE_LABEL[c.kind], c.line.product?.code ?? '', c.line.product?.is_service ? c.line.description : (c.line.product?.name ?? ''), c.line.qty ?? '', c.line.unit_price ?? ''].join('\t'))
     .join('\n');
 
   return (
@@ -941,43 +957,65 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
             <div>
               <table className="stash-table">
                 <tbody>
-                  {stash.map((c) => (
-                    <tr key={c.line.key}>
-                      <td>
-                        <Tag color={c.kind === 'added' ? 'blue' : c.kind === 'edited' ? 'orange' : 'red'}>{CHANGE_LABEL[c.kind]}</Tag>
-                      </td>
-                      <td>{c.line.product?.code}</td>
-                      <td>{c.line.product?.is_service ? c.line.description : c.line.product?.name}</td>
-                      <td className="num">
-                        {c.kind === 'edited' && c.before && c.before.qty !== c.line.qty ? (
-                          <>
-                            SL {formatQty(c.before.qty)} → <b>{formatQty(c.line.qty)}</b>
-                          </>
-                        ) : (
-                          formatQty(c.line.qty)
+                  {stash.map((c) => {
+                    const before = c.kind === 'edited' || c.kind === 'conflict' ? c.base : null;
+                    return (
+                      <tr key={c.id}>
+                        <td>
+                          <Tag color={MERGE_COLOR[c.kind]}>{MERGE_LABEL[c.kind]}</Tag>
+                        </td>
+                        <td>{c.line.product?.code}</td>
+                        <td>{c.line.product?.is_service ? c.line.description : c.line.product?.name}</td>
+                        <td className="num">
+                          {before && before.qty !== c.line.qty ? (
+                            <>
+                              SL {formatQty(before.qty)} → <b>{formatQty(c.line.qty)}</b>
+                            </>
+                          ) : (
+                            formatQty(c.line.qty)
+                          )}
+                        </td>
+                        <td className="num">
+                          {before && before.unit_price !== c.line.unit_price ? (
+                            <>
+                              giá {formatMoney(before.unit_price)} → <b>{formatMoney(c.line.unit_price)}</b>
+                            </>
+                          ) : c.line.unit_price === null ? (
+                            ''
+                          ) : (
+                            formatMoney(c.line.unit_price)
+                          )}
+                        </td>
+                        {needsChoice(c.kind) && (
+                          <td>
+                            {readOnly ? (
+                              conflictText(c)
+                            ) : (
+                              <MergeChoicePicker
+                                text={conflictText(c)}
+                                value={choices[c.id] ?? 'theirs'}
+                                onChange={(v) => setChoices((x) => ({ ...x, [c.id]: v }))}
+                              />
+                            )}
+                          </td>
                         )}
-                      </td>
-                      <td className="num">
-                        {c.kind === 'edited' && c.before && c.before.unit_price !== c.line.unit_price ? (
-                          <>
-                            giá {formatMoney(c.before.unit_price)} → <b>{formatMoney(c.line.unit_price)}</b>
-                          </>
-                        ) : c.line.unit_price === null ? (
-                          ''
-                        ) : (
-                          formatMoney(c.line.unit_price)
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+              {stash.some((c) => needsChoice(c.kind)) && (
+                <div className="merge-hint">
+                  Dòng hai máy cùng sửa: mặc định <b>giữ của máy kia</b> (bản đã lưu). Chọn “Dùng của tôi” nếu số của bạn mới đúng, rồi bấm
+                  “Thêm các dòng này vào phiếu”. Phần chỉ một bên sửa được gộp tự động.
+                </div>
+              )}
               <Space style={{ marginTop: 6 }}>
                 {!readOnly && (
                   <Button
                     size="small"
                     onClick={() => {
-                      setLines((ls) => applyChanges(ls, stash));
+                      setLines((ls) => applyLineMerge(ls, stash, choices));
                       setStash(null);
                     }}
                   >

@@ -27,8 +27,12 @@ Dưới phiếu luôn hiện **Cộng**, **Nợ cũ** và **Tổng nợ**. Cạn
 - Phiếu chưa ghi sổ là **Phiếu tạm** (số TAM…). Phiếu tạm không trừ kho, không vào công nợ, không giữ hàng.
 - Mọi máy đều thấy phiếu tạm ở Bán hàng › **Phiếu tạm đang treo**: ai sửa lần cuối, lúc nào. Máy 2 mở phiếu của máy 1 và làm tiếp bình thường.
 - Đang mở một phiếu mà máy khác lưu phiếu đó: nếu bạn chưa sửa gì, phiếu tự hiện bản mới. Nếu bạn đang sửa dở, phần mềm báo **"Phiếu vừa được … sửa"** và không xóa chữ bạn đang gõ.
-- Hai máy cùng lưu một phiếu: máy lưu sau được báo **"Máy khác vừa sửa phiếu này"**. Bấm **Tải bản mới** để thấy bản của máy kia. Khung vàng chỉ liệt kê những gì **máy bạn** đã thay đổi so với lúc mở phiếu: dòng **thêm mới**, dòng **đã sửa** (ví dụ "SL 2 → 3") và dòng **đã xóa**. Bấm **Thêm các dòng này vào phiếu** để đưa các thay đổi đó vào bản mới: dòng đã có không bị lặp lại, dòng bạn sửa được sửa trên bản mới, phần máy kia đã sửa vẫn giữ. Kiểm tra rồi **Ctrl+S**.
-- Đang gõ phiếu mà phiên đăng nhập bị ngắt (ví dụ quản trị đặt lại mật khẩu): phần mềm về màn đăng nhập. Đăng nhập lại **đúng tên của bạn** trên cùng cửa sổ thì phiếu đang gõ dở được khôi phục, có thông báo "Đã khôi phục các dòng đang gõ dở". Bấm **Đăng xuất** chủ động thì phiếu chưa lưu bị bỏ.
+- Hai máy cùng lưu một phiếu: máy lưu sau được báo **"Máy khác vừa sửa phiếu này"**. Bấm **Tải bản mới** để thấy bản của máy kia. Khung vàng chỉ liệt kê những gì **máy bạn** đã thay đổi so với lúc mở phiếu: dòng **thêm mới**, dòng **đã sửa** (ví dụ "SL 2 → 3") và dòng **đã xóa**. Bấm **Thêm các dòng này vào phiếu** để đưa các thay đổi đó vào bản mới, rồi kiểm tra và **Ctrl+S**. Phần mềm gộp theo **từng ô của từng dòng** (không theo mã hàng — hai dòng cùng mã vẫn là hai dòng riêng):
+  - Ô chỉ bạn sửa ⇒ lấy số của bạn. Ô chỉ máy kia sửa ⇒ giữ số của máy kia. Ví dụ máy kia đổi đơn giá, bạn đổi số lượng của cùng dòng ⇒ dòng đó có số lượng của bạn và đơn giá của máy kia.
+  - Hai máy sửa **cùng một ô** thành hai số khác nhau ⇒ khung vàng ghi **"Cùng sửa: SL — máy kia: 3, bạn: 4"** và cho chọn **Giữ của máy kia** (sẵn) hoặc **Dùng của tôi**. Phần mềm không tự chọn số của bạn.
+  - Bạn sửa một dòng mà máy kia đã xóa dòng đó, hoặc bạn xóa một dòng mà máy kia đã sửa ⇒ khung vàng ghi rõ và cũng cho chọn; để sẵn là giữ như bản máy kia đã lưu.
+  - Sửa một dòng không bao giờ sinh thêm dòng mới: tổng tiền không bị cộng hai lần. Phiếu thu, phiếu chi cũng gộp đúng như vậy cho từng dòng tiền.
+- Đang gõ phiếu mà phiên đăng nhập bị ngắt (ví dụ quản trị đặt lại mật khẩu): phần mềm về màn đăng nhập. Đăng nhập lại **đúng tên của bạn** trên cùng cửa sổ thì phiếu đang gõ dở được khôi phục, có thông báo "Phiên đăng nhập đã hết. Đã khôi phục các dòng đang gõ dở". Lỡ tải lại trang (F5) hay mở lại thẻ khi đang gõ thì phiếu cũng được giữ, thông báo là "Đã khôi phục các dòng đang gõ dở từ lần mở trước"; không cần thì bấm **Bỏ thay đổi**. Bấm **Đăng xuất** chủ động thì phiếu chưa lưu bị bỏ.
 
 ## Hàng hết tồn
 

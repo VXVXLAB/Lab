@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useActiveRow } from '../lib/useActiveRow';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { App, Button, Input, Segmented, Table, Tooltip, type InputRef } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
@@ -80,7 +81,7 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
   const [dq, flushQ] = useDebouncedFlush(q.trim(), 250);
   const [active, setActive] = useState<ActiveFilter>('true');
   const [page, setPage] = useState(1);
-  const [activeIdx, setActiveIdx] = useState(-1);
+  const [activeIdx, setActiveIdx, activeRef] = useActiveRow();
   const searchRef = useRef<InputRef>(null);
   const tableRef = useRef<HTMLDivElement>(null);
   const wrapHeight = useElementHeight(tableRef);
@@ -244,12 +245,15 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
           setActiveIdx(0);
         }
         break;
-      case 'Enter':
-        if (current) {
+      case 'Enter': {
+        // đọc dòng chọn từ ref: Enter đến ngay sau khi chọn dòng (trước khi vẽ lại) vẫn mở đúng dòng (F-15)
+        const now = activeRef.current >= 0 ? rows[activeRef.current] : undefined;
+        if (now) {
           e.preventDefault();
-          onEdit(current);
+          onEdit(now);
         }
         break;
+      }
       case 'Delete':
         if (current && onDelete) {
           e.preventDefault();

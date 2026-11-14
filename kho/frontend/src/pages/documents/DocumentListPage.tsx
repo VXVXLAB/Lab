@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useActiveRow } from '../../lib/useActiveRow';
 import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Button, Dropdown, Input, Segmented, Select, Table, Tag, Tooltip, type InputRef } from 'antd';
@@ -87,7 +88,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
   const [q, setQ] = useState('');
   const [dq, flushQ] = useDebouncedFlush(q.trim(), 250);
   const [page, setPage] = useState(1);
-  const [activeIdx, setActiveIdx] = useState(-1);
+  const [activeIdx, setActiveIdx, activeRef] = useActiveRow();
   const searchRef = useRef<InputRef>(null);
   const tableRef = useRef<HTMLDivElement>(null);
   const wrapHeight = useElementHeight(tableRef);
@@ -168,9 +169,10 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
         setActiveIdx(-1);
         focusSearch();
       } else setActiveIdx(activeIdx - 1);
-    } else if (e.key === 'Enter' && current) {
+    } else if (e.key === 'Enter' && rows[activeRef.current]) {
+      // ref: Enter ngay sau khi chọn dòng (trước khi vẽ lại) vẫn mở đúng dòng (F-15)
       e.preventDefault();
-      open(current);
+      open(rows[activeRef.current]!);
     } else if (e.key === 'PageDown' && page * PAGE_SIZE < total) {
       e.preventDefault();
       setPage(page + 1);

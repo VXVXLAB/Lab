@@ -52,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUnauthorizedHandler(() => {
       setState((s) => (s.status === 'authenticated' ? { status: 'anonymous', reason: 'expired' } : s));
       storage.set(HAD_SESSION, '0');
+      unsavedStore.markSessionEnded();
       queryClient.clear();
     });
     return () => setUnauthorizedHandler(null);

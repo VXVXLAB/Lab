@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useActiveRow } from '../../lib/useActiveRow';
 import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Button, Input, Select, Table, type InputRef } from 'antd';
@@ -31,7 +32,7 @@ export function VoucherListPage({ type }: { type: VoucherType }) {
   const [q, setQ] = useState('');
   const [dq, flushQ] = useDebouncedFlush(q.trim(), 250);
   const [page, setPage] = useState(1);
-  const [active, setActive] = useState(-1);
+  const [active, setActive, activeRef] = useActiveRow();
   const searchRef = useRef<InputRef>(null);
   const tableRef = useRef<HTMLDivElement>(null);
   const h = useElementHeight(tableRef);
@@ -48,7 +49,6 @@ export function VoucherListPage({ type }: { type: VoucherType }) {
   const query = useQuery({ queryKey: [...qk.vouchers, params], queryFn: ({ signal }) => vouchersApi.list(params, signal), placeholderData: keepPreviousData });
   const rows = query.data?.items ?? [];
   const total = query.data?.total ?? 0;
-  const cur = active >= 0 ? rows[active] : undefined;
   const open = (r: VoucherSummary) => navigate(paths.voucher(r.id));
   const onSearchEnter = useListSearchEnter({
     text: q,
@@ -78,9 +78,10 @@ export function VoucherListPage({ type }: { type: VoucherType }) {
       e.preventDefault();
       if (active <= 0) focusSearch();
       setActive((a) => Math.max(-1, a - 1));
-    } else if (e.key === 'Enter' && cur) {
+    } else if (e.key === 'Enter' && rows[activeRef.current]) {
+      // ref: Enter ngay sau khi chọn dòng (trước khi vẽ lại) vẫn mở đúng dòng (F-15)
       e.preventDefault();
-      open(cur);
+      open(rows[activeRef.current]!);
     }
   };
 

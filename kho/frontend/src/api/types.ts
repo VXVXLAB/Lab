@@ -67,6 +67,12 @@ export interface Product {
   active: boolean;
 }
 
+/** GET /products/lookup?optional=1 */
+export interface ProductLookup {
+  found: boolean;
+  product: Product | null;
+}
+
 export interface ProductBody {
   code: string;
   name: string;

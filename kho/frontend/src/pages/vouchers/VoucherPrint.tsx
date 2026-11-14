@@ -38,10 +38,10 @@ export function VoucherPrint({ v }: { v: Voucher }) {
               <b>{v.partner_name ?? '……………………………………'}</b>
             </td>
           </tr>
-          {v.partner_address && (
+          {v.partner_address?.trim() && (
             <tr>
               <td>Địa chỉ:</td>
-              <td>{v.partner_address}</td>
+              <td>{v.partner_address.trim()}</td>
             </tr>
           )}
           <tr>

@@ -1,39 +1,73 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { focusNextField } from './keyboard';
 
-/**
- * Chặn Enter chọn nhầm trên kết quả tìm CŨ (F-05): khi chữ đang gõ chưa có kết quả (đang chờ / đang hỏi máy chủ),
- * Enter được ghi nhớ; khi kết quả của ĐÚNG chữ đó về thì mới chọn mục đầu (theo thứ tự máy chủ) và sang ô kế tiếp.
- * Không có kết quả ⇒ không chọn gì.
- */
-export function useSearchEnterGuard(stale: boolean, pickFirst: () => boolean) {
-  const pending = useRef(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const pickRef = useRef(pickFirst);
-  pickRef.current = pickFirst;
-  useEffect(() => {
-    if (stale || !pending.current) return;
-    pending.current = false;
-    if (pickRef.current()) {
-      const input = wrapRef.current?.querySelector<HTMLElement>('input');
-      window.setTimeout(() => focusNextField(input ?? null), 0);
-    }
-  }, [stale]);
-  const onKeyDownCapture = (e: KeyboardEvent<HTMLElement>) => {
-    if (e.key === 'Enter' && !e.ctrlKey && !e.altKey && stale) {
-      e.preventDefault();
-      e.stopPropagation();
-      pending.current = true;
-    }
-  };
-  return { wrapRef, onKeyDownCapture, pendingAttr: stale ? 'true' : undefined };
+/** Tiêu đề mục đang sáng trong danh sách đang mở của ô chọn `input` (null nếu không có). */
+function activeOptionTitle(input: HTMLElement): string | null {
+  const listId = input.getAttribute('aria-controls');
+  const list = listId ? document.getElementById(listId) : null;
+  const dropdown = list?.closest('.ant-select-dropdown');
+  if (!dropdown || dropdown.classList.contains('ant-select-dropdown-hidden')) return null;
+  return dropdown.querySelector<HTMLElement>('.ant-select-item-option-active')?.getAttribute('title') ?? null;
 }
 
 /**
- * Enter ở ô tìm của màn danh sách (F-05): chỉ hành động trên kết quả của ĐÚNG chữ đang gõ.
- * Enter 1 lần ⇒ xuống dòng đầu của kết quả; Enter 2 lần liên tiếp (khi kết quả chưa về) ⇒ mở luôn dòng đầu.
- * Chưa có kết quả mới ⇒ ghi nhớ số lần Enter, nhận ngay chữ đang gõ (bỏ thời gian chờ), làm khi kết quả về.
+ * Ô chọn có tìm kiếm (khách, mặt hàng): khi đang có chữ gõ, Enter do ô này xử lý trọn (F-05, F-11):
+ * - kết quả chưa phải của chữ đang gõ (`stale`) ⇒ chờ, có kết quả thì chọn mục đầu;
+ * - kết quả đã đúng ⇒ chọn mục đang sáng (↑ ↓ / chuột), không có mục sáng thì mục đầu;
+ * - không có kết quả ⇒ giữ nguyên chữ đã gõ (không bao giờ xóa chữ mà không chọn gì).
+ * Chọn xong: sang ô kế tiếp của biểu mẫu (nếu có), hoặc đóng danh sách.
  */
+export function useSearchEnterGuard(typing: boolean, stale: boolean, pick: (activeTitle: string | null) => boolean) {
+  const pending = useRef(false);
+  /** Người dùng đã tự dời mục sáng bằng ↑ ↓ sau lần gõ cuối */
+  const moved = useRef(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const pickRef = useRef(pick);
+  pickRef.current = pick;
+  const run = (activeTitle: string | null) => {
+    if (!pickRef.current(activeTitle)) return;
+    const input = wrapRef.current?.querySelector<HTMLInputElement>('input');
+    window.setTimeout(() => {
+      if (!input) return;
+      if (input.closest('[data-enter-scope]')) focusNextField(input);
+      else {
+        // không có ô kế tiếp (bộ lọc, thẻ kho): đóng danh sách, con trỏ ở lại
+        input.blur();
+        input.focus();
+      }
+    }, 0);
+  };
+  const runRef = useRef(run);
+  runRef.current = run;
+  useEffect(() => {
+    if (stale || !pending.current) return;
+    pending.current = false;
+    runRef.current(null);
+  }, [stale]);
+  useEffect(() => {
+    if (!typing) pending.current = false;
+  }, [typing]);
+  const onKeyDownCapture = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') moved.current = true;
+    else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete') moved.current = false;
+    if (e.key !== 'Enter' || e.ctrlKey || e.altKey || e.metaKey || !typing) return;
+    if (e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (stale) {
+      pending.current = true;
+      return;
+    }
+    runRef.current(moved.current ? activeOptionTitle(e.target as HTMLElement) : null);
+  };
+  return {
+    wrapRef,
+    onKeyDownCapture,
+    pendingAttr: typing && stale ? 'true' : undefined,
+    ownerAttr: typing ? 'true' : undefined,
+  };
+}
+
 export function useListSearchEnter<T>(o: {
   text: string;
   committed: string;

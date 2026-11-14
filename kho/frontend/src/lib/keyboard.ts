@@ -10,6 +10,11 @@ export function isTypingTarget(t: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
+/** Người dùng đã tự đặt con trỏ vào một ô (đang gõ) — khi đó không tự dời con trỏ (con trỏ ban đầu đến muộn). */
+export function userIsTyping(): boolean {
+  return isTypingTarget(document.activeElement);
+}
+
 /** Có hộp thoại (Modal/Drawer/confirm) đang mở không — khi đó phím tắt của trang tạm ngừng. */
 export function isOverlayOpen(): boolean {
   const wraps = document.querySelectorAll<HTMLElement>('.ant-modal-wrap, .ant-drawer-open');
@@ -94,6 +99,8 @@ export function enterToNext(onLastEnter?: () => void) {
     const t = e.target as HTMLElement;
     // Ô tìm đang chờ kết quả của chữ vừa gõ: để chính ô đó xử lý Enter (chờ kết quả đúng rồi mới chọn)
     if (t.closest('[data-search-pending="true"]')) return;
+    // Ô tìm đang có chữ gõ: chính ô đó chọn mục rồi tự sang ô sau (F-11)
+    if (t.closest('[data-search-owner="true"]')) return;
     if (t.tagName === 'TEXTAREA') return;
     if (t.tagName === 'BUTTON' && !t.classList.contains('ant-switch')) return; // công tắc: Enter đi tiếp, Space bật/tắt
     if (t.getAttribute('aria-expanded') === 'true') {

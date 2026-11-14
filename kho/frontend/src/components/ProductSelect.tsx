@@ -13,6 +13,8 @@ export interface ProductPick {
   unit?: string;
 }
 
+const optLabel = (p: ProductPick) => `${p.code} – ${p.name}`;
+
 /** Chọn một mặt hàng (tìm theo mã/tên, không dấu). */
 export function ProductSelect({
   value,
@@ -39,30 +41,37 @@ export function ProductSelect({
   const q = useQuery({ queryKey: qk.catalogList('product', params), queryFn: () => productsApi.list(params), staleTime: 30_000 });
   const items: ProductPick[] = q.data?.items ?? [];
   const stale = s.trim() !== dq || q.isFetching || !q.data;
-  const guard = useSearchEnterGuard(stale && s.trim() !== '', () => {
-    const first = items[0];
-    if (!first) return false;
-    onChange(first);
+  const typing = s.trim() !== '';
+  const guard = useSearchEnterGuard(typing, stale, (activeTitle) => {
+    const p = (activeTitle && items.find((x) => optLabel(x) === activeTitle)) || items[0];
+    if (!p) return false; // không có kết quả: giữ chữ đã gõ
+    onChange(p);
+    setS('');
     return true;
   });
-  const merged = value && !items.some((p) => p.id === value.id) ? [value, ...items] : items;
+  // Đang gõ tìm ⇒ chỉ hiện kết quả của chữ đang gõ (không ghim mục đang chọn — F-11)
+  const merged = !typing && value && !items.some((p) => p.id === value.id) ? [value, ...items] : items;
   return (
-    <div ref={guard.wrapRef} className="search-guard" data-search-pending={guard.pendingAttr} onKeyDownCapture={guard.onKeyDownCapture} style={{ display: 'inline-block', width }}>
+    <div ref={guard.wrapRef} className="search-guard" data-search-pending={guard.pendingAttr} data-search-owner={guard.ownerAttr} onKeyDownCapture={guard.onKeyDownCapture} style={{ display: 'inline-block', width }}>
     <Select<number>
       id={id}
       allowClear={allowClear}
       showSearch
       autoFocus={autoFocus}
       filterOption={false}
+      searchValue={s}
       onSearch={setS}
       value={value?.id}
-      onChange={(v) => onChange(merged.find((p) => p.id === v) ?? null)}
+      onChange={(v) => {
+        onChange(merged.find((p) => p.id === v) ?? null);
+        setS('');
+      }}
       placeholder={placeholder}
       style={{ width: '100%' }}
       popupMatchSelectWidth={460}
       loading={q.isFetching}
       notFoundContent={q.isFetching ? 'Đang tìm…' : 'Không có mặt hàng nào'}
-      options={merged.map((p) => ({ value: p.id, label: `${p.code} – ${p.name}` }))}
+      options={merged.map((p) => ({ value: p.id, label: optLabel(p), title: optLabel(p) }))}
       defaultActiveFirstOption={!stale}
     />
     </div>

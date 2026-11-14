@@ -193,8 +193,7 @@ thông báo thành công ngắn (1,5 giây), lỗi nói cách khắc phục.
   (`useListSearchEnter`): Enter bỏ thời gian chờ (`useDebouncedFlush`), chờ dữ liệu của đúng bộ lọc rồi mới xuống dòng đầu;
   Enter hai lần ⇒ mở dòng đầu. Ô mã hàng trong lưới tự kiểm (`resultsFor`). Lọc tại máy (Select kho, nhóm…) dùng
   `filterByLabel` / `matchText` (lib/text.ts): không dấu, nhiều từ, thứ tự bất kỳ, bỏ dấu câu.
-- **Xung đột hai máy**: khung vàng = `diffLines(dòng lúc nạp, dòng hiện tại)` (thêm / sửa / xóa); nút "Thêm các dòng này
-  vào phiếu" = `applyChanges` (không lặp dòng). Phiếu thu chi tương tự (`diffV`/`applyV`).
+- **Xung đột hai máy**: khung vàng chỉ có thay đổi của máy này (thêm / sửa / xóa); gộp ba chiều — xem "Sửa vòng 2".
 - **Phiên hết hạn khi đang gõ**: `lib/unsavedStore.ts` lưu phiếu đang gõ dở vào sessionStorage theo người dùng + phiếu,
   khôi phục khi đăng nhập lại đúng người đó; xóa khi lưu, bỏ thay đổi, xóa phiếu, đăng xuất chủ động.
 - **Phiếu mới**: giá trị phần mềm tự điền (kho / tài khoản mặc định, điền sẵn từ "Thu tiền", "Thu tiền phiếu này",
@@ -203,6 +202,28 @@ thông báo thành công ngắn (1,5 giây), lỗi nói cách khắc phục.
   Màn đăng nhập không gọi `/auth/me` nếu trình duyệt chưa từng đăng nhập / đã đăng xuất (cờ `kho.hadSession`).
 - Màn hẹp ≤1100px: nút ít dùng của phiếu gom vào "Thêm ▾" (`useNarrow`). In trong ngăn kéo chi tiết chỉ in ngăn kéo đó.
 - Kiểm tra đọc số thành chữ: `npm run test:words`.
+
+### Sửa vòng 2 (F-09…F-16)
+
+- **Gộp ba chiều** (`lib/merge3.ts`, F-10): so dòng lúc nạp (base) / máy này (mine) / bản máy kia vừa lưu (theirs) theo
+  **từng ô**. Dòng của máy này nhận dòng gốc qua `key` (gắn với id dòng máy chủ lúc nạp; dòng mới gõ không có). Máy chủ
+  cấp lại id dòng mỗi lần lưu (xóa rồi ghi lại), nên dòng gốc ↔ dòng bản mới được ghép theo **thứ tự + mức giống nhau**
+  (`alignLines`, quy hoạch động; phiếu kho chỉ ghép dòng cùng mặt hàng), không theo mã hàng. Chỉ tôi sửa ⇒ của tôi; chỉ máy
+  kia sửa ⇒ của máy kia; cả hai sửa khác nhau ⇒ mục "Cùng sửa: <ô> — máy kia: X, bạn: Y" với lựa chọn
+  (`MergeChoicePicker`, mặc định "Giữ của máy kia"); tôi sửa / máy kia xóa và ngược lại ⇒ cũng hỏi, mặc định giữ bản đã
+  lưu. Sửa không bao giờ thêm dòng. Dùng chung cho phiếu kho (`DOC_FIELDS`, `mergeLines`) và phiếu thu chi (`V_FIELDS`).
+  Kiểm tra: `npm run test:merge`. Nếu sau này máy chủ giữ id dòng khi sửa, `alignLines` có thể thay bằng ghép theo id.
+- **Ô chọn có tìm** (`useSearchEnterGuard`, F-11): khi đang có chữ gõ, ô tự xử lý Enter (`data-search-owner`, `enterToNext`
+  bỏ qua): kết quả chưa đúng chữ ⇒ chờ; đúng ⇒ chọn mục đầu (hoặc mục người dùng dời tới bằng ↑ ↓); không có kết quả ⇒
+  giữ chữ. Đang gõ thì không ghim mục đang chọn vào danh sách. `searchValue` được điều khiển để xóa chữ sau khi chọn.
+- **Danh sách** (`useActiveRow`, F-15): dòng đang chọn có bản sao trong ref ⇒ Enter thứ hai đến trước khi vẽ lại vẫn mở.
+- **Mặt hàng** (F-13, F-16): `q` gửi nguyên chữ (máy chủ tìm theo từ); ô Mã hàng tra mã chính xác bằng
+  `GET /products/lookup?optional=1` (không 404 khi gõ từng chữ).
+- **Khôi phục phiếu gõ dở** (F-14): `unsavedStore.markSessionEnded()` khi gặp 401; lý do = phiên ngắt sau lần lưu tạm cuối
+  ⇒ "Phiên đăng nhập đã hết…", ngược lại "…từ lần mở trước". Phiếu mới khôi phục: con trỏ ở dòng trống cuối.
+- **Con trỏ ban đầu đến muộn** không giành con trỏ khi người dùng đã bấm vào một ô (`userIsTyping`) — trước đây gõ ngày
+  ngay khi mở phiếu thu đôi khi bị chuyển sang ô đối tác.
+- Bản in: bỏ phần địa chỉ / ĐT trống (F-09).
 
 ### Từ ngữ thống nhất
 

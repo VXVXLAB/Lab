@@ -16,6 +16,7 @@ import type {
   ProductGroup,
   ProductGroupBody,
   ProductListParams,
+  ProductLookup,
   StockSummary,
   User,
   UserBody,
@@ -56,6 +57,8 @@ export const productGroupsApi = catalogResource<ProductGroup, ProductGroupBody>(
 export const productsApi = {
   ...catalogResource<Product, ProductBody, ProductListParams>('/products'),
   lookup: (code: string) => api.get<Product>('/products/lookup', { code }),
+  /** Tra mã chính xác, không có thì `found: false` (luôn 200 — dùng khi đang gõ, không sinh 404; F-16). */
+  lookupOptional: (code: string) => api.get<ProductLookup>('/products/lookup', { code, optional: '1' }),
   priceInfo: (id: number, date?: string) => api.get<PriceInfo>(`/products/${id}/price-info`, { date }),
   /** Một lần gọi cho mọi mã của phiếu (tối đa 500). */
   priceInfoBatch: (ids: number[], date?: string, warehouseId?: number | null) =>

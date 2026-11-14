@@ -1,9 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { productsApi } from '../../api/catalog';
-import { ApiError } from '../../api/client';
 import type { Product, ProductWithStock } from '../../api/types';
-import { foldVietnamese, matchText, searchWords } from '../../lib/text';
+import { foldVietnamese } from '../../lib/text';
 import { formatMoney, formatQty } from '../../lib/format';
 
 interface Props {
@@ -40,22 +39,13 @@ function rank(p: Product, text: string): number {
 
 async function search(text: string, allowService: boolean, warehouseId: number | null | undefined): Promise<ProductWithStock[]> {
   const t = text.trim();
-  // Nhiều từ ("que 3.2", "kiswel 3.2"): máy chủ tìm theo chuỗi liền ⇒ hỏi theo từ dài nhất rồi lọc đủ mọi từ tại máy.
-  const words = searchWords(t);
-  const longest = [...words].sort((a, b) => b.length - a.length)[0] ?? t;
-  const multi = words.length > 1;
-  const listP = productsApi
-    .listWithStock({ q: multi ? longest : t, active: true, page_size: multi ? 200 : 20, is_service: allowService ? undefined : false, warehouse_id: warehouseId })
-    .then((r) =>
-      multi ? { ...r, items: r.items.filter((p) => matchText(t, `${p.code} ${p.name}`)).slice(0, 20) } : r,
-    );
+  // Máy chủ tìm theo từ (tách theo khoảng trắng, mọi từ phải có, thứ tự bất kỳ — F-13): gửi nguyên chữ gõ.
+  const listP = productsApi.listWithStock({ q: t, active: true, page_size: 20, is_service: allowService ? undefined : false, warehouse_id: warehouseId });
   // Tra chính xác theo mã (hiểu cả DICHVU ⇒ DV) chạy song song — người gõ đủ mã + Enter luôn trúng.
-  const exactP = /\s/.test(t)
+  // Dùng bản "không có thì trả found=false" nên gõ từng chữ không sinh lỗi 404 (F-16).
+  const exactP = /\s/.test(t) && !SERVICE_ALIASES.has(foldVietnamese(t))
     ? Promise.resolve(null)
-    : productsApi.lookup(t).catch((e: unknown) => {
-        if (e instanceof ApiError && e.status === 404) return null;
-        throw e;
-      });
+    : productsApi.lookupOptional(t).then((r) => (r.found ? r.product : null));
   const [list, exact] = await Promise.all([listP, exactP]);
   let items: ProductWithStock[] = list.items;
   if (exact && exact.active && (allowService || !exact.is_service) && !items.some((p) => p.id === exact.id)) items = [exact, ...items];

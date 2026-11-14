@@ -1,7 +1,8 @@
 // Mô hình phiếu đang soạn trên máy (trước khi lưu) và chuyển đổi qua lại với dữ liệu máy chủ.
 import type { Dayjs } from 'dayjs';
 import type { DocType, DocumentBody, DocumentFull, DocumentLineBody, Product } from '../../api/types';
-import { fromApiDate, toApiDate } from '../../lib/format';
+import { formatMoney, formatQty, fromApiDate, toApiDate } from '../../lib/format';
+import { applyMerge, threeWay, type MergeChoice, type MergeField, type MergeItem } from '../../lib/merge3';
 import type { PartnerLite } from './PartnerSelect';
 
 export interface ProductLite {
@@ -16,6 +17,8 @@ export interface ProductLite {
 
 export interface LineDraft {
   key: string;
+  /** id dòng trên máy chủ lúc nạp (dòng mới gõ thì không có) */
+  id?: number;
   product: ProductLite | null;
   /** Chữ đang gõ ở ô Mã hàng (khi chưa chọn được mã) */
   codeText: string;
@@ -79,6 +82,7 @@ export function draftFromDoc(d: DocumentFull): { header: HeaderDraft; lines: Lin
     lines: withTrailingBlank(
       d.lines.map((l) => ({
         key: newKey(),
+        id: l.id,
         product: { id: l.product_id, code: l.product_code, name: l.product_name, unit: l.unit, is_service: l.is_service },
         codeText: l.product_code,
         description: l.description,
@@ -129,56 +133,33 @@ export function fingerprint(type: DocType, h: HeaderDraft, lines: LineDraft[]): 
   return JSON.stringify([b, unresolved]);
 }
 
-// ---------- Thay đổi của máy này so với bản đã nạp (dùng khi xung đột hai máy, F-01) ----------
-export type LineChangeKind = 'added' | 'edited' | 'removed';
-export interface LineChange {
-  kind: LineChangeKind;
-  line: LineDraft;
-  /** Giá trị lúc nạp (dòng sửa / xóa) */
-  before?: LineDraft;
+// ---------- Gộp khi hai máy cùng sửa (F-01, F-10) ----------
+const show = (v: number | null, money: boolean) => (v === null ? '(trống)' : money ? formatMoney(v) : formatQty(v));
+export const DOC_FIELDS: MergeField<LineDraft>[] = [
+  {
+    label: 'Mặt hàng',
+    value: (l) => l.product?.id ?? null,
+    copy: (to, from) => ({ ...to, product: from.product, codeText: from.codeText, unit: from.unit }),
+    show: (l) => l.product?.code ?? '',
+  },
+  { label: 'Diễn giải', value: (l) => l.description.trim(), copy: (to, from) => ({ ...to, description: from.description }), show: (l) => l.description.trim() || '(trống)' },
+  { label: 'ĐVT', value: (l) => l.unit, copy: (to, from) => ({ ...to, unit: from.unit }), show: (l) => l.unit || '(trống)' },
+  { label: 'SL', value: (l) => l.qty, copy: (to, from) => ({ ...to, qty: from.qty }), show: (l) => show(l.qty, false) },
+  { label: 'Đơn giá', value: (l) => l.unit_price, copy: (to, from) => ({ ...to, unit_price: from.unit_price }), show: (l) => show(l.unit_price, true) },
+  { label: 'Ghi chú', value: (l) => l.note.trim(), copy: (to, from) => ({ ...to, note: from.note }), show: (l) => l.note.trim() || '(trống)' },
+];
+
+/** So ba bản: lúc nạp (base), máy này (mine), bản máy kia vừa lưu (theirs). */
+export function mergeLines(base: LineDraft[], mine: LineDraft[], theirs: LineDraft[]): MergeItem<LineDraft>[] {
+  return threeWay({
+    base: base.filter((l) => !isBlank(l)),
+    mine: sentLines(mine).filter((l) => !!l.product),
+    theirs: theirs.filter((l) => !isBlank(l)),
+    fields: DOC_FIELDS,
+    compatible: (a, b) => (a.product?.id ?? null) === (b.product?.id ?? null),
+  });
 }
 
-const sig = (l: LineDraft) => JSON.stringify([l.product?.id ?? null, l.description.trim(), l.unit, l.qty, l.unit_price, l.note.trim()]);
-const sameItem = (a: LineDraft, b: LineDraft) =>
-  !!a.product && !!b.product && a.product.id === b.product.id && (!a.product.is_service || a.description.trim() === b.description.trim());
-
-/** Chỉ những gì máy này đã thêm, sửa, xóa kể từ lúc nạp phiếu (dòng giữ nguyên không tính). */
-export function diffLines(base: LineDraft[], cur: LineDraft[]): LineChange[] {
-  const baseByKey = new Map(base.filter((l) => !isBlank(l)).map((l) => [l.key, l]));
-  const out: LineChange[] = [];
-  const seen = new Set<string>();
-  for (const l of sentLines(cur)) {
-    if (!l.product) continue;
-    const b = baseByKey.get(l.key);
-    seen.add(l.key);
-    if (!b) out.push({ kind: 'added', line: l });
-    else if (sig(b) !== sig(l)) out.push({ kind: 'edited', line: l, before: b });
-  }
-  for (const b of baseByKey.values()) if (!seen.has(b.key)) out.push({ kind: 'removed', line: b, before: b });
-  return out;
-}
-
-/**
- * Đưa thay đổi của máy này vào bản mới của máy khác, KHÔNG lặp dòng:
- * thêm ⇒ thêm nếu bản mới chưa có dòng giống hệt; sửa ⇒ sửa dòng cùng mặt hàng (ưu tiên dòng máy kia chưa đổi),
- * không thấy thì thêm; xóa ⇒ chỉ xóa nếu dòng đó trên bản mới vẫn y như lúc nạp.
- */
-export function applyChanges(server: LineDraft[], changes: LineChange[]): LineDraft[] {
-  let out = server.filter((l) => !isBlank(l)).map((l) => ({ ...l }));
-  for (const c of changes) {
-    if (c.kind === 'added') {
-      if (!out.some((l) => sig(l) === sig(c.line))) out.push({ ...c.line, key: newKey() });
-    } else if (c.kind === 'edited' && c.before) {
-      const before = c.before;
-      const idx = out.findIndex((l) => sig(l) === sig(before));
-      const j = idx >= 0 ? idx : out.findIndex((l) => sameItem(l, before));
-      if (j >= 0) out[j] = { ...out[j]!, description: c.line.description, unit: c.line.unit, qty: c.line.qty, unit_price: c.line.unit_price, note: c.line.note };
-      else out.push({ ...c.line, key: newKey() });
-    } else if (c.kind === 'removed' && c.before) {
-      const before = c.before;
-      const idx = out.findIndex((l) => sig(l) === sig(before));
-      if (idx >= 0) out = out.filter((_, i) => i !== idx);
-    }
-  }
-  return withTrailingBlank(out);
+export function applyLineMerge(current: LineDraft[], items: MergeItem<LineDraft>[], choices: Record<string, MergeChoice>): LineDraft[] {
+  return withTrailingBlank(applyMerge(current.filter((l) => !isBlank(l)), items, choices, DOC_FIELDS, newKey));
 }

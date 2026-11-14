@@ -54,15 +54,21 @@ export function PrintSheet({ doc }: { doc: DocumentFull }) {
                   {doc.partner_code && <span> ({doc.partner_code})</span>}
                 </td>
               </tr>
-              {(doc.partner_address || doc.partner_phone) && (
+              {/* bỏ phần trống (F-09): chỉ địa chỉ ⇒ "Địa chỉ: …"; chỉ ĐT ⇒ "ĐT: …"; không có cả hai ⇒ không có dòng */}
+              {doc.partner_address?.trim() ? (
                 <tr>
                   <td>Địa chỉ:</td>
                   <td>
-                    {doc.partner_address}
-                    {doc.partner_phone && <> · ĐT: {doc.partner_phone}</>}
+                    {doc.partner_address.trim()}
+                    {doc.partner_phone?.trim() && <> · ĐT: {doc.partner_phone.trim()}</>}
                   </td>
                 </tr>
-              )}
+              ) : doc.partner_phone?.trim() ? (
+                <tr>
+                  <td>ĐT:</td>
+                  <td>{doc.partner_phone.trim()}</td>
+                </tr>
+              ) : null}
             </>
           )}
           <tr>

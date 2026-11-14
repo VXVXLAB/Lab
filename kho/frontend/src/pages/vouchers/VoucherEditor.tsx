@@ -20,7 +20,7 @@ import { NumberInput } from '../../components/NumberInput';
 import { download } from '../../lib/download';
 import { useServerEvent } from '../../lib/events';
 import { formatDate, formatDateTime, formatMoney, fromApiDate, toApiDate, todayVn } from '../../lib/format';
-import { enterToNext, useHotkeys } from '../../lib/keyboard';
+import { enterToNext, useHotkeys, userIsTyping } from '../../lib/keyboard';
 import { useMenuHighlight } from '../../lib/menuHighlight';
 import { moneyInWords } from '../../lib/numberWords';
 import { unsavedStore } from '../../lib/unsavedStore';
@@ -29,10 +29,14 @@ import { paths } from '../../paths';
 import { PartnerSelect, type PartnerLite } from '../documents/PartnerSelect';
 import { useDrawers } from '../reports/drawers';
 import { VoucherPrint } from './VoucherPrint';
+import { MERGE_COLOR, MERGE_LABEL, applyMerge, conflictText, needsChoice, threeWay, type MergeChoice, type MergeField, type MergeItem } from '../../lib/merge3';
+import { MergeChoicePicker } from '../../components/MergeChoicePicker';
 import { DEBT_EFFECT, debtEffect, defaultDebtSide, SIDE_LABEL, VOUCHER_PREFIX } from './voucherText';
 
 interface VLine {
   key: string;
+  /** id dòng trên máy chủ lúc nạp (dòng mới gõ thì không có) */
+  id?: number;
   description: string;
   amount: number | null;
   document_id: number | null;
@@ -49,41 +53,29 @@ const withBlank = (ls: VLine[]): VLine[] => {
 };
 const LAST_ACC = 'kho.lastAccount';
 
-// Thay đổi của máy này so với bản đã nạp (xung đột hai máy): chỉ giữ dòng thêm / sửa / xóa, đưa lại không lặp dòng.
-type VChange = { kind: 'added' | 'edited' | 'removed'; line: VLine; before?: VLine };
-const vsig = (l: VLine) => JSON.stringify([l.description.trim(), l.amount, l.document_id]);
-function diffV(base: VLine[], cur: VLine[]): VChange[] {
-  const byKey = new Map(base.filter((l) => !isBlank(l)).map((l) => [l.key, l]));
-  const out: VChange[] = [];
-  const seen = new Set<string>();
-  for (const l of cur.filter((x) => !isBlank(x))) {
-    const b = byKey.get(l.key);
-    seen.add(l.key);
-    if (!b) out.push({ kind: 'added', line: l });
-    else if (vsig(b) !== vsig(l)) out.push({ kind: 'edited', line: l, before: b });
-  }
-  for (const b of byKey.values()) if (!seen.has(b.key)) out.push({ kind: 'removed', line: b, before: b });
-  return out;
-}
-function applyV(server: VLine[], changes: VChange[]): VLine[] {
-  let out = server.filter((l) => !isBlank(l)).map((l) => ({ ...l }));
-  for (const c of changes) {
-    if (c.kind === 'added') {
-      if (!out.some((l) => vsig(l) === vsig(c.line))) out.push({ ...c.line, key: nk() });
-    } else if (c.kind === 'edited' && c.before) {
-      const b = c.before;
-      const j = out.findIndex((l) => vsig(l) === vsig(b));
-      if (j >= 0) out[j] = { ...c.line, key: out[j]!.key };
-      else out.push({ ...c.line, key: nk() });
-    } else if (c.kind === 'removed' && c.before) {
-      const b = c.before;
-      const j = out.findIndex((l) => vsig(l) === vsig(b));
-      if (j >= 0) out = out.filter((_, i) => i !== j);
-    }
-  }
-  return withBlank(out);
-}
-const VCHANGE = { added: 'Thêm mới', edited: 'Đã sửa', removed: 'Đã xóa' } as const;
+// Gộp ba chiều khi hai máy cùng sửa (F-10): theo từng ô của từng dòng, không bao giờ thêm dòng tiền cho một lần sửa.
+const V_FIELDS: MergeField<VLine>[] = [
+  { label: 'Diễn giải', value: (l) => l.description.trim(), copy: (to, f) => ({ ...to, description: f.description }), show: (l) => l.description.trim() || '(trống)' },
+  { label: 'Số tiền', value: (l) => l.amount, copy: (to, f) => ({ ...to, amount: f.amount }), show: (l) => (l.amount === null ? '(trống)' : formatMoney(l.amount)) },
+  {
+    label: 'Chứng từ',
+    value: (l) => l.document_id,
+    copy: (to, f) => ({ ...to, document_id: f.document_id, document_no: f.document_no }),
+    show: (l) => l.document_no ?? '(không)',
+  },
+];
+const linesOf = (v: Voucher): VLine[] =>
+  withBlank(v.lines.map((l) => ({ key: nk(), id: l.id, description: l.description, amount: l.amount, document_id: l.document_id, document_no: l.document_no })));
+const mergeV = (base: VLine[], mine: VLine[], theirs: VLine[]) =>
+  threeWay({
+    base: base.filter((l) => !isBlank(l)),
+    mine: mine.filter((l) => !isBlank(l)),
+    theirs: theirs.filter((l) => !isBlank(l)),
+    fields: V_FIELDS,
+    compatible: () => true,
+  });
+const applyV = (cur: VLine[], items: MergeItem<VLine>[], choices: Record<string, MergeChoice>) =>
+  withBlank(applyMerge(cur.filter((l) => !isBlank(l)), items, choices, V_FIELDS, nk));
 
 /** /phieu-thu-chi/:id và /phieu-thu-chi/moi?loai=receipt&partner_id=&document_id= */
 export function VoucherRoute() {
@@ -143,7 +135,8 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   const [headErr, setHeadErr] = useState<Record<string, string>>({});
   const [remote, setRemote] = useState<{ by: string; at: string } | null>(null);
   const [deletedBy, setDeletedBy] = useState<string | null>(null);
-  const [stash, setStash] = useState<VChange[] | null>(null);
+  const [stash, setStash] = useState<MergeItem<VLine>[] | null>(null);
+  const [choices, setChoices] = useState<Record<string, MergeChoice>>({});
   const baseLinesRef = useRef<VLine[]>([]);
   const [printOpen, setPrintOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
@@ -207,14 +200,15 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
     setPartner(st.partner);
     setSideChoice(st.sideChoice);
     setNote(st.note);
-    setLines(withBlank(st.lines));
+    const baseById = new Map(baseLinesRef.current.filter((b) => b.id !== undefined).map((b) => [b.id, b.key]));
+    setLines(withBlank(st.lines.map((l) => (l.id !== undefined && baseById.has(l.id) ? { ...l, key: baseById.get(l.id)! } : l))));
     autoFill.current = false; // khôi phục là thay đổi thật của người dùng, không phải giá trị tự điền
-    message.info('Đã khôi phục các dòng đang gõ dở (phiên đăng nhập trước bị ngắt). Kiểm tra rồi bấm Lưu.', 5);
+    message.info(unsavedStore.restoredMessage(unsavedStore.reason(me.id, draftScope)), 5);
     return true;
   };
 
   const load = useCallback(
-    (v: Voucher) => {
+    (v: Voucher, prepared?: VLine[]) => {
       setLoaded(v);
       setType(v.voucher_type);
       setAccountId(v.account_id);
@@ -223,7 +217,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
       setPartner(p);
       setSideChoice(v.debt_side);
       setNote(v.note);
-      const ls = withBlank(v.lines.map((l) => ({ key: nk(), description: l.description, amount: l.amount, document_id: l.document_id, document_no: l.document_no })));
+      const ls = prepared ?? linesOf(v);
       setLines(ls);
       baseLinesRef.current = ls;
       setBaseline(
@@ -302,6 +296,8 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
           });
     }
     window.setTimeout(() => {
+      // người dùng đã bấm vào một ô và gõ (vd. ngày) ⇒ không giành con trỏ (chữ đang gõ phải vào đúng ô đó)
+      if (userIsTyping()) return;
       if (!preDocumentId && !prePartnerId) partnerRef.current?.focus();
       else gridRef.current?.querySelector<HTMLInputElement>('[data-vcell$=":desc"]')?.focus();
     }, 80);
@@ -422,10 +418,15 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
 
   // ---------- lưu / xóa ----------
   const reloadKeepingMine = async () => {
-    const mine = diffV(baseLinesRef.current, lines);
-    setStash(mine.length ? mine : null);
     if (!loaded) return;
-    load(await vouchersApi.get(loaded.id));
+    const base = baseLinesRef.current;
+    const mine = lines;
+    const fresh = await vouchersApi.get(loaded.id);
+    const theirs = linesOf(fresh);
+    const items = mergeV(base, mine, theirs);
+    setStash(items.length ? items : null);
+    setChoices({});
+    load(fresh, theirs);
   };
   const save = async () => {
     if (saving || deletedBy) return null;
@@ -613,22 +614,43 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
           message={`Các dòng bạn đã nhập trước khi tải bản mới (${stash.length} thay đổi của máy này, chưa lưu)`}
           description={
             <div>
-              {stash.map((c) => (
-                <div key={c.line.key}>
-                  <Tag color={c.kind === 'added' ? 'blue' : c.kind === 'edited' ? 'orange' : 'red'}>{VCHANGE[c.kind]}</Tag>
-                  {c.line.description} —{' '}
-                  {c.kind === 'edited' && c.before && c.before.amount !== c.line.amount ? (
-                    <>
-                      {formatMoney(c.before.amount)} → <b>{formatMoney(c.line.amount)}</b>
-                    </>
-                  ) : (
-                    <b>{formatMoney(c.line.amount)}</b>
-                  )}{' '}
-                  {c.line.document_no && <span className="muted">({c.line.document_no})</span>}
+              {stash.map((c) => {
+                const before = c.kind === 'edited' || c.kind === 'conflict' ? c.base : null;
+                return (
+                  <div key={c.id} className="stash-vline">
+                    <Tag color={MERGE_COLOR[c.kind]}>{MERGE_LABEL[c.kind]}</Tag>
+                    {before && before.description.trim() !== c.line.description.trim() ? (
+                      <>
+                        {before.description} → <b>{c.line.description}</b>
+                      </>
+                    ) : (
+                      c.line.description
+                    )}{' '}
+                    —{' '}
+                    {before && before.amount !== c.line.amount ? (
+                      <>
+                        {formatMoney(before.amount)} → <b>{formatMoney(c.line.amount)}</b>
+                      </>
+                    ) : (
+                      <b>{formatMoney(c.line.amount)}</b>
+                    )}{' '}
+                    {c.line.document_no && <span className="muted">({c.line.document_no})</span>}
+                    {needsChoice(c.kind) && (
+                      <div className="stash-choice">
+                        <MergeChoicePicker text={conflictText(c)} value={choices[c.id] ?? 'theirs'} onChange={(v) => setChoices((x) => ({ ...x, [c.id]: v }))} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {stash.some((c) => needsChoice(c.kind)) && (
+                <div className="merge-hint">
+                  Dòng hai máy cùng sửa: mặc định <b>giữ của máy kia</b> (bản đã lưu). Chọn “Dùng của tôi” nếu số của bạn mới đúng, rồi bấm
+                  “Thêm các dòng này vào phiếu”. Phần chỉ một bên sửa được gộp tự động.
                 </div>
-              ))}
+              )}
               <Space style={{ marginTop: 6 }}>
-                <Button size="small" onClick={() => (setLines((ls) => applyV(ls, stash)), setStash(null))}>
+                <Button size="small" onClick={() => (setLines((ls) => applyV(ls, stash, choices)), setStash(null))}>
                   Thêm các dòng này vào phiếu
                 </Button>
                 <Button size="small" onClick={() => setStash(null)}>

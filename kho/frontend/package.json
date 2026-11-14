@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test:words": "esbuild scripts/numberWords.check.ts --bundle --platform=node --format=cjs --log-level=error --outfile=node_modules/.cache/numberWords.check.cjs && node node_modules/.cache/numberWords.check.cjs"
+    "test:words": "esbuild scripts/numberWords.check.ts --bundle --platform=node --format=cjs --log-level=error --outfile=node_modules/.cache/numberWords.check.cjs && node node_modules/.cache/numberWords.check.cjs",
+    "test:merge": "esbuild scripts/merge3.check.ts --bundle --platform=node --format=cjs --log-level=error --outfile=node_modules/.cache/merge3.check.cjs && node node_modules/.cache/merge3.check.cjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",

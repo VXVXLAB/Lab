@@ -36,6 +36,8 @@ interface Props {
   style?: React.CSSProperties;
 }
 
+const optTitle = (p: PartnerLite) => `${p.code} – ${p.name}`;
+
 /** Ô chọn khách hàng / nhà cung cấp: gõ mã, tên, điện thoại (không dấu được); thêm mới ngay tại chỗ. */
 export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerSelect(
   { type, value, current, onChange, id, disabled, status, noAdd, allowClear, placeholder, style },
@@ -53,18 +55,25 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
   const items: PartnerLite[] = q.data?.items ?? [];
   // Kết quả đang hiện có phải của đúng chữ đang gõ không (F-05): chờ gõ xong / đang hỏi máy chủ ⇒ chưa được chọn.
   const stale = search.trim() !== dq || q.isFetching || !q.data;
-  const guard = useSearchEnterGuard(stale && search.trim() !== '', () => {
-    const first = items[0];
-    if (!first) return false;
-    onChange?.(first);
+  const typing = search.trim() !== '';
+  const guard = useSearchEnterGuard(typing, stale, (activeTitle) => {
+    const p = (activeTitle && items.find((x) => optTitle(x) === activeTitle)) || items[0];
+    if (!p) return false; // không có kết quả: giữ chữ đã gõ
+    onChange?.(p);
     setSearch('');
     return true;
   });
-  const merged = current && !items.some((p) => p.id === current.id) ? [current, ...items] : items;
+  // Đang gõ tìm ⇒ chỉ hiện kết quả của chữ đang gõ (không ghim mục đang chọn lên đầu — F-11)
+  const merged = !typing && current && !items.some((p) => p.id === current.id) ? [current, ...items] : items;
   const label = type === 'customer' ? 'khách hàng' : type === 'supplier' ? 'nhà cung cấp' : 'đối tác';
 
   return (
-    <div ref={guard.wrapRef} className="search-guard" data-search-pending={guard.pendingAttr} onKeyDownCapture={guard.onKeyDownCapture} style={style ?? { width: '100%' }}>
+    <div
+      ref={guard.wrapRef}
+      className="search-guard"
+      data-search-pending={guard.pendingAttr}
+      data-search-owner={guard.ownerAttr}
+      onKeyDownCapture={guard.onKeyDownCapture} style={style ?? { width: '100%' }}>
     <Space.Compact style={{ width: '100%' }}>
       <Select<number>
         ref={ref}
@@ -77,6 +86,7 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
         allowClear={allowClear}
         onClear={() => onChange?.(null)}
         filterOption={false}
+        searchValue={search}
         onSearch={setSearch}
         onKeyDown={(e) => {
           if (e.key === 'F4' && !noAdd && type) {
@@ -105,7 +115,7 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
         options={merged.map((p) => ({
           value: p.id,
           label: `${p.code} – ${p.name}`,
-          title: p.name,
+          title: optTitle(p),
           children: undefined,
           p,
         }))}
