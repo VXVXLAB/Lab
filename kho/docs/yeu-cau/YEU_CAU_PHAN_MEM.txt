@@ -1,0 +1,128 @@
+KHO
+
+1)  Theo dõi được hàng chuyển nội bộ giữa các kho – có 4 kho -Xem được
+    tồn theo tổng 4 kho và từng kho chi tiết
+
+2)  Xem được chi tiết NTX từng mã trong thời gian dài.
+
+Vd: Mặt hàng A có tồn đầu kỳ là 10, bán cho Lan 5c, bán cho Hoa 3c, mua
+của Hùng 2c, thì khi xem chi tiết NXT nó phải hiện rõ mua bán cho ai chứ
+k phải chỉ hiện số phiếu nhập- xuất.
+
+Vd:
+
+  -------------------------------------------------------------------------------------------------
+  Mã hàng       Ngày hạch    Số chứng  Diễn giải                     ĐVT    Nhập    Xuất    Tồn
+                toán         từ                                                             
+  ------------- ------------ --------- ----------------------------- ------ ------- ------- -------
+                                                                            Số      Số      Số
+                                                                            lượng   lượng   lượng
+
+  WW829HT107k                          Số dư đầu kỳ                  Cuộn   -       -       27
+
+  WW829HT107k   03/04/2026   XK70155   Xuất kho bán hàng CTY TNHH TM Cuộn   -       4       23
+                                       DV VĨNH PHONG                                        
+
+  WW829HT107k   14/04/2026   XK70499   Xuất kho bán hàng CTY TNHH TM Cuộn   -       3       20
+                                       DV VĨNH PHONG                                        
+
+  WW829HT107k   17/04/2026   NK2339    CHÚ NGỌC MINH - trả hàng      Cuộn   1       -       21
+
+  WW829HT107k   26/05/2026   XK71647   Xuất kho bán hàng CÔNG TY     Cuộn   -       1       20
+                                       TNHH NHỰA PHẠM GIA - Phường                          
+                                       Bình Hưng Hòa B                                      
+
+                                                                            1       8       20
+  -------------------------------------------------------------------------------------------------
+
+3)  Cho phép chỉnh lại phiếu nhập- xuất trong thời gian dài.
+
+Vd: Tháng 1/2026 có mua hàng của nhà CC, phiếu mua đó gồm nhiều mặt
+hàng, nhưng mãi đến tháng 9 mới bán và khi đó phát hiện kế toán nhập sai
+số, thì vẫn được phép quay lại phiếu đó chỉnh lại cho đúng.
+
+Xuất được file qua excel để làm báo cáo tồn kho (xuất hết toàn bộ các
+mã)
+
+Xem được tồn kho của nhiều mặt hàng cùng nhóm VTHH.
+
+Xem được lịch sử báng hàng của từng mặt hàng
+
+BÁN HÀNG/ NHẬP HÀNG
+
+1)  Ra phiếu bán hàng, theo dõi công nợ chi tiết từng khách hàng.
+
+2)  Hàng tồn kho =0 , không được phép ghi sổ hay in phiếu, cảnh báo hàng
+    bán bị lỗ khi giá bán thấp hơn giá mua.
+
+-   Đơn giá theo hệ thống mặc định nhảy theo đơn giá đã nhập vào phần
+    mềm, nhưng vẫn được phép sửa khi bán hàng.
+
+  Vd: Mặt hàng A có giá bán là 6.500Đ/Cái, khi ra phiếu bán hàng cho
+  khách, đơn giá mặc định nhảy là : 6.500đ/c, nhưng nếu khi muốn bán cho
+  một khách nào đó, với giá Cao-hoặc thấp hơn đơn giá trong hệ thống thì
+  kế toán được quyền gõ lại đơn giá đó trong phiếu.
+
+3)  Đối với những mặt hàng không có hàng tồn, được phép nhập hàng vào 1
+    phiếu Tạm đế ra được phiếu – gửi cho khách hàng, khách hàng xem đồng
+    ý thì bên kế toán mua hàng xem nhìn vào phiếu tạm mà đặt hàng.
+
+-Riêng đối với những cái ghi chú trong phiếu thì được phép ghi chú vào
+mã “Dịch Vụ”, mã này chỉ cần gõ Mã hàng là “DV” còn phần chi tiết thì kế
+toán sẽ gi chú vào đó, hoặc trong phiếu bán hàng có phát sinh các khoản
+tiển cần được cộng thêm vào-hay trừ bớt ra, thì dòng đó được phép nhập
+Dịch vụ và gõ số tiền vào để nó sẽ cộng hoặc trừ vào công nợ của phiếu
+đó. Mã Dịch vụ này sẽ k có theo dõi NXT vì nó mang tính chất dịch vụ.
+
+Vd:
+
+  ----------------------------------------------------------------------------------
+  STT    Mã hàng     Tên hàng                ĐVT     Số      Đơn giá     Thành tiền
+                                                     lượng               
+  ------ ----------- ----------------------- ------- ------- ----------- -----------
+  1      4CA200A5    Súng hàn CO2 200A-5.0M  Bộ      1,0     600.000     600.000
+                     (EU)                                                
+
+  2      CN249SS08   Béc CO2 Sunshine 0.8 mm Cái     50,0    13.000      650.000
+
+  3      CN249SS10   Béc CO2 Sunshine 1.0 mm Cái     50,0    13.000      650.000
+
+  4      COS10       Đầu cos (khoen đồng)    Cái     100,0   6.000       600.000
+                     10mm (50c/bao)                                      
+
+  5      K701832     Que hàn Kiswel          Thùng   1,0     1.090.000   1.090.000
+                     K7018-3.2 (20kg)                                    
+
+  6      DICHVU      TRẢ 01 ĐỒNG HỒ                  1,0                  
+
+  7      DICHVU      PHÍ SỬA XE                      1,0     400.000     400.000
+
+  Cộng                                                                   3.990.000
+  ----------------------------------------------------------------------------------
+
+Nợ cũ : 10/8/26 2.000.000
+
+Tổng nợ 25/9/26 5.990.000
+
+4)Phiếu nhập -xuất được phép kết xuất ra file exel để gửi khách hàng, và
+được phiếu chỉnh sửa,thêm bớt dòng, cột để điền thêm thông tín sau khi
+xuất ra exel hoặc word.
+
+4)  Trong quá trình ra phiếu nhập -xuất, nếu máy 1 đã ra, nhưng chưa
+    chốt với khách thì sẽ ở chế độ tạm thời – đại loại như chưa ghi sổ,
+    hoặc chưa hoàn thành.... nên vẫn còn treo ở hệ thống, lúc này khách
+    hàng gọi cho bạn đang ngồi Máy 2- thì bạn này vẫn vào xem và tiếp
+    tục làm phiếu này vẫn được=> nghĩa là giữa các máy luôn xem được
+    những gì đang có trên hệ thống. Tránh trường hợp khách A đã gọi đơn
+    cho bạn Ktoan máy 1- máy 1 lên đơn, xong lát hồi sau khách gọi bổ
+    sung hay chỉnh sửa, chốt đơn hàng, thì lúc này bạn kế toán đang ngồi
+    Máy 2 nghe và xem trên hệ thống không thấy phiếu Tạm mà bạn ngồi máy
+    1 đã lên, nên lúc này bạn ngồi máy 2 lại hỏi khách từ đầu rồi lên
+    tiếp.
+
+5)  Khi xem báo cáo tồn kho hay báo cáo công nợ, chi tiết mua- bán hàng
+    thì xem dc chi tiết trong báo cáo luôn, tức là muốn xem chi tiết đơn
+    hàng nào đó là bấm vô nó hiện lên luôn không phải thoát ra xem lại.
+
+6)  Thu – chi tiền trong quỹ + ngân hàng được nhập nhiều dòng tiền cho
+    cùng 1 ncc hay khách hàng

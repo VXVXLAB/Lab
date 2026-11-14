@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+/backend/khoserver
+/backend/bin/
+test-results/
+playwright-report/
+.env
