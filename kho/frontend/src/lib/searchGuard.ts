@@ -60,6 +60,11 @@ export function useListSearchEnter<T>(o: {
   }, [ready, tick]);
   return (e: KeyboardEvent<HTMLInputElement>) => {
     e.preventDefault();
+    if (ready && pending.current === 0) {
+      // kết quả đã đúng chữ đang gõ: xuống dòng đầu ngay (Enter kế tiếp ở bảng sẽ mở dòng đó)
+      if (o.rows.length) o.focusFirst();
+      return;
+    }
     if (!ready) o.flush();
     pending.current = Math.min(2, pending.current + 1);
     setTick((t) => t + 1);

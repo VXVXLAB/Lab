@@ -1,5 +1,5 @@
 // Đọc số thành chữ tiếng Việt cho dòng "Bằng chữ" trên phiếu thu/chi.
-// Quy tắc: linh (105 = một trăm linh năm), mười/mươi, mốt (21), lăm (15, 25), tư (24), "không trăm" ở nhóm giữa
+// Quy tắc: linh (105 = một trăm linh năm), mười/mươi, mốt (21), lăm (15, 25), bốn (24 = hai mươi bốn — theo quyết định của khách), "không trăm" ở nhóm giữa
 // (1.005 = một nghìn không trăm linh năm), nhóm 000 bỏ qua, tỷ đọc lặp (1.000.000.000.000 = một nghìn tỷ).
 
 const DIGITS = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
@@ -21,7 +21,6 @@ function readGroup(n: number, full: boolean): string[] {
   if (u > 0) {
     if (u === 1 && t > 1) w.push('mốt');
     else if (u === 5 && t > 0) w.push('lăm');
-    else if (u === 4 && t > 1) w.push('tư');
     else w.push(DIGITS[u]!);
   }
   return w;

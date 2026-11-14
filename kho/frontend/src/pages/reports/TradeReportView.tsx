@@ -142,7 +142,7 @@ export function TradeReportView({
         {!pageTitle && (
           <>
             <span style={{ marginLeft: 'auto' }} />
-            <ReportActions xlsxUrl={reportApi.xlsxUrl(kind, params)} canPrint={!inDrawer} />
+            <ReportActions xlsxUrl={reportApi.xlsxUrl(kind, params)} />
           </>
         )}
       </div>

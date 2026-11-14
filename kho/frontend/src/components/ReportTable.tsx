@@ -120,7 +120,7 @@ export function ReportActions({ xlsxUrl, canPrint = true }: { xlsxUrl?: string; 
         </Tooltip>
       )}
       {canPrint && (
-        <Button icon={<PrinterOutlined />} onClick={printReport}>
+        <Button icon={<PrinterOutlined />} onClick={(e) => printReport(e.currentTarget)}>
           In
         </Button>
       )}

@@ -27,7 +27,8 @@ function isServerEvent(x: unknown): x is ServerEvent {
 
 /** Ánh xạ sự kiện ⇒ những cache cần làm mới. */
 export function invalidateFor(qc: QueryClient, e: ServerEvent): void {
-  const inv = (queryKey: readonly unknown[]) => void qc.invalidateQueries({ queryKey });
+  const inv = (f: readonly unknown[] | { predicate: (q: { queryKey: readonly unknown[] }) => boolean }) =>
+    void qc.invalidateQueries(Array.isArray(f) ? { queryKey: f } : (f as { predicate: (q: { queryKey: readonly unknown[] }) => boolean }));
   switch (e.type) {
     case 'catalog.changed':
       inv(qk.catalog(e.entity));
@@ -44,7 +45,12 @@ export function invalidateFor(qc: QueryClient, e: ServerEvent): void {
       break;
     case 'document.changed':
       inv(qk.documents);
-      inv(qk.document(e.id));
+      if (e.action === 'deleted') {
+        // phiếu đã xóa: bỏ khỏi bộ nhớ đệm, KHÔNG tải lại (tránh gọi tới phiếu không còn — 404)
+        void qc.cancelQueries({ queryKey: ['document', e.id] });
+        qc.removeQueries({ queryKey: ['document', e.id] });
+        qc.removeQueries({ predicate: (q) => q.queryKey[0] === 'document-check' && String(q.queryKey[1] ?? '').includes(`"id":${e.id}`) });
+      } else inv(qk.document(e.id));
       inv(['price-info']);
       inv(['document-check']);
       inv(qk.catalog('product')); // tồn trong danh sách gợi ý mã hàng (with_stock)
@@ -53,7 +59,10 @@ export function invalidateFor(qc: QueryClient, e: ServerEvent): void {
       break;
     case 'voucher.changed':
       inv(qk.vouchers);
-      inv(qk.voucher(e.id));
+      if (e.action === 'deleted') {
+        void qc.cancelQueries({ queryKey: ['voucher', e.id] });
+        qc.removeQueries({ queryKey: ['voucher', e.id] });
+      } else inv(qk.voucher(e.id));
       // "Nợ cũ / Tổng nợ" trên phiếu bán/mua phụ thuộc phiếu thu chi
       inv(['document']);
       inv(qk.reports);

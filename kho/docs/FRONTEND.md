@@ -80,7 +80,7 @@ pages/
     MoneyPages           Công nợ phải thu / phải trả (debt-summary), Sổ quỹ / sổ ngân hàng (cash-book)
     voucherText.ts       câu chữ thu chi dùng chung: VOUCHER_TITLE, VOUCHER_PREFIX, DEBT_EFFECT, defaultDebtSide, debtEffect
   GuidePage.tsx          trang Hướng dẫn: hiển thị docs/HUONG_DAN_SU_DUNG.md (một nguồn nội dung, import ?raw)
-lib/numberWords.ts       numberToVietnameseWords / moneyInWords (linh, mươi, mốt, lăm, tư, "không trăm" ở nhóm giữa, tỷ lặp)
+lib/numberWords.ts       numberToVietnameseWords / moneyInWords (linh, mươi, mốt, lăm; 24 = "hai mươi bốn" — không dùng "tư"; "không trăm" ở nhóm giữa, tỷ lặp)
 ```
 
 ## Quy ước
@@ -184,6 +184,25 @@ thông báo thành công ngắn (1,5 giây), lỗi nói cách khắc phục.
 - **Lần đầu dùng** (CSDL mới): Tổng quan hiện khung "Bắt đầu sử dụng" 5 bước, tự đánh dấu theo dữ liệu thật, tự ẩn khi xong
   (hoặc người dùng bấm "Ẩn hướng dẫn này" — nhớ theo máy).
 - Lưới dòng (phiếu kho và phiếu thu chi) chuyển con trỏ bằng `useLayoutEffect` để người gõ nhanh không mất phím.
+
+### Sửa sau kiểm thử E2E (F-01, F-04…F-08)
+
+- **Tìm rồi Enter không bao giờ dùng kết quả cũ** (`lib/searchGuard.ts`): ô chọn tìm trên máy chủ (`PartnerSelect`,
+  `ProductSelect`) đánh dấu `data-search-pending` khi kết quả chưa phải của chữ đang gõ; Enter lúc đó được ghi nhớ, kết quả
+  đúng về mới chọn mục đầu (thứ tự máy chủ) rồi `focusNextField`; không có kết quả ⇒ không chọn. Ô tìm ở màn danh sách
+  (`useListSearchEnter`): Enter bỏ thời gian chờ (`useDebouncedFlush`), chờ dữ liệu của đúng bộ lọc rồi mới xuống dòng đầu;
+  Enter hai lần ⇒ mở dòng đầu. Ô mã hàng trong lưới tự kiểm (`resultsFor`). Lọc tại máy (Select kho, nhóm…) dùng
+  `filterByLabel` / `matchText` (lib/text.ts): không dấu, nhiều từ, thứ tự bất kỳ, bỏ dấu câu.
+- **Xung đột hai máy**: khung vàng = `diffLines(dòng lúc nạp, dòng hiện tại)` (thêm / sửa / xóa); nút "Thêm các dòng này
+  vào phiếu" = `applyChanges` (không lặp dòng). Phiếu thu chi tương tự (`diffV`/`applyV`).
+- **Phiên hết hạn khi đang gõ**: `lib/unsavedStore.ts` lưu phiếu đang gõ dở vào sessionStorage theo người dùng + phiếu,
+  khôi phục khi đăng nhập lại đúng người đó; xóa khi lưu, bỏ thay đổi, xóa phiếu, đăng xuất chủ động.
+- **Phiếu mới**: giá trị phần mềm tự điền (kho / tài khoản mặc định, điền sẵn từ "Thu tiền", "Thu tiền phiếu này",
+  "Hàng cần đặt") là mốc (`autoFill` + `pristine`) ⇒ chưa gõ gì thì rời đi không bị hỏi.
+- **Xóa phiếu**: tắt truy vấn trước khi gửi lệnh xóa; sự kiện SSE `deleted` gỡ phiếu khỏi bộ nhớ đệm thay vì tải lại.
+  Màn đăng nhập không gọi `/auth/me` nếu trình duyệt chưa từng đăng nhập / đã đăng xuất (cờ `kho.hadSession`).
+- Màn hẹp ≤1100px: nút ít dùng của phiếu gom vào "Thêm ▾" (`useNarrow`). In trong ngăn kéo chi tiết chỉ in ngăn kéo đó.
+- Kiểm tra đọc số thành chữ: `npm run test:words`.
 
 ### Từ ngữ thống nhất
 

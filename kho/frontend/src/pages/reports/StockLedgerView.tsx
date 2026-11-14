@@ -29,7 +29,6 @@ export function StockLedgerView({
   initialWarehouseId,
   initialFrom,
   initialTo,
-  inDrawer = false,
   pageTitle,
   pageSub,
 }: {
@@ -118,7 +117,7 @@ export function StockLedgerView({
         {!pageTitle && (
           <>
             <span style={{ marginLeft: 'auto' }} />
-            {params && <ReportActions xlsxUrl={reportApi.xlsxUrl('stock-ledger', params)} canPrint={!inDrawer} />}
+            {params && <ReportActions xlsxUrl={reportApi.xlsxUrl('stock-ledger', params)} />}
           </>
         )}
       </div>

@@ -299,7 +299,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
             } else if (e.key === 'Escape' && q) setQ('');
           }}
         />
-        <Select<Preset> value={preset} onChange={setPreset} options={PRESETS} style={{ width: 132 }} aria-label="Khoảng thời gian" />
+        <Select<Preset> value={preset} onChange={setPreset} options={PRESETS} style={{ width: 158 }} aria-label="Khoảng thời gian" />
         {preset === 'custom' && (
           <span className="range">
             <DateInput value={range[0]} onChange={(d) => setRange([d, range[1]])} style={{ width: 130 }} placeholder="Từ ngày" />

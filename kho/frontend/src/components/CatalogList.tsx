@@ -179,7 +179,7 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
   };
 
   const onSearchEnter = useListSearchEnter({
-    text: clientFilter ? dq : q,
+    text: q,
     committed: dq,
     flush: flushQ,
     fresh: !query.isPlaceholderData && !query.isFetching,

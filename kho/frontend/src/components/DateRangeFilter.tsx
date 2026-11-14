@@ -72,7 +72,7 @@ export function DateRangeFilter({
       <Select<Preset>
         aria-label="Khoảng thời gian"
         value={value.preset}
-        style={{ width: 132 }}
+        style={{ width: 158 }}
         options={presets.map((p) => ({ value: p, label: LABEL[p] }))}
         onChange={(p) => onChange({ preset: p, range: p === 'custom' ? rangeOf(value) : value.range })}
       />

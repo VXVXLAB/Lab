@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:words": "esbuild scripts/numberWords.check.ts --bundle --platform=node --format=cjs --log-level=error --outfile=node_modules/.cache/numberWords.check.cjs && node node_modules/.cache/numberWords.check.cjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",

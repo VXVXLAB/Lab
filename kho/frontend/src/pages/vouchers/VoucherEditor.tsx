@@ -23,6 +23,7 @@ import { formatDate, formatDateTime, formatMoney, fromApiDate, toApiDate, todayV
 import { enterToNext, useHotkeys } from '../../lib/keyboard';
 import { useMenuHighlight } from '../../lib/menuHighlight';
 import { moneyInWords } from '../../lib/numberWords';
+import { unsavedStore } from '../../lib/unsavedStore';
 import { storage } from '../../lib/storage';
 import { paths } from '../../paths';
 import { PartnerSelect, type PartnerLite } from '../documents/PartnerSelect';
@@ -123,7 +124,8 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   const qc = useQueryClient();
   const drawers = useDrawers();
   const { modal, message } = App.useApp();
-  const vq = useQuery({ queryKey: qk.voucher(voucherId ?? 0), queryFn: () => vouchersApi.get(voucherId ?? 0), enabled: voucherId !== null });
+  const [removed, setRemoved] = useState(false);
+  const vq = useQuery({ queryKey: qk.voucher(voucherId ?? 0), queryFn: () => vouchersApi.get(voucherId ?? 0), enabled: voucherId !== null && !removed });
   const accounts = useQuery({ queryKey: qk.catalogList('cash_account', { all: true }), queryFn: () => cashAccountsApi.list({ page_size: 1000 }) });
   const accItems = accounts.data?.items ?? [];
 
@@ -164,9 +166,52 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   });
   const fp = JSON.stringify(body());
   const isNew = voucherId === null && !loaded;
-  const dirty = isNew ? sent.length > 0 || !!partner || !!note.trim() : baseline !== null && fp !== baseline;
+  // Phiếu mới: giá trị tự điền (tài khoản mặc định, đối tác / dòng tiền điền sẵn từ "Thu tiền", "Thu tiền phiếu này") là mốc (F-08)
+  const autoFill = useRef(true);
+  const [pristine, setPristine] = useState<string | null>(null);
+  useEffect(() => {
+    if (autoFill.current) {
+      autoFill.current = false;
+      setPristine(fp);
+    }
+  }, [fp]);
+  const dirty = isNew ? pristine !== null && fp !== pristine : baseline !== null && fp !== baseline;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
+
+  // ---------- giữ phiếu đang gõ dở khi phiên hết hạn (F-04) ----------
+  const draftScope = voucherId !== null ? `voucher:${voucherId}` : `newv:${newType}`;
+  interface Stored {
+    type: VoucherType;
+    accountId: number | null;
+    date: string | null;
+    partner: PartnerLite | null;
+    sideChoice: DebtSide | null;
+    note: string;
+    lines: VLine[];
+  }
+  const restoreChecked = useRef(false);
+  useEffect(() => {
+    if (removed || !restoreChecked.current) return;
+    if (dirty) unsavedStore.save(me.id, draftScope, { type, accountId, date: toApiDate(date) ?? null, partner, sideChoice, note, lines } satisfies Stored);
+    else unsavedStore.clear(me.id, draftScope);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fp, dirty]);
+  const restoreUnsaved = (): boolean => {
+    restoreChecked.current = true;
+    const st = unsavedStore.load<Stored>(me.id, draftScope);
+    if (!st || !st.lines?.some((l) => !isBlank(l))) return false;
+    setType(st.type);
+    setAccountId(st.accountId);
+    setDate(fromApiDate(st.date));
+    setPartner(st.partner);
+    setSideChoice(st.sideChoice);
+    setNote(st.note);
+    setLines(withBlank(st.lines));
+    autoFill.current = false; // khôi phục là thay đổi thật của người dùng, không phải giá trị tự điền
+    message.info('Đã khôi phục các dòng đang gõ dở (phiên đăng nhập trước bị ngắt). Kiểm tra rồi bấm Lưu.', 5);
+    return true;
+  };
 
   const load = useCallback(
     (v: Voucher) => {
@@ -207,7 +252,11 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   useEffect(() => {
     const v = vq.data;
     if (!v) return;
-    if (!loaded) return load(v);
+    if (!loaded) {
+      load(v);
+      restoreUnsaved();
+      return;
+    }
     if (v.id !== loaded.id || v.version === loaded.version) return;
     if (!dirtyRef.current) {
       load(v);
@@ -223,23 +272,34 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
     if (!isNew || accountId !== null || !accItems.length) return;
     const last = Number(storage.get(`${LAST_ACC}.${type}`));
     const def = accItems.find((a) => a.active && a.id === last) ?? accItems.find((a) => a.active && a.kind === 'cash') ?? accItems.find((a) => a.active);
-    if (def) setAccountId(def.id);
+    if (def) {
+      autoFill.current = true;
+      setAccountId(def.id);
+    }
   }, [isNew, accountId, accItems, type]);
   const prefilled = useRef(false);
   useEffect(() => {
     if (!isNew || prefilled.current) return;
     prefilled.current = true;
+    if (restoreUnsaved()) return; // có phiếu gõ dở của phiên trước ⇒ khôi phục thay cho điền sẵn
     if (preDocumentId) {
       void documentsApi.get(preDocumentId).then((d) => {
         if (d.partner_id) {
-          void partnersApi.get(d.partner_id).then((p) => setPartner({ id: p.id, code: p.code, name: p.name, phone: p.phone, address: p.address, is_customer: p.is_customer, is_supplier: p.is_supplier }));
+          void partnersApi.get(d.partner_id).then((p) => {
+            autoFill.current = true;
+            setPartner({ id: p.id, code: p.code, name: p.name, phone: p.phone, address: p.address, is_customer: p.is_customer, is_supplier: p.is_supplier });
+          });
         }
         const verb = newType === 'receipt' ? 'Thu tiền' : 'Chi tiền';
+        autoFill.current = true;
         setLines(withBlank([{ key: nk(), description: `${verb} phiếu ${d.display_no} ngày ${formatDate(d.doc_date)}`, amount: d.total_amount, document_id: d.id, document_no: d.display_no }]));
         message.info('Đã điền sẵn đối tác và số tiền của phiếu — kiểm tra rồi bấm Lưu (Ctrl+S)', 3);
       });
     } else if (prePartnerId) {
-      void partnersApi.get(prePartnerId).then((p) => setPartner({ id: p.id, code: p.code, name: p.name, phone: p.phone, address: p.address, is_customer: p.is_customer, is_supplier: p.is_supplier }));
+      void partnersApi.get(prePartnerId).then((p) => {
+            autoFill.current = true;
+            setPartner({ id: p.id, code: p.code, name: p.name, phone: p.phone, address: p.address, is_customer: p.is_customer, is_supplier: p.is_supplier });
+          });
     }
     window.setTimeout(() => {
       if (!preDocumentId && !prePartnerId) partnerRef.current?.focus();
@@ -340,6 +400,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
       autoFocusButton: 'cancel',
       onOk: () => {
         shown.current = false;
+        unsavedStore.clear(me.id, draftScope);
         blocker.proceed?.();
       },
       onCancel: () => {
@@ -418,6 +479,8 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
       } else if (e instanceof ApiError && e.code === 'VALIDATION' && e.field) {
         setHeadErr({ [e.field]: e.message });
         message.error(e.message, 4);
+      } else if (e instanceof ApiError && e.status === 401) {
+        // đã về màn đăng nhập; phiếu đang gõ được giữ lại để khôi phục (F-04)
       } else modal.error({ title: 'Không lưu được', content: errorMessage(e) });
       return null;
     } finally {
@@ -434,13 +497,19 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
       cancelText: 'Không xóa',
       autoFocusButton: 'cancel',
       onOk: async () => {
+        setRemoved(true);
+        await qc.cancelQueries({ queryKey: ['voucher', loaded.id] });
         try {
           await vouchersApi.remove(loaded.id, loaded.version);
           message.success(`Đã xóa phiếu ${loaded.voucher_no}`, 2);
           skipGuard.current = true;
+          unsavedStore.clear(me.id, draftScope);
+          await qc.cancelQueries({ queryKey: ['voucher', loaded.id] });
+          qc.removeQueries({ queryKey: ['voucher', loaded.id] });
           void qc.invalidateQueries({ queryKey: qk.vouchers });
           navigate(loaded.voucher_type === 'receipt' ? paths.receipts : paths.payments);
         } catch (e) {
+          setRemoved(false);
           modal.error({ title: 'Không xóa được', content: errorMessage(e) });
         }
       },
@@ -584,6 +653,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
             <label>Loại phiếu</label>
             <Segmented<VoucherType>
               className="big-seg"
+              aria-label="Loại phiếu"
               value={type}
               onChange={(t) => {
                 setType(t);
@@ -597,7 +667,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
           </div>
           <div className={`hf hf-acc${headErr.account_id ? ' hf-err' : ''}`}>
             <label>Thu/chi bằng</label>
-            <Radio.Group className="acc-choice" value={accountId} onChange={(e) => setAccountId(e.target.value as number)}>
+            <Radio.Group className="acc-choice" aria-label="Thu/chi bằng tài khoản" value={accountId} onChange={(e) => setAccountId(e.target.value as number)}>
               {accOptions.map((a) => (
                 <Radio.Button key={a.id} value={a.id}>
                   <span className="acc-kind">{a.kind === 'cash' ? 'Tiền mặt' : 'Ngân hàng'}</span>
@@ -617,11 +687,11 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
         </div>
         <div className="vh-row">
           <div className={`hf hf-date${headErr.voucher_date ? ' hf-err' : ''}`}>
-            <label>Ngày</label>
+            <label htmlFor="voucher_date">Ngày</label>
             <DateInput id="voucher_date" value={date} onChange={setDate} />
           </div>
           <div className={`hf hf-partner${headErr.partner_id ? ' hf-err' : ''}`}>
-            <label>{receipt ? 'Người nộp / khách hàng' : 'Người nhận / nhà cung cấp'} (bỏ trống nếu thu/chi khác)</label>
+            <label htmlFor="partner">{receipt ? 'Người nộp / khách hàng' : 'Người nhận / nhà cung cấp'} (bỏ trống nếu thu/chi khác)</label>
             <PartnerSelect
               ref={(r) => (partnerRef.current = r)}
               id="partner"
@@ -637,7 +707,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
             {headErr.partner_id && <div className="hf-msg">{headErr.partner_id}</div>}
           </div>
           <div className="hf hf-note">
-            <label>Ghi chú / lý do</label>
+            <label htmlFor="vnote">Ghi chú / lý do</label>
             <Input id="vnote" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
           </div>
         </div>

@@ -30,10 +30,12 @@ import { useCurrentUser } from '../../auth/AuthContext';
 import { DateInput } from '../../components/DateInput';
 import { Kbd } from '../../components/Kbd';
 import { useServerEvent } from '../../lib/events';
-import { formatDate, formatDateTime, formatMoney, formatQty, toApiDate, todayVn } from '../../lib/format';
+import { formatDate, formatDateTime, formatMoney, formatQty, fromApiDate, toApiDate, todayVn } from '../../lib/format';
 import { enterToNext, useHotkeys } from '../../lib/keyboard';
 import { storage } from '../../lib/storage';
 import { useMenuHighlight } from '../../lib/menuHighlight';
+import { unsavedStore } from '../../lib/unsavedStore';
+import { useNarrow } from '../../lib/useNarrow';
 import { paths } from '../../paths';
 import { DOC_TYPES, isDocType } from './docTypes';
 import {
@@ -107,10 +109,12 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const qc = useQueryClient();
   const { modal, message } = App.useApp();
 
+  // phiếu vừa bị xóa trên máy này: ngừng mọi lệnh gọi tới nó (F-06)
+  const [removed, setRemoved] = useState(false);
   const docQ = useQuery({
     queryKey: qk.document(docId ?? 0),
     queryFn: () => documentsApi.get(docId ?? 0),
-    enabled: docId !== null,
+    enabled: docId !== null && !removed,
   });
   const [loaded, setLoaded] = useState<DocumentFull | null>(null);
   const type: DocType | null = loaded?.doc_type ?? docQ.data?.doc_type ?? newType;
@@ -142,6 +146,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const drawers = useDrawers();
   const location = useLocation();
   const skipGuard = useRef(false);
+  const narrow = useNarrow(1100);
   const headerRef = useRef<HTMLDivElement>(null);
   const partnerRef = useRef<{ focus: () => void } | null>(null);
   const whRef = useRef<{ focus: () => void } | null>(null);
@@ -172,11 +177,51 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const isNew = docId === null && !loaded;
   const readOnlyBase = !editing || !!deletedBy;
   const fp = type ? fingerprint(type, header, lines) : '';
-  const dirty = isNew
-    ? sentLines(lines).length > 0 || !!header.partner || !!header.note.trim()
-    : editing && baseline !== null && fp !== baseline;
+  // Phiếu mới: giá trị phần mềm tự điền (kho mặc định, điền sẵn từ "Hàng cần đặt") là mốc, chưa phải thay đổi (F-08)
+  const autoFill = useRef(true);
+  const [pristine, setPristine] = useState<string | null>(null);
+  useEffect(() => {
+    if (autoFill.current) {
+      autoFill.current = false;
+      setPristine(fp);
+    }
+  }, [fp]);
+  const dirty = isNew ? pristine !== null && fp !== pristine : editing && baseline !== null && fp !== baseline;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
+
+  // ---------- giữ phiếu đang gõ dở khi phiên hết hạn (F-04) ----------
+  const draftScope = docId !== null ? `doc:${docId}` : `new:${newType ?? ''}`;
+  interface Stored {
+    header: Omit<HeaderDraft, 'doc_date'> & { doc_date: string | null };
+    lines: LineDraft[];
+    editing: boolean;
+  }
+  const restoreChecked = useRef(false);
+  useEffect(() => {
+    if (removed || !restoreChecked.current) return;
+    if (dirty) unsavedStore.save(me.id, draftScope, { header: { ...header, doc_date: toApiDate(header.doc_date) ?? null }, lines, editing } satisfies Stored);
+    else unsavedStore.clear(me.id, draftScope);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fp, dirty, editing]);
+  const restoreUnsaved = () => {
+    restoreChecked.current = true;
+    const st = unsavedStore.load<Stored>(me.id, draftScope);
+    if (!st || !st.lines?.length) return;
+    setHeader({ ...st.header, doc_date: fromApiDate(st.header.doc_date) });
+    setLines(withTrailingBlank(st.lines));
+    setEditing(st.editing);
+    autoFill.current = false; // khôi phục là thay đổi thật của người dùng, không phải giá trị tự điền
+    message.info('Đã khôi phục các dòng đang gõ dở (phiên đăng nhập trước bị ngắt). Kiểm tra rồi bấm Lưu.', 5);
+  };
+  const restoredNew = useRef(false);
+  useEffect(() => {
+    if (docId === null && !restoredNew.current) {
+      restoredNew.current = true;
+      restoreUnsaved();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // bản mới nhất cho các thao tác gọi lại từ hộp thoại (tránh dùng giá trị cũ trong closure)
   const loadedRef = useRef<DocumentFull | null>(null);
   loadedRef.current = loaded;
@@ -186,7 +231,10 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     if (!isNew || header.warehouse_id !== null || !whItems.length) return;
     const last = Number(storage.get(`${LAST_WH}.${type}`));
     const def = whItems.find((w) => w.active && w.id === last) ?? whItems.find((w) => w.active);
-    if (def) setHeader((h) => ({ ...h, warehouse_id: def.id }));
+    if (def) {
+      autoFill.current = true;
+      setHeader((h) => ({ ...h, warehouse_id: def.id }));
+    }
   }, [isNew, header.warehouse_id, whItems]);
 
   // Phiếu mới điền sẵn (vd. từ "Hàng cần đặt"): lấy mã, ĐVT, giá mặc định bằng một lần gọi
@@ -214,6 +262,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
             },
           ];
         });
+        autoFill.current = true;
         setLines(withTrailingBlank(ls));
         if (pre.note) setHeader((h) => ({ ...h, note: pre.note ?? '' }));
         message.info(`Đã điền sẵn ${ls.length} mã thiếu — chọn nhà cung cấp rồi lưu`, 3);
@@ -227,6 +276,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     if (!d) return;
     if (!loaded) {
       load(d);
+      restoreUnsaved();
       return;
     }
     if (d.id !== loaded.id || d.version === loaded.version) return;
@@ -295,7 +345,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const liveCheck = useQuery({
     queryKey: ['document-check', checkKey],
     queryFn: ({ signal }) => documentsApi.checkDraft(JSON.parse(checkKey ?? '{}') as Parameters<typeof documentsApi.checkDraft>[0], signal),
-    enabled: !!checkKey,
+    enabled: !!checkKey && !removed,
     placeholderData: keepPreviousData,
     retry: false,
     staleTime: 10_000,
@@ -349,6 +399,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       autoFocusButton: 'cancel',
       onOk: () => {
         blockerShown.current = false;
+        unsavedStore.clear(me.id, draftScope);
         blocker.proceed?.();
       },
       onCancel: () => {
@@ -452,6 +503,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   };
 
   const handleError = (e: unknown, ctx: 'save' | 'post' | 'unpost' | 'delete', sent: LineDraft[], retryWithLoss?: () => void) => {
+    if (e instanceof ApiError && e.status === 401) return; // đã về màn đăng nhập; phiếu đang gõ được giữ lại (F-04)
     if (!(e instanceof ApiError)) {
       modal.error({ title: 'Có lỗi', content: errorMessage(e) });
       return;
@@ -610,13 +662,22 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       cancelText: 'Không xóa',
       autoFocusButton: 'cancel',
       onOk: async () => {
+        // ngừng mọi lệnh gọi tới phiếu này TRƯỚC khi xóa (sự kiện SSE có thể về trước cả phản hồi)
+        setRemoved(true);
+        await qc.cancelQueries({ queryKey: ['document', loaded.id] });
         try {
           await documentsApi.remove(loaded.id, loaded.version);
           message.success(`Đã xóa phiếu tạm ${loaded.draft_no}`, 2);
           skipGuard.current = true;
+          unsavedStore.clear(me.id, draftScope);
+          // bỏ khỏi bộ nhớ đệm để không ai (kể cả sự kiện SSE) gọi lại phiếu đã xóa
+          await qc.cancelQueries({ queryKey: ['document', loaded.id] });
+          qc.removeQueries({ queryKey: ['document', loaded.id] });
+          qc.removeQueries({ queryKey: ['document-check'] });
           void qc.invalidateQueries({ queryKey: qk.documents });
           navigate(cfg.listPath);
         } catch (e) {
+          setRemoved(false);
           handleError(e, 'delete', []);
         }
       },
@@ -708,13 +769,36 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   }));
   const oldDebt = loaded?.old_debt ?? null;
 
-  const field = (label: string, err: string | undefined, node: ReactNode, cls = '') => (
+  const field = (label: string, err: string | undefined, node: ReactNode, cls = '', id?: string) => (
     <div className={`hf ${cls}${err ? ' hf-err' : ''}`}>
-      <label>{label}</label>
+      <label htmlFor={id}>{label}</label>
       {node}
       {err && <div className="hf-msg">{err}</div>}
     </div>
   );
+
+  // Màn hẹp (máy tính bảng): nút ít dùng gom vào "Thêm ▾"
+  const moreItems = [
+    ...(loaded?.status === 'posted' && editing && !deletedBy ? [{ key: 'cancel', icon: <RollbackOutlined />, label: 'Hủy sửa' }] : []),
+    ...(loaded?.status === 'posted' && !editing && (type === 'sale' || type === 'purchase')
+      ? [{ key: 'pay', icon: <DollarOutlined />, label: type === 'sale' ? 'Thu tiền phiếu này' : 'Chi tiền phiếu này' }]
+      : []),
+    ...(loaded?.status === 'posted' && !editing ? [{ key: 'unpost', icon: <RollbackOutlined />, label: 'Bỏ ghi sổ' }] : []),
+    { key: 'print', icon: <PrinterOutlined />, label: 'In (Ctrl+P)', disabled: !loaded },
+    { key: 'xlsx', icon: <FileExcelOutlined />, label: 'Xuất Excel (.xlsx)', disabled: !loaded },
+    { key: 'docx', icon: <FileWordOutlined />, label: 'Xuất Word (.docx)', disabled: !loaded },
+    { key: 'history', icon: <HistoryOutlined />, label: 'Lịch sử sửa phiếu', disabled: !loaded },
+    ...(loaded?.status === 'draft' ? [{ key: 'delete', icon: <DeleteOutlined />, label: 'Xóa phiếu tạm', danger: true }] : []),
+  ];
+  const onMore = (key: string) => {
+    if (key === 'cancel') cancelEdit();
+    else if (key === 'pay' && loaded) navigate(paths.newVoucher(type === 'sale' ? 'receipt' : 'payment', { document_id: loaded.id }));
+    else if (key === 'unpost') unpost();
+    else if (key === 'print') openPrint();
+    else if (key === 'xlsx' || key === 'docx') exportFile(key);
+    else if (key === 'history') setHistoryOpen(true);
+    else if (key === 'delete') remove();
+  };
 
   const stashText = (stash ?? [])
     .map((c) => [CHANGE_LABEL[c.kind], c.line.product?.code ?? '', c.line.product?.is_service ? c.line.description : (c.line.product?.name ?? ''), c.line.qty ?? '', c.line.unit_price ?? ''].join('\t'))
@@ -758,45 +842,61 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
               Ghi sổ <Kbd>F9</Kbd>
             </Button>
           )}
-          {loaded?.status === 'posted' && editing && !deletedBy && <Button onClick={cancelEdit}>Hủy sửa</Button>}
+          {loaded?.status === 'posted' && editing && !deletedBy && !narrow && <Button onClick={cancelEdit}>Hủy sửa</Button>}
           {loaded?.status === 'posted' && !editing && (
+            <Button type="primary" icon={<EditOutlined />} onClick={() => setEditing(true)}>
+              Sửa phiếu <Kbd>F8</Kbd>
+            </Button>
+          )}
+          {narrow ? (
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: moreItems,
+                onClick: ({ key }) => onMore(key),
+              }}
+            >
+              <Button>Thêm ▾</Button>
+            </Dropdown>
+          ) : (
             <>
-              <Button type="primary" icon={<EditOutlined />} onClick={() => setEditing(true)}>
-                Sửa phiếu <Kbd>F8</Kbd>
-              </Button>
-              {(type === 'sale' || type === 'purchase') && (
-                <Button icon={<DollarOutlined />} onClick={() => loaded && navigate(paths.newVoucher(type === 'sale' ? 'receipt' : 'payment', { document_id: loaded.id }))}>
-                  {type === 'sale' ? 'Thu tiền phiếu này' : 'Chi tiền phiếu này'}
-                </Button>
+              {loaded?.status === 'posted' && !editing && (
+                <>
+                  {(type === 'sale' || type === 'purchase') && (
+                    <Button icon={<DollarOutlined />} onClick={() => onMore('pay')}>
+                      {type === 'sale' ? 'Thu tiền phiếu này' : 'Chi tiền phiếu này'}
+                    </Button>
+                  )}
+                  <Button icon={<RollbackOutlined />} onClick={unpost}>
+                    Bỏ ghi sổ
+                  </Button>
+                </>
               )}
-              <Button icon={<RollbackOutlined />} onClick={unpost}>
-                Bỏ ghi sổ
-              </Button>
+              <Dropdown.Button
+                icon={<span className="dd-caret">▾</span>}
+                onClick={openPrint}
+                disabled={!loaded}
+                menu={{
+                  items: [
+                    { key: 'xlsx', icon: <FileExcelOutlined />, label: 'Xuất Excel (.xlsx)' },
+                    { key: 'docx', icon: <FileWordOutlined />, label: 'Xuất Word (.docx)' },
+                  ],
+                  onClick: ({ key }) => exportFile(key === 'docx' ? 'docx' : 'xlsx'),
+                }}
+              >
+                <PrinterOutlined /> In
+              </Dropdown.Button>
+              {loaded && (
+                <Tooltip title="Lịch sử sửa phiếu">
+                  <Button icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)} aria-label="Lịch sử sửa phiếu" />
+                </Tooltip>
+              )}
+              {loaded?.status === 'draft' && (
+                <Tooltip title="Xóa phiếu tạm">
+                  <Button danger icon={<DeleteOutlined />} onClick={remove} aria-label="Xóa phiếu tạm" />
+                </Tooltip>
+              )}
             </>
-          )}
-          <Dropdown.Button
-            icon={<span className="dd-caret">▾</span>}
-            onClick={openPrint}
-            disabled={!loaded}
-            menu={{
-              items: [
-                { key: 'xlsx', icon: <FileExcelOutlined />, label: 'Xuất Excel (.xlsx)' },
-                { key: 'docx', icon: <FileWordOutlined />, label: 'Xuất Word (.docx)' },
-              ],
-              onClick: ({ key }) => exportFile(key === 'docx' ? 'docx' : 'xlsx'),
-            }}
-          >
-            <PrinterOutlined /> In
-          </Dropdown.Button>
-          {loaded && (
-            <Tooltip title="Lịch sử sửa phiếu">
-              <Button icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)} aria-label="Lịch sử sửa phiếu" />
-            </Tooltip>
-          )}
-          {loaded?.status === 'draft' && (
-            <Tooltip title="Xóa phiếu tạm">
-              <Button danger icon={<DeleteOutlined />} onClick={remove} aria-label="Xóa phiếu tạm" />
-            </Tooltip>
           )}
         </div>
       </div>
@@ -927,7 +1027,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
               'Ngày hạch toán',
               headerErrors.doc_date,
               <DateInput id="doc_date" value={header.doc_date} onChange={(d) => setHeader((h) => ({ ...h, doc_date: d }))} />,
-              'hf-date',
+              'hf-date', 'doc_date',
             )}
             {cfg.partner &&
               field(
@@ -945,7 +1045,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                     setHeaderErrors((e) => ({ ...e, partner_id: '' }));
                   }}
                 />,
-                'hf-partner',
+                'hf-partner', 'partner',
               )}
             {field(
               cfg.warehouseLabel,
@@ -960,7 +1060,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                 onChange={(v) => setHeader((h) => ({ ...h, warehouse_id: v }))}
                 status={headerErrors.warehouse_id ? 'error' : undefined}
               />,
-              'hf-wh',
+              'hf-wh', 'warehouse',
             )}
             {cfg.toWarehouse &&
               field(
@@ -976,13 +1076,13 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                   onChange={(v) => setHeader((h) => ({ ...h, to_warehouse_id: v }))}
                   status={headerErrors.to_warehouse_id ? 'error' : undefined}
                 />,
-                'hf-wh',
+                'hf-wh', 'to_warehouse',
               )}
             {field(
               'Ghi chú',
               headerErrors.note,
               <Input ref={noteRef} id="note" value={header.note} maxLength={500} onChange={(e) => setHeader((h) => ({ ...h, note: e.target.value }))} />,
-              'hf-note',
+              'hf-note', 'note',
             )}
           </>
         )}

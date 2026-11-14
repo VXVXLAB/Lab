@@ -6,8 +6,8 @@ import type { ColumnsType } from 'antd/es/table';
 import { qk } from '../../api/queryKeys';
 import { reportApi, type DebtLedgerParams } from '../../api/reports';
 import type { DebtLedgerRow, DebtSide } from '../../api/types';
-import { DateRangeFilter, rangeOf, type DateRangeValue } from '../../components/DateRangeFilter';
-import { OpenHint, ReportActions, ReportTable } from '../../components/ReportTable';
+import { DateRangeFilter, describeRange, rangeOf, type DateRangeValue } from '../../components/DateRangeFilter';
+import { OpenHint, PrintTitle, ReportActions, ReportTable } from '../../components/ReportTable';
 import { formatDate, formatMoney, fromApiDate, toApiDate } from '../../lib/format';
 import { paths } from '../../paths';
 import { useDrawers } from '../reports/drawers';
@@ -62,7 +62,7 @@ export function DebtLedgerView({ partner, side: initialSide, initialFrom, initia
         <span style={{ marginLeft: 'auto' }} />
         <Button onClick={() => newVoucher('receipt')}>Thu tiền</Button>
         <Button onClick={() => newVoucher('payment')}>Chi tiền</Button>
-        <ReportActions xlsxUrl={reportApi.xlsxUrl('debt-ledger', params)} canPrint={false} />
+        <ReportActions xlsxUrl={reportApi.xlsxUrl('debt-ledger', params)} />
       </div>
       {d && (
         <div className="debt-headline">
@@ -71,6 +71,11 @@ export function DebtLedgerView({ partner, side: initialSide, initialFrom, initia
           {d.closing < 0 && <span className="muted"> (số âm: {side === 'receivable' ? 'khách đã trả dư' : 'mình đã trả dư'})</span>}
         </div>
       )}
+      <div className="report-area">
+      <PrintTitle
+        title={`SỔ CHI TIẾT CÔNG NỢ ${side === 'receivable' ? 'PHẢI THU' : 'PHẢI TRẢ'} — ${partner.code} ${partner.name}`}
+        filters={[describeRange(range), d && `${side === 'receivable' ? 'Khách còn nợ' : 'Mình còn nợ'}: ${formatMoney(d.closing)} đ`]}
+      />
       <ReportTable<Row>
         columns={columns}
         rows={rows}
@@ -87,6 +92,7 @@ export function DebtLedgerView({ partner, side: initialSide, initialFrom, initia
         }}
         emptyText="Không có phát sinh công nợ trong khoảng này"
       />
+      </div>
       <OpenHint />
     </>
   );

@@ -15,7 +15,7 @@ Gõ phím là nhanh nhất: **Enter** để sang ô kế tiếp, **Ctrl+S** đ�
 ## Lập phiếu bán hàng
 
 1. Vào Bán hàng › Phiếu bán, bấm **F2**.
-2. Gõ vài chữ tên hoặc số điện thoại khách (gõ không dấu cũng được), rồi **Enter**. Khách mới: bấm **F4** để thêm ngay mà không phải thoát khỏi phiếu.
+2. Gõ vài chữ tên hoặc số điện thoại khách (gõ không dấu cũng được, nhiều chữ theo thứ tự nào cũng được), rồi **Enter**. Nếu danh sách chưa kịp hiện theo đúng chữ vừa gõ, phần mềm chờ kết quả rồi mới chọn — không bao giờ lấy nhầm khách của lần tìm trước. Khách mới: bấm **F4** để thêm ngay mà không phải thoát khỏi phiếu.
 3. Kiểm tra kho xuất, rồi **Enter** xuống dòng hàng.
 4. Ở ô **Mã hàng**, gõ mã hoặc một phần tên ("que 3.2") rồi **Enter** → gõ số lượng → **Enter** → đơn giá (tự điền theo giá bán, sửa được) → **Enter** sang dòng sau.
 5. **Ctrl+S** để lưu tạm, **F9** để ghi sổ. Ghi sổ xong phiếu mới có số chính thức (XK…), mới trừ kho và tính vào công nợ.
@@ -27,7 +27,8 @@ Dưới phiếu luôn hiện **Cộng**, **Nợ cũ** và **Tổng nợ**. Cạn
 - Phiếu chưa ghi sổ là **Phiếu tạm** (số TAM…). Phiếu tạm không trừ kho, không vào công nợ, không giữ hàng.
 - Mọi máy đều thấy phiếu tạm ở Bán hàng › **Phiếu tạm đang treo**: ai sửa lần cuối, lúc nào. Máy 2 mở phiếu của máy 1 và làm tiếp bình thường.
 - Đang mở một phiếu mà máy khác lưu phiếu đó: nếu bạn chưa sửa gì, phiếu tự hiện bản mới. Nếu bạn đang sửa dở, phần mềm báo **"Phiếu vừa được … sửa"** và không xóa chữ bạn đang gõ.
-- Hai máy cùng lưu một phiếu: máy lưu sau được báo **"Máy khác vừa sửa phiếu này"**. Bấm **Tải bản mới**. Các dòng bạn vừa gõ vẫn giữ trong khung vàng để thêm lại.
+- Hai máy cùng lưu một phiếu: máy lưu sau được báo **"Máy khác vừa sửa phiếu này"**. Bấm **Tải bản mới** để thấy bản của máy kia. Khung vàng chỉ liệt kê những gì **máy bạn** đã thay đổi so với lúc mở phiếu: dòng **thêm mới**, dòng **đã sửa** (ví dụ "SL 2 → 3") và dòng **đã xóa**. Bấm **Thêm các dòng này vào phiếu** để đưa các thay đổi đó vào bản mới: dòng đã có không bị lặp lại, dòng bạn sửa được sửa trên bản mới, phần máy kia đã sửa vẫn giữ. Kiểm tra rồi **Ctrl+S**.
+- Đang gõ phiếu mà phiên đăng nhập bị ngắt (ví dụ quản trị đặt lại mật khẩu): phần mềm về màn đăng nhập. Đăng nhập lại **đúng tên của bạn** trên cùng cửa sổ thì phiếu đang gõ dở được khôi phục, có thông báo "Đã khôi phục các dòng đang gõ dở". Bấm **Đăng xuất** chủ động thì phiếu chưa lưu bị bỏ.
 
 ## Hàng hết tồn
 
@@ -87,7 +88,7 @@ Trường hợp đặc biệt: **thu tiền của nhà cung cấp** (họ hoàn 
 
 - Trong phiếu: nút **In** (Ctrl+P) để xem trước rồi in (A4/A5). Mũi tên cạnh nút In có **Xuất Excel** và **Xuất Word**. File xuất sửa được, thêm bớt dòng cột được.
 - Mọi báo cáo có nút **Xuất Excel** (đúng bộ lọc đang xem) và **In**.
-- Phiếu thu/chi in khổ A5, có dòng "Bằng chữ".
+- Phiếu thu/chi in khổ A5, có dòng "Bằng chữ" (ví dụ 1.234.000 = "Một triệu hai trăm ba mươi bốn nghìn đồng").
 
 ## Phím tắt
 

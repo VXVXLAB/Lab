@@ -402,3 +402,13 @@ td.col-code { font-weight: 500; font-variant-numeric: tabular-nums; white-space:
 /* Lưới dòng không bóp cột tên hàng ở màn hẹp: cuộn ngang bên trong khung dòng */
 .line-grid table { min-width: 900px; }
 .voucher-editor .line-grid table { min-width: 640px; }
+
+/* In từ ngăn kéo chi tiết: chỉ ngăn kéo được bấm In, nằm phẳng trên giấy */
+@media print {
+  body.printing-drawer #root, body.printing-drawer .ant-drawer:not(.print-this), body.printing-drawer .ant-drawer-mask { display: none !important; }
+  body.printing-drawer .ant-drawer.print-this, body.printing-drawer .ant-drawer.print-this .ant-drawer-content-wrapper { position: static !important; width: auto !important; transform: none !important; box-shadow: none !important; inset: auto !important; }
+  body.printing-drawer .ant-drawer.print-this .ant-drawer-header { display: none !important; }
+  body.printing-drawer .ant-drawer.print-this .ant-drawer-body { overflow: visible !important; padding: 0 !important; }
+  body.printing-drawer .ant-drawer.print-this .report-table { height: auto !important; }
+  body.printing-drawer .debt-headline { display: none !important; }
+}
