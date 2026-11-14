@@ -202,8 +202,13 @@ func firstErr(errs ...error) error {
 	return nil
 }
 
-// sendFile gửi file xuất (xlsx/docx) với tên file an toàn.
-func sendFile(w http.ResponseWriter, format, baseName string, t export.Table) error {
+// sendFile gửi file xuất (xlsx/docx) với tên file an toàn; thêm thông tin công ty (nếu đã khai báo) lên đầu file.
+func (s *Server) sendFile(w http.ResponseWriter, r *http.Request, format, baseName string, t export.Table) error {
+	if st, err := s.Catalog.GetSettings(r.Context(), s.Pool); err == nil {
+		t.Company = st.HeaderLines()
+	} else {
+		return err
+	}
 	var data []byte
 	var err error
 	var mime string

@@ -35,6 +35,8 @@ type Column struct {
 
 // Table là dữ liệu một bảng xuất file.
 type Table struct {
+	// Company: các dòng thông tin công ty in trên cùng (tên, địa chỉ, ĐT/MST) — rỗng thì không in.
+	Company   []string
 	SheetName string
 	Title     string
 	Subtitle  string
@@ -171,14 +173,28 @@ func XLSX(t Table) ([]byte, error) {
 	moneyFracBold, _ := f.NewStyle(&mfb)
 	row := 1
 	set := func(cell string, v any) error { return f.SetCellValue(sheet, cell, v) }
-	if err := set("A1", t.Title); err != nil {
+	if len(t.Company) > 0 {
+		compStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Family: "Times New Roman"}})
+		for i, line := range t.Company {
+			cell := fmt.Sprintf("A%d", row)
+			_ = f.SetCellStr(sheet, cell, line)
+			if i == 0 {
+				_ = f.SetCellStyle(sheet, cell, cell, compStyle)
+			} else {
+				_ = f.SetCellStyle(sheet, cell, cell, infoStyle)
+			}
+			row++
+		}
+	}
+	titleCell := fmt.Sprintf("A%d", row)
+	if err := set(titleCell, t.Title); err != nil {
 		return nil, err
 	}
 	if ncol > 1 {
-		_ = f.MergeCell(sheet, "A1", last+"1")
+		_ = f.MergeCell(sheet, titleCell, fmt.Sprintf("%s%d", last, row))
 	}
-	_ = f.SetCellStyle(sheet, "A1", last+"1", titleStyle)
-	_ = f.SetRowHeight(sheet, 1, 24)
+	_ = f.SetCellStyle(sheet, titleCell, fmt.Sprintf("%s%d", last, row), titleStyle)
+	_ = f.SetRowHeight(sheet, row, 24)
 	row++
 	if t.Subtitle != "" {
 		_ = set(fmt.Sprintf("A%d", row), t.Subtitle)
@@ -484,6 +500,9 @@ func tcell(text string, width int, bold bool, align string, shade bool) string {
 // DOCX tạo file Word (.docx) có bảng thật (<w:tbl>) từ bảng.
 func DOCX(t Table) ([]byte, error) {
 	var body strings.Builder
+	for i, line := range t.Company {
+		body.WriteString(para(line, i == 0, false, "", 0))
+	}
 	body.WriteString(para(t.Title, true, false, "center", 32))
 	if t.Subtitle != "" {
 		body.WriteString(para(t.Subtitle, false, true, "center", 0))

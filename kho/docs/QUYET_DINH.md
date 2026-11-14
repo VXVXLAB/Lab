@@ -100,3 +100,15 @@ người dùng không rành công nghệ vẫn dùng được. Điểm đánh d�
 |---|---|---|
 | I1 | Phiên bản thư viện được ghim để build bằng **Go 1.24** (`go.mod: go 1.24`): chi v5.2.1, pgx v5.7.2, decimal v1.4.0, excelize v2.9.0, x/crypto v0.36.0, pgx-shopspring-decimal. Bản mới nhất của các thư viện này đòi Go ≥ 1.25. | SPEC §1 chốt Go 1.24. |
 | I2 | Test tích hợp tạo **schema PostgreSQL riêng cho mỗi test** (`search_path`), migrate + seed, xóa khi xong ⇒ độc lập và chạy song song (`t.Parallel`). | Nhanh hơn truncate + tuần tự, cô lập hoàn toàn. |
+
+## J. Bổ sung API cho frontend (giai đoạn 2)
+
+| # | Quyết định | Lý do |
+|---|---|---|
+| J1 | `sum_total_amount` ở `GET /documents`, `GET /vouchers` = tổng mọi dòng khớp bộ lọc (một truy vấn `count + sum`). Không lọc `status` thì gồm cả phiếu tạm. | Dòng tổng dưới bảng danh sách. |
+| J2 | `GET /products/price-info?ids=` trả `{"items":[…]}` (không phải mảng trần, cho thống nhất với các danh sách khác), tối đa 500 id, id trùng bị bỏ, id không tồn tại ⇒ 404 `missing_ids`. Endpoint đơn lẻ dùng chung mã nguồn và nhận thêm `warehouse_id`. | Tránh N+1 khi mở phiếu nhiều dòng. |
+| J3 | `with_stock=true` tính tồn **đến hết hôm nay** (giờ VN), chỉ cho các mặt hàng của trang hiện tại, một truy vấn gộp. | Đủ nhanh với vài nghìn mã (trang tối đa 1000). |
+| J4 | `POST /documents/check`: bỏ qua dòng chưa chọn mặt hàng và dòng hàng hóa chưa có SL > 0 (đang gõ); lỗi dữ liệu khác vẫn 400. Phiếu mới kiểm như tạo mới (danh mục ngừng dùng ⇒ 400); có `id` thì như sửa. | Gợi ý tức thời khi gõ, không báo lỗi vì dòng còn dở. |
+| J5 | Đổi mật khẩu: sai mật khẩu cũ ⇒ **400** `VALIDATION` (không phải 401, để giao diện không coi là hết phiên); hủy mọi phiên khác, giữ phiên hiện tại. | Theo yêu cầu controller. |
+| J6 | Thông tin công ty: bảng một dòng `settings` (migration 003), mặc định rỗng; seed lúc khởi động luôn tạo lại dòng này nếu mất (vd. `seeddemo -reset` TRUNCATE CASCADE); in trước tiêu đề mọi file xuất, mục trống thì bỏ dòng. Có ghi `audit_log` (entity `settings`). | Đầu phiếu in gửi khách. |
+| J7 | Cột "Ghi chú" (ghi chú từng dòng) trong file xuất chứng từ chỉ có khi ít nhất một dòng có ghi chú; khi không có, bảng còn 7 cột. | Phiếu gọn hơn; theo yêu cầu controller. |

@@ -172,6 +172,8 @@ type Input struct {
 	Lines         []LineInput `json:"lines"`
 	Version       int         `json:"version"`
 	ConfirmLoss   bool        `json:"confirm_loss"`
+	// lenient (chỉ dùng cho kiểm tra phiếu đang gõ): bỏ qua dòng chưa chọn mặt hàng / chưa có SL hàng hóa.
+	lenient bool
 }
 
 // CheckResult là kết quả kiểm tra chứng từ (không đổi dữ liệu).

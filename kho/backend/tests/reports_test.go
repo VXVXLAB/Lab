@@ -186,7 +186,7 @@ func TestREQ071_074_087_XuatPhieuExcelWordChinhSuaDuoc(t *testing.T) {
 		t.Fatal("docx phải có bảng thật")
 	}
 	cells := docxCellTexts(x)
-	if strings.Join(cells[0], "|") != "STT|Mã hàng|Tên hàng|ĐVT|Số lượng|Đơn giá|Thành tiền|Ghi chú" {
+	if strings.Join(cells[0], "|") != "STT|Mã hàng|Tên hàng|ĐVT|Số lượng|Đơn giá|Thành tiền" { // không dòng nào có ghi chú ⇒ không có cột Ghi chú
 		t.Fatalf("tiêu đề bảng Word: %q", cells[0])
 	}
 	if cells[1][1] != "K701832" || cells[1][4] != "10,0" || cells[1][6] != "9.500.000" || cells[2][4] != "100,5" || cells[3][0] != "Cộng" || cells[3][6] != "10.404.500" {

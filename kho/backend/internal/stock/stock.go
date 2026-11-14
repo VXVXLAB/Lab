@@ -252,3 +252,131 @@ SELECT p.id, p.purchase_price, lp.unit_price
 	}
 	return out, rows.Err()
 }
+
+// PriceInfo là thông tin giá & tồn của một mặt hàng tại một ngày (dùng khi nhập dòng phiếu).
+type PriceInfo struct {
+	ProductID        int64            `json:"product_id"`
+	Code             string           `json:"code"`
+	Name             string           `json:"name"`
+	Unit             string           `json:"unit"`
+	IsService        bool             `json:"is_service"`
+	Date             util.Date        `json:"date"`
+	SalePrice        decimal.Decimal  `json:"sale_price"`
+	PurchasePrice    decimal.Decimal  `json:"purchase_price"`
+	CostPrice        decimal.Decimal  `json:"cost_price"`
+	CostSource       string           `json:"cost_source"`
+	TotalStock       decimal.Decimal  `json:"total_stock"`
+	StockByWarehouse []WarehouseQty   `json:"stock_by_warehouse"`
+	WarehouseQty     *decimal.Decimal `json:"warehouse_qty,omitempty"`
+}
+
+// PriceInfos trả thông tin giá & tồn cho nhiều mặt hàng (theo thứ tự ids) bằng vài truy vấn gộp.
+// Trả thêm danh sách id không tồn tại. warehouseID (tùy chọn) ⇒ điền warehouse_qty.
+func PriceInfos(ctx context.Context, q db.Q, ids []int64, date util.Date, warehouseID *int64) ([]PriceInfo, []int64, error) {
+	rows, err := q.Query(ctx, `SELECT id, code, name, unit, is_service, sale_price, purchase_price FROM products WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, nil, err
+	}
+	byID := map[int64]*PriceInfo{}
+	for rows.Next() {
+		var p PriceInfo
+		if err := rows.Scan(&p.ProductID, &p.Code, &p.Name, &p.Unit, &p.IsService, &p.SalePrice, &p.PurchasePrice); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		p.Date = date
+		p.TotalStock = decimal.Zero
+		p.StockByWarehouse = []WarehouseQty{}
+		byID[p.ProductID] = &p
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	var missing, found []int64
+	for _, id := range ids {
+		if _, ok := byID[id]; ok {
+			found = append(found, id)
+		} else {
+			missing = append(missing, id)
+		}
+	}
+	costs, err := CostPrices(ctx, q, found, date)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Tồn từng (mặt hàng, kho) đến hết ngày date; kho đang dùng luôn có mặt, kho ngừng dùng chỉ khi còn tồn.
+	srows, err := q.Query(ctx, `SELECT p.id, w.id, w.code, w.name, w.active, COALESCE(m.qty, 0)
+		FROM unnest($1::bigint[]) AS p(id) CROSS JOIN warehouses w
+		LEFT JOIN (SELECT product_id, warehouse_id, sum(qty_in - qty_out) AS qty FROM stock_movements
+		           WHERE product_id = ANY($1) AND doc_date <= $2 GROUP BY 1, 2) m ON m.product_id=p.id AND m.warehouse_id=w.id
+		ORDER BY p.id, w.code`, found, date)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer srows.Close()
+	for srows.Next() {
+		var pid int64
+		var wq WarehouseQty
+		var active bool
+		if err := srows.Scan(&pid, &wq.WarehouseID, &wq.Code, &wq.Name, &active, &wq.Qty); err != nil {
+			return nil, nil, err
+		}
+		p := byID[pid]
+		p.TotalStock = p.TotalStock.Add(wq.Qty)
+		if warehouseID != nil && *warehouseID == wq.WarehouseID {
+			v := wq.Qty
+			p.WarehouseQty = &v
+		}
+		if active || !wq.Qty.IsZero() {
+			p.StockByWarehouse = append(p.StockByWarehouse, wq)
+		}
+	}
+	if err := srows.Err(); err != nil {
+		return nil, nil, err
+	}
+	out := make([]PriceInfo, 0, len(found))
+	for _, id := range found {
+		p := byID[id]
+		c := costs[id]
+		p.CostPrice, p.CostSource = c.Price, c.Source
+		if p.IsService || p.CostSource == "" {
+			p.CostSource = "none"
+			p.CostPrice = decimal.Zero
+		}
+		if warehouseID != nil && p.WarehouseQty == nil {
+			z := decimal.Zero
+			p.WarehouseQty = &z
+		}
+		out = append(out, *p)
+	}
+	return out, missing, nil
+}
+
+// StockTotals trả tồn tổng (và tồn tại một kho nếu có) đến hết ngày date của nhiều mặt hàng — một truy vấn gộp.
+func StockTotals(ctx context.Context, q db.Q, ids []int64, date util.Date, warehouseID *int64) (map[int64][2]decimal.Decimal, error) {
+	out := map[int64][2]decimal.Decimal{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var wh any
+	if warehouseID != nil {
+		wh = *warehouseID
+	}
+	rows, err := q.Query(ctx, `SELECT product_id, sum(qty_in - qty_out),
+		COALESCE(sum(qty_in - qty_out) FILTER (WHERE warehouse_id = $3::bigint), 0)
+		FROM stock_movements WHERE product_id = ANY($1) AND doc_date <= $2 GROUP BY product_id`, ids, date, wh)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var t, w decimal.Decimal
+		if err := rows.Scan(&id, &t, &w); err != nil {
+			return nil, err
+		}
+		out[id] = [2]decimal.Decimal{t, w}
+	}
+	return out, rows.Err()
+}

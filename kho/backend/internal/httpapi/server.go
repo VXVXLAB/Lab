@@ -95,6 +95,9 @@ func (s *Server) Handler() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/auth/me", s.me)
+			r.Post("/auth/change-password", s.changePassword)
+			r.Get("/settings", s.getSettings)
+			r.With(requireAdmin).Put("/settings", s.putSettings)
 			r.Get("/events", s.sse)
 
 			r.Route("/users", func(r chi.Router) {
@@ -109,6 +112,7 @@ func (s *Server) Handler() http.Handler {
 			r.Route("/documents", func(r chi.Router) {
 				r.Get("/", s.listDocuments)
 				r.Post("/", s.createDocument)
+				r.Post("/check", s.checkDocumentInput)
 				r.Get("/{id}", s.getDocument)
 				r.Put("/{id}", s.updateDocument)
 				r.Delete("/{id}", s.deleteDocument)
@@ -177,7 +181,7 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 func requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !userOf(r).IsAdmin() {
-			writeErr(w, r, apperr.Forbidden("Chỉ quản trị mới được quản lý người dùng"))
+			writeErr(w, r, apperr.Forbidden("Chỉ quản trị mới được thực hiện thao tác này"))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -213,6 +217,46 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"user": userOf(r)})
+}
+
+func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if err := s.Auth.ChangePassword(r.Context(), userOf(r).ID, s.tokenOf(r), in.OldPassword, in.NewPassword); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	st, err := s.Catalog.GetSettings(r.Context(), s.Pool)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
+	var in catalog.SettingsInput
+	if err := decode(r, &in); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	st, err := s.Catalog.SaveSettings(r.Context(), userOf(r).ID, in)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	s.publishCatalog(r, "settings", 1, "updated")
+	writeJSON(w, http.StatusOK, st)
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {

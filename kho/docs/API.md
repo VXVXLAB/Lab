@@ -60,6 +60,17 @@ Xóa phiên, xóa cookie → `{"ok":true}` (không cần đăng nhập).
 ```
 `role`: `admin` | `ketoan`.
 
+### `POST /api/auth/change-password` (mọi người dùng đã đăng nhập)
+Body `{"old_password":"123456","new_password":"matkhaumoi"}` → `{"ok":true}`. `new_password` ≥ 6 ký tự (400). Sai mật khẩu cũ ⇒ `400 VALIDATION` "Mật khẩu hiện tại không đúng" (`details.field = "old_password"`). Mọi phiên **khác** của người này bị hủy, phiên hiện tại giữ nguyên.
+
+### Thông tin công ty — `GET /api/settings` (mọi người dùng), `PUT /api/settings` (chỉ admin, người khác ⇒ 403)
+```json
+{"company_name": "CÔNG TY TNHH VẬT TƯ HÀN MINH PHÁT", "company_address": "12 Lê Trọng Tấn, Q. Tân Phú",
+ "company_phone": "028 3812 3456", "company_tax_code": "0312345678", "updated_by_name": "Quản trị", "updated_at": "…"}
+```
+PUT body: 4 trường `company_*` (thay toàn bộ; mỗi trường ≤ 500 ký tự) → object như trên; phát SSE `catalog.changed` với `entity:"settings"`. Mặc định rỗng.
+Mọi file xuất (chứng từ, phiếu thu chi, báo cáo; xlsx và docx) in các dòng đầu trang **trước tiêu đề**: tên công ty (đậm), "Địa chỉ: …", "Điện thoại: … &nbsp;&nbsp;&nbsp; MST: …" — mục nào trống thì không in (tất cả trống ⇒ không có dòng nào, tiêu đề ở ô A1 như cũ).
+
 ### Người dùng (chỉ admin; người khác ⇒ 403)
 - `GET /api/users` → `{"items":[User…],"total":n,"page":1,"page_size":n}` (không phân trang).
 - `POST /api/users` body `{"username","password","full_name","role","active"}` → `201 User`. `password` ≥ 6 ký tự, `role` mặc định `ketoan`, trùng username ⇒ 400.
@@ -99,6 +110,7 @@ Body POST/PUT: `{"code":"KHO5","name":"Kho Bình Dương","active":true}` (`acti
 
 ### 2.2 Mặt hàng — `/api/products`
 Lọc thêm: `group_id`, `is_service=true|false`. `q` tìm theo mã + tên (không dấu).
+`with_stock=true` (tùy chọn, kèm `warehouse_id`): mỗi item có thêm `total_stock` (tồn tổng mọi kho đến hết hôm nay) và, nếu có `warehouse_id`, `warehouse_qty` (tồn tại kho đó). Tồn của cả trang lấy bằng một truy vấn gộp. Không có `with_stock` ⇒ hình dạng như cũ (không có hai trường này).
 ```json
 {
   "id": 5, "code": "KT42132", "name": "Que hàn Kim Tín KT-421 3.2mm (5kg)", "unit": "Hộp",
@@ -129,6 +141,10 @@ Dùng khi nhập dòng phiếu: tự điền giá bán (REQ-026), cảnh báo l�
 ```
 - `cost_price`/`cost_source`: giá vốn so sánh = đơn giá dòng **phiếu mua đã ghi sổ gần nhất có ngày ≤ date** (mọi kho) ⇒ `last_purchase`; chưa từng mua ⇒ `purchase_price` của danh mục ⇒ `default`; nếu cũng = 0 (hoặc là dịch vụ) ⇒ `none` (không cảnh báo). Cảnh báo lỗ khi `unit_price < cost_price` và `cost_source ≠ "none"`.
 - Tồn tính **đến hết ngày `date`** (chỉ chứng từ đã ghi sổ). `stock_by_warehouse` gồm mọi kho đang dùng (và kho ngừng dùng còn tồn).
+- Tham số tùy chọn `warehouse_id` ⇒ thêm trường `warehouse_qty` (tồn tại kho đó; không có tham số thì không có trường).
+
+#### `GET /api/products/price-info?ids=1,2,3&date=YYYY-MM-DD&warehouse_id=`
+Bản hàng loạt: → `{"items": [PriceInfo…]}`, mỗi phần tử **giống hệt** object của endpoint đơn lẻ (có `product_id`, và `warehouse_qty` khi có `warehouse_id`), theo thứ tự `ids` (id trùng bị bỏ). Tối đa **500** id (vượt ⇒ 400). Thiếu `ids` / id không phải số nguyên dương ⇒ 400; có id không tồn tại ⇒ `404 NOT_FOUND` với `details.missing_ids`; `warehouse_id` không tồn tại ⇒ 400.
 
 ### 2.3 Đối tác — `/api/partners`
 Lọc thêm: `type=customer|supplier`. `q` tìm theo mã, tên, điện thoại, MST (không dấu).
@@ -227,6 +243,7 @@ Tham số: `type` (một hoặc nhiều, cách bằng dấu phẩy: `type=sale,s
   "posted_at": "2026-11-14T13:58:09Z", "updated_at": "2026-11-14T13:58:09Z"
 }], "total": 27, "page": 1, "page_size": 50}
 ```
+Phản hồi có thêm `"sum_total_amount"`: tổng `total_amount` của **mọi** chứng từ khớp bộ lọc (mọi trang), ví dụ `{"items":[…],"total":27,"page":1,"page_size":50,"sum_total_amount":153760000}`.
 Máy 2 xem "phiếu tạm đang treo": `GET /api/documents?status=draft` (REQ-043).
 
 ### 3.3 `POST /api/documents` — tạo phiếu tạm
@@ -283,9 +300,13 @@ Kiểm tra nếu ghi sổ (hoặc lưu lại) ngay bây giờ, **không đổi d
 ```
 `can_post = không thiếu hàng && có ≥ 1 dòng` (chưa xét `confirm_loss`).
 
+### 3.8b `POST /api/documents/check` — kiểm tra phiếu **chưa lưu** (đang gõ)
+Body như `POST`/`PUT /api/documents` (không cần `version`), thêm `"id"` (tùy chọn) khi đang sửa phiếu có sẵn: bút toán kho hiện có của phiếu đó được loại trừ (thay bằng nội dung đang gõ) và đối tác giữ nguyên không bị kiểm lại cờ KH/NCC. → cùng hình dạng `{"stock_shortages", "loss_lines", "can_post"}` như §3.8, tính như thể ghi sổ nội dung này ngay — kể cả xung đột sửa lùi (giảm SL phiếu nhập cũ, dời ngày, đổi kho). **Không đổi dữ liệu.**
+Để dùng khi đang gõ: dòng chưa chọn mặt hàng, và dòng hàng hóa chưa có SL (hoặc SL làm tròn = 0), được **bỏ qua**; `line_no` trong `loss_lines` vẫn là số thứ tự dòng trong body. Lỗi dữ liệu khác như POST (400; thiếu `warehouse_id`, đối tác sai loại…). `id` không tồn tại ⇒ 404; `doc_type` khác loại phiếu `id` ⇒ 400.
+
 ### 3.9 `GET /api/documents/{id}/export?format=xlsx|docx`
 File phiếu (mặc định `xlsx`). Phiếu tạm: tiêu đề **"PHIẾU TẠM (chưa ghi sổ)"**, tên file `PHIEU_TAM_TAM000025.xlsx`. Đã ghi sổ: tiêu đề theo loại (`PHIẾU XUẤT KHO BÁN HÀNG`, `PHIẾU NHẬP KHO MUA HÀNG`, `PHIẾU NHẬP HÀNG BÁN BỊ TRẢ LẠI`, `PHIẾU XUẤT TRẢ HÀNG NHÀ CUNG CẤP`, `PHIẾU CHUYỂN KHO NỘI BỘ`, `PHIẾU NHẬP TỒN ĐẦU KỲ`), tên file `XK00008.xlsx`.
-Nội dung: thông tin phiếu, bảng `STT | Mã hàng | Tên hàng | ĐVT | Số lượng | Đơn giá | Thành tiền | Ghi chú`, dòng `Cộng`, rồi (phiếu bán/mua) "Nợ cũ:" và "Tổng nợ (đến ngày dd/mm/yyyy):", ô ký tên.
+Nội dung: (thông tin công ty nếu có), thông tin phiếu, bảng `STT | Mã hàng | Tên hàng | ĐVT | Số lượng | Đơn giá | Thành tiền` — thêm cột thứ 8 `Ghi chú` (ghi chú từng dòng) **chỉ khi** ít nhất một dòng có `note` —, dòng `Cộng`, rồi (phiếu bán/mua) "Nợ cũ:" và "Tổng nợ (đến ngày dd/mm/yyyy):", ô ký tên.
 Excel: số là ô số thật; ô Cộng = công thức `SUM(...)`; "Nợ cũ:" và "Tổng nợ …:" là ô nhãn (cột C) + **ô số riêng** (cột Thành tiền); ô Tổng nợ = công thức `Nợ cũ + Cộng`. Mọi ô công thức có **kết quả lưu sẵn dạng số** (trình xem không tính lại vẫn hiện đúng). Đơn giá/tiền có số lẻ hiển thị số lẻ (`#,##0.0#`), số chẵn hiển thị `#,##0`. Word: "Nợ cũ: 2.000.000", "Tổng nợ (đến ngày …): 5.990.000". Dòng dịch vụ: cột Tên hàng = diễn giải. File không khóa, không ảnh ⇒ người dùng thêm/bớt dòng cột được.
 Phiếu chính thức chỉ in được khi đã ghi sổ ⇒ hết tồn thì không ghi sổ ⇒ không có phiếu chính thức (REQ-031/032).
 
@@ -334,7 +355,7 @@ Bỏ trống `debt_side` (khi tạo **và** khi sửa) ⇒ mặc định: `recei
 ```
 `voucher_type_name`: "Phiếu thu tiền mặt" | "Phiếu chi tiền mặt" | "Thu tiền ngân hàng (giấy báo có)" | "Chi tiền ngân hàng (giấy báo nợ)".
 
-- `GET /api/vouchers?type=receipt|payment&account_id=&partner_id=&from=&to=&q=&page=&page_size=` → phân trang `Summary`:
+- `GET /api/vouchers?type=receipt|payment&account_id=&partner_id=&from=&to=&q=&page=&page_size=` → phân trang `Summary` + `"sum_total_amount"` (tổng tiền mọi phiếu khớp bộ lọc, mọi trang):
   `{"id","voucher_type","voucher_type_name","voucher_no","voucher_date","debt_side","account_id","account_name","account_kind","partner_id","partner_name","note","total_amount","line_count","version","updated_by_name","updated_at"}`. `q` tìm số phiếu, đối tác, ghi chú, diễn giải dòng (không phân biệt dấu).
 - `POST /api/vouchers` body:
   ```json
@@ -534,9 +555,13 @@ Gợi ý frontend: nhận sự kiện ⇒ invalidate query liên quan (TanStack 
 |---|---|---|
 | 1 | GET | `/api/health` |
 | 2–4 | POST, POST, GET | `/api/auth/login`, `/api/auth/logout`, `/api/auth/me` |
+| 63 | POST | `/api/auth/change-password` |
+| 64–65 | GET, PUT | `/api/settings` |
 | 5–7 | GET, POST, PUT | `/api/users`, `/api/users`, `/api/users/{id}` |
 | 8–32 | GET, POST, GET, PUT, DELETE | `/api/warehouses[/{id}]`, `/api/product-groups[/{id}]`, `/api/products[/{id}]`, `/api/partners[/{id}]`, `/api/cash-accounts[/{id}]` |
 | 33–34 | GET | `/api/products/lookup?code=`, `/api/products/{id}/price-info` |
+| 66 | GET | `/api/products/price-info?ids=` (hàng loạt) |
+| 67 | POST | `/api/documents/check` (phiếu chưa lưu) |
 | 35–44 | GET, POST, GET, PUT, DELETE, POST, POST, GET, GET, GET | `/api/documents`, `/api/documents`, `/api/documents/{id}` (GET/PUT/DELETE), `/{id}/post`, `/{id}/unpost`, `/{id}/check`, `/{id}/export`, `/{id}/history` |
 | 45–51 | GET, POST, GET, PUT, DELETE, GET, GET | `/api/vouchers`, `/api/vouchers`, `/api/vouchers/{id}` (GET/PUT/DELETE), `/{id}/export`, `/{id}/history` |
 | 52–60 | GET | `/api/reports/stock-summary`, `stock-nxt`, `stock-ledger`, `sales`, `purchases`, `debt-summary`, `debt-ledger`, `cash-book`, `draft-demand` |

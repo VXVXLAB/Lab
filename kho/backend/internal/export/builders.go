@@ -67,8 +67,18 @@ func DocumentTable(d *docs.Document) Table {
 	if d.Note != "" {
 		t.Info = append(t.Info, "Ghi chú: "+d.Note)
 	}
+	// Cột "Ghi chú" chỉ có khi ít nhất một dòng có ghi chú.
+	hasNote := false
+	for _, l := range d.Lines {
+		if l.Note != "" {
+			hasNote = true
+		}
+	}
 	t.Columns = []Column{{"STT", 6, Text}, {"Mã hàng", 14, Text}, {"Tên hàng", 34, Text}, {"ĐVT", 8, Text},
-		{"Số lượng", 11, Qty}, {"Đơn giá", 13, Money}, {"Thành tiền", 15, Money}, {"Ghi chú", 16, Text}}
+		{"Số lượng", 11, Qty}, {"Đơn giá", 13, Money}, {"Thành tiền", 15, Money}}
+	if hasNote {
+		t.Columns = append(t.Columns, Column{"Ghi chú", 20, Text})
+	}
 	for i, l := range d.Lines {
 		name := l.ProductName
 		if l.IsService {
@@ -82,9 +92,13 @@ func DocumentTable(d *docs.Document) Table {
 		if l.UnitPrice == nil {
 			amount = nil
 		}
-		t.Rows = append(t.Rows, []any{i + 1, l.ProductCode, name, l.Unit, l.Qty, l.UnitPrice, amount, l.Note})
+		row := []any{i + 1, l.ProductCode, name, l.Unit, l.Qty, l.UnitPrice, amount}
+		if hasNote {
+			row = append(row, l.Note)
+		}
+		t.Rows = append(t.Rows, row)
 	}
-	t.Footer = [][]any{{"Cộng", nil, nil, nil, nil, nil, d.TotalAmount, nil}}
+	t.Footer = [][]any{{"Cộng", nil, nil, nil, nil, nil, d.TotalAmount}}
 	t.SumColumns = []int{6}
 	if d.OldDebt != nil && d.TotalDebt != nil {
 		// Nhãn và số ở hai ô; Tổng nợ = công thức (Nợ cũ + Cộng) để thêm dòng sau khi xuất vẫn tự đúng.

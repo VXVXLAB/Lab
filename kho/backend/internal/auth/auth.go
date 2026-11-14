@@ -241,3 +241,29 @@ func (s *Service) UpdateUser(ctx context.Context, id int64, in UserInput) (*User
 	}
 	return u, nil
 }
+
+// ChangePassword đổi mật khẩu của chính người dùng: kiểm tra mật khẩu cũ, hủy mọi phiên khác (giữ phiên hiện tại).
+func (s *Service) ChangePassword(ctx context.Context, userID int64, currentToken, oldPassword, newPassword string) error {
+	if oldPassword == "" {
+		return apperr.ValidationField("old_password", "Vui lòng nhập mật khẩu hiện tại")
+	}
+	if len(newPassword) < 6 {
+		return apperr.ValidationField("new_password", "Mật khẩu mới phải có ít nhất 6 ký tự")
+	}
+	var hash string
+	if err := s.Pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, userID).Scan(&hash); err != nil {
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(oldPassword)) != nil {
+		return apperr.ValidationField("old_password", "Mật khẩu hiện tại không đúng")
+	}
+	h, err := s.hash(newPassword)
+	if err != nil {
+		return err
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE users SET password_hash=$2 WHERE id=$1`, userID, h); err != nil {
+		return err
+	}
+	_, err = s.Pool.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1 AND token<>$2`, userID, currentToken)
+	return err
+}

@@ -18,7 +18,7 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, data any, name 
 	case "", "json":
 		writeJSON(w, http.StatusOK, data)
 	case "xlsx", "docx":
-		if err := sendFile(w, f, name, table()); err != nil {
+		if err := s.sendFile(w, r, f, name, table()); err != nil {
 			writeErr(w, r, err)
 		}
 	default:

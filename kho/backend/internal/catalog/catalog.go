@@ -13,6 +13,7 @@ import (
 
 	"kho/internal/apperr"
 	"kho/internal/db"
+	"kho/internal/stock"
 	"kho/internal/util"
 )
 
@@ -719,4 +720,44 @@ func (s *Service) DeleteCashAccount(ctx context.Context, userID, id int64) error
 		}
 		return db.Audit(ctx, tx, userID, "cash_account", id, "deleted", b, nil)
 	})
+}
+
+// ProductStock là mặt hàng kèm tồn (danh sách with_stock=true).
+type ProductStock struct {
+	Product
+	TotalStock   decimal.Decimal  `json:"total_stock"`
+	WarehouseQty *decimal.Decimal `json:"warehouse_qty,omitempty"`
+}
+
+// ListProductsWithStock như ListProducts, thêm tồn tổng (và tồn tại kho warehouseID) đến hết hôm nay;
+// tồn của cả trang lấy bằng một truy vấn gộp.
+func (s *Service) ListProductsWithStock(ctx context.Context, f ProductFilter, warehouseID *int64) (util.Page[ProductStock], error) {
+	pg, err := s.ListProducts(ctx, f)
+	out := util.Page[ProductStock]{Page: pg.Page, PageSize: pg.PageSize, Total: pg.Total, Items: []ProductStock{}}
+	if err != nil {
+		return out, err
+	}
+	if warehouseID != nil {
+		if _, err := s.GetWarehouse(ctx, s.Pool, *warehouseID); err != nil {
+			return out, apperr.ValidationField("warehouse_id", "Kho không tồn tại")
+		}
+	}
+	ids := make([]int64, len(pg.Items))
+	for i, p := range pg.Items {
+		ids[i] = p.ID
+	}
+	totals, err := stock.StockTotals(ctx, s.Pool, ids, util.Today(), warehouseID)
+	if err != nil {
+		return out, err
+	}
+	for _, p := range pg.Items {
+		t := totals[p.ID]
+		it := ProductStock{Product: p, TotalStock: t[0]}
+		if warehouseID != nil {
+			w := t[1]
+			it.WarehouseQty = &w
+		}
+		out.Items = append(out.Items, it)
+	}
+	return out, nil
 }

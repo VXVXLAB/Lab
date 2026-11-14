@@ -171,6 +171,28 @@ func (s *Server) checkDocument(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// checkDocumentInput: POST /documents/check — kiểm tra phiếu chưa lưu (body như POST/PUT, thêm "id" nếu đang sửa).
+func (s *Server) checkDocumentInput(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		docs.Input
+		ID int64 `json:"id"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if in.ID < 0 {
+		writeErr(w, r, apperr.ValidationField("id", "id không hợp lệ"))
+		return
+	}
+	res, err := s.Docs.CheckInput(r.Context(), in.Input, in.ID)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (s *Server) exportDocument(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
@@ -194,7 +216,7 @@ func (s *Server) exportDocument(w http.ResponseWriter, r *http.Request) {
 	if d.Status != docs.StatusPosted {
 		name = "PHIEU_TAM_" + d.DraftNo
 	}
-	if err := sendFile(w, format, name, export.DocumentTable(d)); err != nil {
+	if err := s.sendFile(w, r, format, name, export.DocumentTable(d)); err != nil {
 		writeErr(w, r, err)
 	}
 }
@@ -338,7 +360,7 @@ func (s *Server) exportVoucher(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	if err := sendFile(w, format, v.VoucherNo, export.VoucherTable(v)); err != nil {
+	if err := s.sendFile(w, r, format, v.VoucherNo, export.VoucherTable(v)); err != nil {
 		writeErr(w, r, err)
 	}
 }

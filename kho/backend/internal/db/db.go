@@ -125,7 +125,7 @@ type SeedOptions struct {
 	BcryptCost int
 }
 
-// Seed tạo dữ liệu bắt buộc nếu chưa có: admin, 4 kho, mã DV, tài khoản TM/NH. Chạy nhiều lần không sao.
+// Seed tạo dữ liệu bắt buộc nếu chưa có: admin, 4 kho, mã DV, tài khoản TM/NH, dòng thông tin công ty. Chạy nhiều lần không sao.
 func Seed(ctx context.Context, pool *pgxpool.Pool, opt SeedOptions) error {
 	if opt.AdminPassword == "" {
 		opt.AdminPassword = "admin123"
@@ -172,6 +172,10 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, opt SeedOptions) error {
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO cash_accounts(code,name,kind)
 			SELECT 'NH','Ngân hàng','bank' WHERE NOT EXISTS (SELECT 1 FROM cash_accounts WHERE upper(code)='NH')`); err != nil {
+			return err
+		}
+		// Dòng thông tin công ty duy nhất (có thể bị mất khi TRUNCATE ... CASCADE dữ liệu demo).
+		if _, err := tx.Exec(ctx, `INSERT INTO settings(id) VALUES (1) ON CONFLICT (id) DO NOTHING`); err != nil {
 			return err
 		}
 		return nil

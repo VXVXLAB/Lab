@@ -1,10 +1,14 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
+	"kho/internal/apperr"
 	"kho/internal/catalog"
 	"kho/internal/stock"
 	"kho/internal/util"
@@ -134,16 +138,23 @@ func (s *Server) catalogRoutes(r chi.Router) {
 	})
 	// Các route đặc biệt của mặt hàng phải đăng ký trước /{id}.
 	r.Get("/products/lookup", s.lookupProduct)
+	r.Get("/products/price-info", s.priceInfoBatch)
 	r.Get("/products/{id}/price-info", s.priceInfo)
 	mount(s, r, "/products", crud[*catalog.Product, catalog.ProductInput]{
 		entity: "product",
 		list: func(r *http.Request, p util.ListParams) (any, error) {
 			g, err1 := qInt64(r, "group_id")
 			sv, err2 := qBool(r, "is_service")
-			if err := firstErr(err1, err2); err != nil {
+			ws, err3 := qBool(r, "with_stock")
+			wh, err4 := qInt64(r, "warehouse_id")
+			if err := firstErr(err1, err2, err3, err4); err != nil {
 				return nil, err
 			}
-			return cat.ListProducts(r.Context(), catalog.ProductFilter{ListParams: p, GroupID: g, IsService: sv})
+			f := catalog.ProductFilter{ListParams: p, GroupID: g, IsService: sv}
+			if ws != nil && *ws {
+				return cat.ListProductsWithStock(r.Context(), f, wh)
+			}
+			return cat.ListProducts(r.Context(), f)
 		},
 		get: func(r *http.Request, id int64) (*catalog.Product, error) {
 			return cat.GetProduct(r.Context(), s.Pool, id)
@@ -193,55 +204,94 @@ func (s *Server) lookupProduct(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
+// maxPriceInfoIDs là số mặt hàng tối đa của một lần gọi price-info hàng loạt.
+const maxPriceInfoIDs = 500
+
+func (s *Server) priceInfoParams(r *http.Request) (util.Date, *int64, error) {
+	d, err := qDate(r, "date")
+	if err != nil {
+		return util.Date{}, nil, err
+	}
+	wh, err := qInt64(r, "warehouse_id")
+	if err != nil {
+		return util.Date{}, nil, err
+	}
+	if wh != nil {
+		if _, err := s.Catalog.GetWarehouse(r.Context(), s.Pool, *wh); err != nil {
+			return util.Date{}, nil, apperr.ValidationField("warehouse_id", "Kho không tồn tại")
+		}
+	}
+	date := util.Today()
+	if d != nil {
+		date = *d
+	}
+	return date, wh, nil
+}
+
 func (s *Server) priceInfo(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	d, err := qDate(r, "date")
+	date, wh, err := s.priceInfoParams(r)
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	date := util.Today()
-	if d != nil {
-		date = *d
-	}
-	p, err := s.Catalog.GetProduct(r.Context(), s.Pool, id)
+	list, _, err := stock.PriceInfos(r.Context(), s.Pool, []int64{id}, date, wh)
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	costs, err := stock.CostPrices(r.Context(), s.Pool, []int64{id}, date)
+	if len(list) == 0 {
+		writeErr(w, r, apperr.NotFound("mặt hàng"))
+		return
+	}
+	writeJSON(w, http.StatusOK, list[0])
+}
+
+// priceInfoBatch: GET /products/price-info?ids=1,2,3&date=&warehouse_id=
+func (s *Server) priceInfoBatch(w http.ResponseWriter, r *http.Request) {
+	raw := strings.TrimSpace(r.URL.Query().Get("ids"))
+	if raw == "" {
+		writeErr(w, r, apperr.ValidationField("ids", "Vui lòng truyền ids (danh sách mã số mặt hàng, cách nhau dấu phẩy)"))
+		return
+	}
+	var ids []int64
+	seen := map[int64]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(part, 10, 64)
+		if err != nil || id <= 0 {
+			writeErr(w, r, apperr.ValidationField("ids", "ids chỉ gồm các số nguyên dương cách nhau dấu phẩy"))
+			return
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) > maxPriceInfoIDs {
+		writeErr(w, r, apperr.ValidationField("ids", fmt.Sprintf("Tối đa %d mặt hàng mỗi lần", maxPriceInfoIDs)))
+		return
+	}
+	date, wh, err := s.priceInfoParams(r)
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	byWh, total, err := stock.ByWarehouse(r.Context(), s.Pool, id, date)
+	list, missing, err := stock.PriceInfos(r.Context(), s.Pool, ids, date, wh)
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	c := costs[id]
-	if p.IsService {
-		c.Source = "none"
+	if len(missing) > 0 {
+		writeErr(w, r, apperr.New(http.StatusNotFound, apperr.CodeNotFound, fmt.Sprintf("Không tìm thấy mặt hàng có mã số %v", missing), map[string]any{"missing_ids": missing}))
+		return
 	}
-	if c.Source == "" {
-		c.Source = "none"
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"product_id":         p.ID,
-		"code":               p.Code,
-		"name":               p.Name,
-		"unit":               p.Unit,
-		"is_service":         p.IsService,
-		"date":               date,
-		"sale_price":         p.SalePrice,
-		"purchase_price":     p.PurchasePrice,
-		"cost_price":         c.Price,
-		"cost_source":        c.Source,
-		"total_stock":        total,
-		"stock_by_warehouse": byWh,
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"items": list})
 }

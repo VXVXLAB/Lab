@@ -175,6 +175,10 @@ func (s *seeder) run() (err error) {
 	}
 	s.lan, s.hoa = lan.ID, hoa.ID
 
+	if _, err := s.cat.SaveSettings(ctx, s.admin, catalog.SettingsInput{CompanyName: "CÔNG TY TNHH VẬT TƯ HÀN MINH PHÁT",
+		CompanyAddress: "12 Lê Trọng Tấn, P. Tây Thạnh, Q. Tân Phú, TP.HCM", CompanyPhone: "028 3812 3456", CompanyTaxCode: "0312345678"}); err != nil {
+		return err
+	}
 	// Kho: đổi tên 4 kho seed.
 	s.wh = map[string]int64{}
 	names := map[string]string{"KHO1": "Kho Tân Bình", "KHO2": "Kho Bình Tân", "KHO3": "Kho Thủ Đức", "KHO4": "Kho Bình Dương"}

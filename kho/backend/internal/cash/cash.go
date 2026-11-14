@@ -422,11 +422,17 @@ type Filter struct {
 }
 
 // List liệt kê phiếu thu chi.
-func (s *Service) List(ctx context.Context, f Filter) (util.Page[Summary], error) {
+// ListResult là danh sách phân trang kèm tổng tiền của MỌI dòng khớp bộ lọc (không chỉ trang hiện tại).
+type ListResult struct {
+	util.Page[Summary]
+	SumTotalAmount decimal.Decimal `json:"sum_total_amount"`
+}
+
+func (s *Service) List(ctx context.Context, f Filter) (ListResult, error) {
 	var w util.Where
 	if f.Type != "" {
 		if f.Type != TypeReceipt && f.Type != TypePayment {
-			return util.Page[Summary]{}, apperr.ValidationField("type", "type phải là receipt hoặc payment")
+			return ListResult{}, apperr.ValidationField("type", "type phải là receipt hoặc payment")
 		}
 		w.Add(`v.voucher_type = ?`, f.Type)
 	}
@@ -447,26 +453,27 @@ func (s *Service) List(ctx context.Context, f Filter) (util.Page[Summary], error
 			OR EXISTS (SELECT 1 FROM cash_voucher_lines l WHERE l.voucher_id=v.id AND kho_fold(l.description) LIKE ?))`,
 			"%"+q+"%", util.LikePattern(q), util.LikePattern(q), util.LikePattern(q))
 	}
-	out := util.Page[Summary]{Page: f.Page, PageSize: f.PageSize, Items: []Summary{}}
+	res := ListResult{Page: util.Page[Summary]{Page: f.Page, PageSize: f.PageSize, Items: []Summary{}}, SumTotalAmount: decimal.Zero}
+	out := &res.Page
 	from := ` FROM cash_vouchers v JOIN cash_accounts a ON a.id=v.account_id LEFT JOIN partners p ON p.id=v.partner_id`
-	if err := s.Pool.QueryRow(ctx, `SELECT count(*)`+from+w.SQL(), w.Args...).Scan(&out.Total); err != nil {
-		return out, err
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*), COALESCE(sum(v.total_amount), 0)`+from+w.SQL(), w.Args...).Scan(&out.Total, &res.SumTotalAmount); err != nil {
+		return res, err
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT v.id, v.voucher_type, v.voucher_no, v.voucher_date, v.debt_side, v.account_id, a.name, a.kind, v.partner_id, p.name,
 		v.note, v.total_amount, (SELECT count(*) FROM cash_voucher_lines l WHERE l.voucher_id=v.id)::int, v.version, uu.full_name, v.updated_at`+from+`
 		LEFT JOIN users uu ON uu.id=v.updated_by`+w.SQL()+` ORDER BY v.voucher_date DESC, v.id DESC LIMIT `+w.Arg(f.PageSize)+` OFFSET `+w.Arg(f.Offset()), w.Args...)
 	if err != nil {
-		return out, err
+		return res, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var x Summary
 		if err := rows.Scan(&x.ID, &x.VoucherType, &x.VoucherNo, &x.VoucherDate, &x.DebtSide, &x.AccountID, &x.AccountName, &x.AccountKind, &x.PartnerID, &x.PartnerName,
 			&x.Note, &x.TotalAmount, &x.LineCount, &x.Version, &x.UpdatedByName, &x.UpdatedAt); err != nil {
-			return out, err
+			return res, err
 		}
 		x.VoucherTypeName = TypeName(x.VoucherType, x.AccountKind)
 		out.Items = append(out.Items, x)
 	}
-	return out, rows.Err()
+	return res, rows.Err()
 }

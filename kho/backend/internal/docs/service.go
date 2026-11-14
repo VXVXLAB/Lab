@@ -153,6 +153,9 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 				return h, nil, lineErr(i, "product_code", "không tìm thấy mã hàng "+strings.TrimSpace(li.ProductCode))
 			}
 		default:
+			if in.lenient {
+				continue
+			}
 			return h, nil, lineErr(i, "product_id", "vui lòng chọn mã hàng")
 		}
 		if strict && !p.Active {
@@ -181,6 +184,9 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 				pl.UnitPrice = &up
 			}
 		} else {
+			if in.lenient && (li.Qty == nil || !li.Qty.Round(3).IsPositive()) {
+				continue
+			}
 			if li.Qty == nil || !li.Qty.IsPositive() {
 				return h, nil, lineErr(i, "qty", "số lượng phải lớn hơn 0")
 			}
@@ -738,6 +744,48 @@ func (s *Service) Check(ctx context.Context, id int64) (*CheckResult, error) {
 	return res, nil
 }
 
+// CheckInput kiểm tra tồn & bán lỗ cho một phiếu CHƯA LƯU (đang gõ) như thể ghi sổ ngay — không đổi dữ liệu.
+// id ≠ 0: phiếu đang sửa; bút toán hiện có của nó được loại trừ (thay bằng nội dung mới), đối tác giữ nguyên
+// không bị kiểm lại cờ KH/NCC. Dòng chưa chọn mặt hàng hoặc hàng hóa chưa có SL được bỏ qua.
+func (s *Service) CheckInput(ctx context.Context, in Input, id int64) (*CheckResult, error) {
+	in.lenient = true
+	strict := true
+	var oldPartner *int64
+	if id != 0 {
+		d, err := s.Get(ctx, s.Pool, id)
+		if err != nil {
+			return nil, err
+		}
+		if in.DocType == "" {
+			in.DocType = d.DocType
+		}
+		if in.DocType != d.DocType {
+			return nil, apperr.ValidationField("doc_type", "Không được đổi loại chứng từ")
+		}
+		strict, oldPartner = false, d.PartnerID
+	}
+	h, lines, err := s.validate(ctx, s.Pool, in, strict, oldPartner)
+	if err != nil {
+		return nil, err
+	}
+	newMovs := movements(h, lines)
+	var oldPairs []stock.Pair
+	if id != 0 {
+		if oldPairs, err = existingPairs(ctx, s.Pool, id); err != nil {
+			return nil, err
+		}
+	}
+	sh, err := stock.CheckShortages(ctx, s.Pool, id, newMovs, stock.MergePairs(oldPairs, stock.PairsOf(newMovs)))
+	if err != nil {
+		return nil, err
+	}
+	lw, err := lossWarnings(ctx, s.Pool, h, lines)
+	if err != nil {
+		return nil, err
+	}
+	return &CheckResult{StockShortages: sh, LossLines: lw, CanPost: len(sh) == 0 && len(lines) > 0}, nil
+}
+
 const docSelect = `SELECT d.id, d.doc_type, d.doc_no, d.draft_no, d.doc_date, d.status,
 	d.partner_id, p.code, p.name, p.address, p.phone,
 	d.warehouse_id, w.code, w.name, d.to_warehouse_id, tw.code, tw.name,
@@ -821,19 +869,25 @@ type Filter struct {
 }
 
 // List liệt kê chứng từ (mới nhất trước).
-func (s *Service) List(ctx context.Context, f Filter) (util.Page[Summary], error) {
+// ListResult là danh sách phân trang kèm tổng tiền của MỌI dòng khớp bộ lọc (không chỉ trang hiện tại).
+type ListResult struct {
+	util.Page[Summary]
+	SumTotalAmount decimal.Decimal `json:"sum_total_amount"`
+}
+
+func (s *Service) List(ctx context.Context, f Filter) (ListResult, error) {
 	var w util.Where
 	if len(f.Type) > 0 {
 		for _, t := range f.Type {
 			if _, ok := TypeNames[t]; !ok {
-				return util.Page[Summary]{}, apperr.ValidationField("type", "Loại chứng từ không hợp lệ: "+t)
+				return ListResult{}, apperr.ValidationField("type", "Loại chứng từ không hợp lệ: "+t)
 			}
 		}
 		w.Add(`d.doc_type = ANY(?)`, f.Type)
 	}
 	if f.Status != "" {
 		if f.Status != StatusDraft && f.Status != StatusPosted {
-			return util.Page[Summary]{}, apperr.ValidationField("status", "status phải là draft hoặc posted")
+			return ListResult{}, apperr.ValidationField("status", "status phải là draft hoặc posted")
 		}
 		w.Add(`d.status = ?`, f.Status)
 	}
@@ -856,10 +910,11 @@ func (s *Service) List(ctx context.Context, f Filter) (util.Page[Summary], error
 		w.Add(`(upper(COALESCE(d.doc_no,'')) LIKE upper(?) OR upper(d.draft_no) LIKE upper(?) OR COALESCE(p.search_key,'') LIKE ? OR kho_fold(d.note) LIKE ?)`,
 			"%"+q+"%", "%"+q+"%", util.LikePattern(q), util.LikePattern(q))
 	}
-	out := util.Page[Summary]{Page: f.Page, PageSize: f.PageSize, Items: []Summary{}}
+	res := ListResult{Page: util.Page[Summary]{Page: f.Page, PageSize: f.PageSize, Items: []Summary{}}, SumTotalAmount: decimal.Zero}
+	out := &res.Page
 	from := ` FROM documents d LEFT JOIN partners p ON p.id=d.partner_id`
-	if err := s.Pool.QueryRow(ctx, `SELECT count(*)`+from+w.SQL(), w.Args...).Scan(&out.Total); err != nil {
-		return out, err
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*), COALESCE(sum(d.total_amount), 0)`+from+w.SQL(), w.Args...).Scan(&out.Total, &res.SumTotalAmount); err != nil {
+		return res, err
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT d.id, d.doc_type, d.doc_no, d.draft_no, d.doc_date, d.status, d.partner_id, p.name,
 		d.warehouse_id, w.name, d.to_warehouse_id, tw.name, d.note, d.total_amount,
@@ -868,7 +923,7 @@ func (s *Service) List(ctx context.Context, f Filter) (util.Page[Summary], error
 		LEFT JOIN users cu ON cu.id=d.created_by LEFT JOIN users uu ON uu.id=d.updated_by`+w.SQL()+
 		` ORDER BY d.doc_date DESC, d.id DESC LIMIT `+w.Arg(f.PageSize)+` OFFSET `+w.Arg(f.Offset()), w.Args...)
 	if err != nil {
-		return out, err
+		return res, err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -876,7 +931,7 @@ func (s *Service) List(ctx context.Context, f Filter) (util.Page[Summary], error
 		if err := rows.Scan(&x.ID, &x.DocType, &x.DocNo, &x.DraftNo, &x.DocDate, &x.Status, &x.PartnerID, &x.PartnerName,
 			&x.WarehouseID, &x.WarehouseName, &x.ToWarehouseID, &x.ToWarehouse, &x.Note, &x.TotalAmount,
 			&x.LineCount, &x.Version, &x.CreatedByName, &x.UpdatedByName, &x.PostedAt, &x.UpdatedAt); err != nil {
-			return out, err
+			return res, err
 		}
 		x.DocTypeName = TypeNames[x.DocType]
 		x.DisplayNo = x.DraftNo
@@ -885,7 +940,7 @@ func (s *Service) List(ctx context.Context, f Filter) (util.Page[Summary], error
 		}
 		out.Items = append(out.Items, x)
 	}
-	return out, rows.Err()
+	return res, rows.Err()
 }
 
 // History trả nhật ký thay đổi của một thực thể (document | voucher ...).
