@@ -296,7 +296,7 @@ func (s *Server) exportDocument(w http.ResponseWriter, r *http.Request) {
 	if d.Status != docs.StatusPosted {
 		name = "PHIEU_TAM_" + d.DraftNo
 	}
-	if err := s.sendFile(w, r, format, name, export.DocumentTableMasked(d, !can(r, ext.PCostView), !can(r, ext.PDebtView))); err != nil {
+	if err := s.sendFile(w, r, format, name, export.DocumentTableOpts(d, !can(r, ext.PCostView), !can(r, ext.PDebtView), s.printOpts(r, d.DocType))); err != nil {
 		writeErr(w, r, err)
 	}
 }
@@ -472,7 +472,11 @@ func (s *Server) exportVoucher(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	if err := s.sendFile(w, r, format, v.VoucherNo, export.VoucherTable(v)); err != nil {
+	key := "payment"
+	if v.VoucherType == "receipt" {
+		key = "receipt"
+	}
+	if err := s.sendFile(w, r, format, v.VoucherNo, export.VoucherTableOpts(export.VoucherTable(v), s.printOpts(r, key))); err != nil {
 		writeErr(w, r, err)
 	}
 }

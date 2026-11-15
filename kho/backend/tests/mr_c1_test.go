@@ -150,6 +150,17 @@ func mrMutations(e *Env, f mrFixture, tag string) []mrMut {
 		mrMut{pattern: "PUT /api/partners/{id}/prices", method: "PUT", path: fmt.Sprintf("/api/partners/%d/prices", f.cus),
 			body: map[string]any{"items": []any{map[string]any{"product_id": f.prod, "price": 900}}}, perms: []string{"sale.write"}},
 		mrMut{pattern: "DELETE /api/partners/{id}/prices/{product_id}", method: "DELETE", path: fmt.Sprintf("/api/partners/%d/prices/999999", f.cus), perms: []string{"sale.write"}},
+		// Đợt M3.
+		mrMut{pattern: "POST /api/documents", method: "POST", path: "/api/documents",
+			body: DocBody("stocktake", "2026-02-02", 0, e.WH["KHO1"], Line(f.prod, "1", nil)), perms: []string{"stock.write"}},
+		mrMut{pattern: "PUT /api/products/{id}/units", method: "PUT", path: fmt.Sprintf("/api/products/%d/units", f.prod),
+			body: map[string]any{"items": []any{map[string]any{"unit": "Thùng" + tag, "factor": 12}}}, perms: []string{"catalog.write"}},
+		mrMut{pattern: "POST /api/import/{kind}", method: "POST", path: "/api/import/product_units?dry_run=1", upload: true, perms: []string{"catalog.write"}},
+		mrMut{pattern: "PUT /api/settings/vat", method: "PUT", path: "/api/settings/vat", body: map[string]any{"default_vat_rate": nil}, admin: true},
+		mrMut{pattern: "PUT /api/print-template", method: "PUT", path: "/api/print-template", body: map[string]any{"paper_size_document": "A4", "paper_size_voucher": "A5"}, admin: true},
+		mrMut{pattern: "PUT /api/print-template/logo", method: "PUT", path: "/api/print-template/logo", body: map[string]any{}, admin: true},
+		mrMut{pattern: "POST /api/print-template/logo", method: "POST", path: "/api/print-template/logo", body: map[string]any{}, admin: true},
+		mrMut{pattern: "DELETE /api/print-template/logo", method: "DELETE", path: "/api/print-template/logo", admin: true},
 		mrMut{pattern: "POST /api/auth/change-password", method: "POST", path: "/api/auth/change-password", body: map[string]any{"old_password": "sai", "new_password": "1234567"}},
 		mrMut{pattern: "POST /api/auth/login", skip: true},
 		mrMut{pattern: "POST /api/auth/logout", skip: true},
@@ -199,7 +210,8 @@ func runMatrix(t *testing.T, e *Env, clients map[string]*Client, perms map[strin
 func TestMR_C1_MaTranQuyenMoiEndpointGhi(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	mrEnable(e, "permissions", "import_excel", "period_lock", "price_list", "min_stock", "credit_limit", "profit_report")
+	mrEnable(e, "permissions", "import_excel", "period_lock", "price_list", "min_stock", "credit_limit", "profit_report",
+		"stocktake", "unit_conversion", "vat", "print_template")
 	f := mrSeed(e, "")
 	clients := map[string]*Client{}
 	for role := range mrRoleDefaults {
@@ -248,6 +260,11 @@ func TestMR_C1_MaTranQuyenMoiEndpointGhi(t *testing.T) {
 		{"/api/reports/debt-aging", []string{"debt.view"}, nil},
 		{"/api/reports/profit", []string{"report.view", "cost.view"}, nil},
 		{"/api/reports/low-stock", nil, nil},
+		{"/api/reports/vat-summary", []string{"report.view"}, nil},
+		{fmt.Sprintf("/api/documents/stocktake-load?warehouse_id=%d", e.WH["KHO1"]), nil, nil},
+		{fmt.Sprintf("/api/products/%d/units", f.prod), nil, nil},
+		{"/api/settings/vat", nil, nil},
+		{"/api/print-template", nil, nil},
 		{fmt.Sprintf("/api/partners/%d/prices", f.cus), nil, nil},
 		{fmt.Sprintf("/api/products/sale-price?partner_id=%d&ids=%d", f.cus, f.prod), nil, nil},
 		{"/api/documents", nil, nil},

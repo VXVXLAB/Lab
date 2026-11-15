@@ -58,12 +58,37 @@ ngân hàng. Đăng nhập `admin`, làm theo màn hình "Bắt đầu sử dụ
 | `STATIC_DIR` | `../frontend/dist` | Thư mục giao diện đã build |
 | `ADMIN_PASSWORD` | `admin123` | Mật khẩu `admin` khi tạo lần đầu — **phải đổi** |
 | `COOKIE_SECURE` | trống | `true` nếu chạy sau HTTPS |
+| `KHO_EDITION` | trống | `extended` ⇒ bản mở rộng (các tính năng mở rộng mặc định bật) |
+| `TLS_CERT`, `TLS_KEY` | trống | Đường dẫn file chứng thư / khóa riêng (PEM) ⇒ chạy **HTTPS**, cookie tự có `Secure` (mục 4.1) |
 
 **Tự chạy khi bật máy:** Linux dùng systemd (`Restart=always`); Windows dùng Task Scheduler "At startup" hoặc
 NSSM để chạy `khoserver.exe` như một dịch vụ.
 
 **Mạng:** mở cổng 8080 trên tường lửa máy chủ cho mạng nội bộ; đặt IP tĩnh cho máy chủ. Không mở cổng này ra
-Internet (phần mềm thiết kế cho mạng nội bộ, chưa có HTTPS).
+Internet (phần mềm thiết kế cho mạng nội bộ; HTTPS ở mục 4.1 chỉ để mã hóa trong mạng nội bộ).
+
+### 4.1 HTTPS trong mạng nội bộ (bản mở rộng C13)
+Đặt cả hai biến `TLS_CERT` và `TLS_KEY` (trong môi trường hoặc trong `kho.env` cạnh `khoserver`) ⇒ máy chủ chạy HTTPS
+trên cùng `LISTEN_ADDR` và cookie đăng nhập tự có cờ `Secure`. File sai (không tồn tại, không phải PEM, khóa không khớp
+chứng thư, chỉ đặt một biến) ⇒ `khoserver` dừng ngay với thông báo "Không bật được HTTPS: …". Chứng thư đã / sắp hết hạn
+(≤ 30 ngày) ⇒ ghi cảnh báo vào log nhưng vẫn chạy.
+
+Tạo chứng thư tự ký (10 năm) cho máy chủ có IP `192.168.1.10` và tên `kho.local` (thay bằng IP / tên thật):
+```bash
+openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+  -keyout kho.key -out kho.crt -subj "/CN=kho.local" \
+  -addext "subjectAltName=DNS:kho.local,IP:192.168.1.10"
+chmod 600 kho.key
+```
+Rồi trong `kho.env`:
+```
+TLS_CERT=/duong/dan/kho.crt
+TLS_KEY=/duong/dan/kho.key
+```
+Trên Windows có thể dùng `openssl` đi kèm Git for Windows (`C:\Program Files\Git\usr\bin\openssl.exe`). Truy cập
+`https://192.168.1.10:8080`. Trình duyệt sẽ cảnh báo vì chứng thư tự ký: cài `kho.crt` vào mục "Trusted Root
+Certification Authorities" của từng máy (Windows: nhấp đúp file `.crt` › Install Certificate › Local Machine) để hết
+cảnh báo. Khi đổi chứng thư chỉ cần thay file và khởi động lại `khoserver`.
 
 ## 5. Sao lưu — bắt buộc trước khi dùng thật
 Toàn bộ sổ sách nằm trong PostgreSQL. Hỏng ổ cứng máy chủ mà không có bản sao lưu là mất hết.

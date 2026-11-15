@@ -160,6 +160,8 @@ func (s *Server) catalogRoutes(r chi.Router) {
 	r.Delete("/partners/{id}/prices/{product_id}", s.deletePartnerPrice)
 	r.Get("/products/sale-price", s.salePrice)
 	r.Get("/products/{id}/price-info", s.priceInfo)
+	r.Get("/products/{id}/units", s.listProductUnits)
+	r.Put("/products/{id}/units", s.saveProductUnits)
 	mount(s, r, "/products", crud[*catalog.Product, catalog.ProductInput]{
 		entity: "product",
 		list: func(r *http.Request, p util.ListParams) (any, error) {
@@ -188,12 +190,16 @@ func (s *Server) catalogRoutes(r chi.Router) {
 			p, err := cat.GetProduct(r.Context(), s.Pool, id)
 			if err == nil {
 				productOut(r, p)
+				s.productUnitsOut(r, p)
 			}
 			return p, err
 		},
 		save: func(r *http.Request, uid, id int64, in catalog.ProductInput) (out *catalog.Product, err error) {
 			if !extOf(r).st.On(ext.FMinStock) {
 				in.MinStock = util.OptDec{} // tính năng tắt ⇒ không đổi tồn tối thiểu
+			}
+			if !extOf(r).st.On(ext.FVAT) {
+				in.VatRate = util.OptStr{} // tính năng tắt ⇒ không đổi thuế suất
 			}
 			defer func() {
 				if out != nil {
@@ -299,6 +305,7 @@ func (s *Server) lookupProduct(w http.ResponseWriter, r *http.Request) {
 	p, err := s.Catalog.LookupProduct(r.Context(), s.Pool, r.URL.Query().Get("code"))
 	if err == nil {
 		productOut(r, p)
+		s.productUnitsOut(r, p)
 	}
 	if opt != nil && *opt {
 		if err != nil {
@@ -458,6 +465,22 @@ func productOut(r *http.Request, p *catalog.Product) {
 		p.MinStock = nil
 	} else if p.MinStock == nil {
 		p.MinStock = &decimal.NullDecimal{}
+	}
+	// C11: thuế suất mặc định của mặt hàng chỉ có khi tính năng vat bật.
+	if !extOf(r).st.On(ext.FVAT) {
+		p.VatRate = nil
+	} else if p.VatRate == nil {
+		p.VatRate = &util.NullStr{}
+	}
+}
+
+// productUnitsOut (C10): GET một mặt hàng / tra mã kèm danh sách đơn vị quy đổi khi tính năng bật.
+func (s *Server) productUnitsOut(r *http.Request, p *catalog.Product) {
+	if p == nil || !extOf(r).st.On(ext.FUnitConversion) {
+		return
+	}
+	if us, err := catalog.ListUnits(r.Context(), s.Pool, p.ID); err == nil {
+		p.Units = &us
 	}
 }
 

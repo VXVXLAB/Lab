@@ -7,6 +7,7 @@
 //	ADMIN_PASSWORD (mật khẩu admin khi seed lần đầu, mặc định admin123)
 //	STATIC_DIR     (thư mục giao diện đã build, mặc định ../frontend/dist)
 //	COOKIE_SECURE  (true nếu chạy sau HTTPS)
+//	TLS_CERT, TLS_KEY (đường dẫn file chứng thư / khóa riêng PEM ⇒ máy chủ chạy HTTPS, cookie Secure; xem CAI_DAT.md)
 //	KHO_EDITION    (extended ⇒ tính năng mở rộng mặc định bật; bỏ trống ⇒ bản chuẩn, mặc định tắt)
 //	LOG_FILE       (ghi log ra file này thay vì màn hình; dùng khi chạy nền)
 //
@@ -30,6 +31,7 @@ import (
 	"kho/internal/db"
 	"kho/internal/ext"
 	"kho/internal/httpapi"
+	"kho/internal/tlsconf"
 )
 
 func env(k, def string) string {
@@ -99,6 +101,15 @@ func main() {
 	addr := env("LISTEN_ADDR", ":8080")
 	static := env("STATIC_DIR", defaultStatic)
 
+	// HTTPS (bản mở rộng C13): kiểm tra file chứng thư TRƯỚC khi kết nối CSDL để lỗi cấu hình hiện ngay.
+	tlsCfg, tlsWarn, err := tlsconf.Load(os.Getenv("TLS_CERT"), os.Getenv("TLS_KEY"))
+	if err != nil {
+		log.Fatalf("Không bật được HTTPS: %v", err)
+	}
+	for _, w := range tlsWarn {
+		log.Printf("Cảnh báo: %s", w)
+	}
+
 	pool, err := db.Connect(ctx, dbURL, db.Options{})
 	if err != nil {
 		log.Fatalf("Không kết nối được CSDL: %v", err)
@@ -115,7 +126,7 @@ func main() {
 		log.Fatalf("Lỗi seed tính năng: %v", err)
 	}
 
-	srv := httpapi.New(httpapi.Config{Pool: pool, StaticDir: static, SecureCookie: env("COOKIE_SECURE", "") == "true"})
+	srv := httpapi.New(httpapi.Config{Pool: pool, StaticDir: static, SecureCookie: env("COOKIE_SECURE", "") == "true" || tlsCfg != nil})
 	hs := &http.Server{
 		Addr:              addr,
 		Handler:           srv.Handler(),
@@ -123,6 +134,7 @@ func main() {
 		ReadTimeout:       60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		// Không đặt WriteTimeout vì kết nối SSE /api/events giữ lâu.
+		TLSConfig: tlsCfg,
 	}
 	go func() {
 		<-ctx.Done()
@@ -131,7 +143,13 @@ func main() {
 		_ = hs.Shutdown(sh)
 	}()
 	httpapi.LogStartup(addr, static)
-	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if tlsCfg != nil {
+		log.Printf("HTTPS đang bật (TLS_CERT=%s)", os.Getenv("TLS_CERT"))
+		err = hs.ListenAndServeTLS("", "")
+	} else {
+		err = hs.ListenAndServe()
+	}
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("Lỗi máy chủ: %v", err)
 	}
 }

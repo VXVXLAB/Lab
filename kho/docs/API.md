@@ -593,6 +593,12 @@ Gợi ý frontend: nhận sự kiện ⇒ invalidate query liên quan (TanStack 
 | 80 | GET | `/api/products/sale-price` (mục 9.2) |
 | 81–83 | GET | `/api/reports/low-stock`, `/api/reports/debt-aging`, `/api/reports/profit` (mục 9) |
 | 84 | GET | `/api/audit` (quản trị, mục 10) |
+| 85–86 | GET, PUT | `/api/products/{id}/units` (mục 11.2) |
+| 87 | GET | `/api/documents/stocktake-load` (mục 11.1) |
+| 88–89 | GET, PUT | `/api/settings/vat` (mục 11.3) |
+| 90 | GET | `/api/reports/vat-summary` (mục 11.3) |
+| 91–92 | GET, PUT | `/api/print-template` (mục 11.4) |
+| 93–96 | GET, PUT, POST, DELETE | `/api/print-template/logo` (mục 11.4) |
 
 ---
 
@@ -792,3 +798,91 @@ nhập mới chỉ được áp dụng khi **có gửi** và tính năng bật (
    "total": 37, "limit": 100, "offset": 0}
   ```
   Các `entity` thường gặp: `features`, `role_permissions`, `period_lock`, `import`, `document`, `voucher`, `product`, `partner`, `product_group`, `warehouse`, `cash_account`, `partner_prices`, `settings`, `user` (action `created`, `role_changed`, `deactivated`, `activated`, `password_reset`, `password_changed`, `updated`; before/after có username, full_name, role, active — không bao giờ có mật khẩu). `to` < `from` ⇒ 400.
+
+
+## 11. Bản mở rộng — đợt M3
+
+Khóa có sẵn từ đợt này: `stocktake`, `unit_conversion`, `vat`, `print_template` (mọi khóa trong `/api/features` đều đã
+làm xong). Tắt ⇒ API riêng trả `404 FEATURE_OFF`, JSON chứng từ / mặt hàng / báo cáo **y như bản chuẩn** (không có trường
+mới) — trừ khi dữ liệu đã có giá trị khác mặc định từ lúc tính năng bật (vd. dòng có hệ số ≠ 1, phiếu có thuế): khi đó
+các trường đó vẫn hiện để số liệu đọc được.
+
+**Máy khách cũ / không gửi trường mới:** dòng gửi lại `id` của chính phiếu (cùng mặt hàng) mà **không gửi** `unit` hoặc
+gửi đúng đơn vị đang lưu ⇒ giữ đơn vị + hệ số; không gửi `vat_rate` ⇒ giữ thuế suất đang lưu. Dòng mới ⇒ mặc định.
+
+### 11.1 Kiểm kê (`stocktake`)
+- `doc_type: "stocktake"`, số chính thức `KK00001`, một kho, không đối tác, cần `stock.write`. Dòng: `product_id` /
+  `product_code`, `qty` = **số lượng thực tế** (≥ 0, bắt buộc; 0 = hết hàng), `unit` (tùy chọn, mục 11.2); không có đơn
+  giá / thuế (gửi ⇒ 400); mỗi mã một dòng; không có dòng dịch vụ. `total_amount` = 0.
+- Mỗi dòng có thêm:
+  ```json
+  {"book_qty": 7, "counted_qty": 9, "diff_qty": 2, "current_book_qty": null, "book_changed": false}
+  ```
+  (đơn vị gốc). Phiếu tạm: `book_qty` = tồn cuối ngày phiếu tại kho tính lúc xem. Đã ghi sổ: `book_qty` là số đã dùng khi
+  ghi sổ (lưu lại), `current_book_qty` = tồn sổ sách tính lại theo sổ hiện tại (không gồm chính phiếu), `book_changed` =
+  khác nhau (có chứng từ lùi ngày sửa lịch sử sau khi kiểm). Phiếu có `book_changed_lines` (số dòng lệch).
+- Ghi sổ (và sửa phiếu đã ghi sổ): khóa mặt hàng + kho, tính lại tồn sổ sách, sinh bút toán **nhập** (thừa) / **xuất**
+  (thiếu) đúng bằng `counted − book`; không chênh ⇒ không có bút toán. R6 áp dụng từ ngày phiếu (`422 INSUFFICIENT_STOCK`).
+  Không vào công nợ, không có trong báo cáo mua / bán; thẻ kho ghi "Kiểm kê thừa" / "Kiểm kê thiếu". Bỏ ghi sổ, sửa, xóa,
+  khóa sổ, `posted.edit`, version như mọi chứng từ. Tắt tính năng ⇒ phiếu kiểm kê cũ vẫn tính trong tồn, nhưng sửa / ghi
+  sổ ⇒ `404 FEATURE_OFF`; tạo mới ⇒ 400 như bản chuẩn.
+- `GET /api/documents/stocktake-load?warehouse_id=&date=` → `{"warehouse_id", "date", "items": [{"product_id", "product_code",
+  "product_name", "unit", "book_qty"}]}` — mọi mã (không phải dịch vụ) có tồn ≠ 0 tại kho cuối ngày (nút "Nạp toàn bộ mã
+  đang có tồn").
+- Xuất `/documents/{id}/export`: "BIÊN BẢN KIỂM KÊ KHO", cột Tồn sổ sách / Thực tế / Chênh lệch.
+- Lãi gộp (C7): thừa nhập theo giá bình quân hiện tại (chưa từng nhập ⇒ giá mua mặc định), thiếu xuất theo bình quân hiện
+  tại; không sinh dòng giá vốn.
+
+### 11.2 Quy đổi đơn vị (`unit_conversion`)
+- `GET /api/products/{id}/units` → `{"product_id", "base_unit": "Lon", "items": [{"unit": "Thùng", "factor": 24, "in_use": true}]}`
+  (1 Thùng = 24 Lon). `PUT` (`catalog.write`) body `{"items": [{"unit": "Thùng", "factor": 24}, …]}` **thay cả danh sách**;
+  hệ số > 0, tối đa 6 chữ số thập phân, < 10⁹; không trùng đơn vị gốc; không lặp. Đơn vị đang dùng trên chứng từ (cùng tên,
+  cùng hệ số) mà bị bỏ / đổi hệ số ⇒ `409 IN_USE`. `GET /products/{id}` và `/products/lookup` kèm `"units": [...]`.
+  Đổi đơn vị gốc của mặt hàng đã có dòng quy đổi ⇒ 400.
+- Dòng chứng từ (mọi loại, kể cả chuyển kho, kiểm kê): `unit` = đơn vị gốc hoặc đơn vị đã khai báo (không phân biệt hoa
+  thường; khác ⇒ 400). `qty`, `unit_price`, `amount` theo đơn vị đã chọn — `amount = round(qty × unit_price)` đúng như nhập.
+  JSON dòng thêm `{"factor": 24, "base_qty": 48, "base_unit": "Lon"}`; `base_qty = round(qty × factor, 3)` (bằng 0 ⇒ 400).
+- Sổ kho, tồn, kiểm tra thiếu hàng (thông báo theo đơn vị gốc), hàng cần đặt, tồn tối thiểu, lãi gộp, thẻ kho (ĐVT = đơn
+  vị gốc, đơn giá = đơn giá / hệ số) đều theo đơn vị gốc. Báo cáo mua / bán: dòng giữ đơn vị đã chọn + `base_qty`;
+  `total_qty` cộng theo đơn vị gốc.
+- Giá tự điền: giá mặc định × hệ số (làm tròn 2 chữ số); giá riêng của khách (C6) là giá **theo đơn vị gốc** × hệ số;
+  giá bán gần nhất: lập lại đúng đơn vị đó ⇒ đúng đơn giá cũ (không lệch), đơn vị khác ⇒ (đơn giá / hệ số cũ) × hệ số mới.
+  `/products/sale-price` trả giá theo đơn vị gốc.
+- Cảnh báo bán lỗ: so theo đơn vị gốc (đơn giá / hệ số < giá vốn); `cost_price` trong cảnh báo = giá vốn × hệ số.
+- Tắt: `unit` là chữ tự do, hệ số 1 (như bản chuẩn); dòng cũ có hệ số ≠ 1 giữ nguyên.
+- Nhập Excel loại `product_units` (cần `import_excel` + `unit_conversion`, quyền `catalog.write`): Mã hàng*, Đơn vị*, Hệ số*.
+
+### 11.3 Thuế GTGT (`vat`)
+- Mặt hàng: `"vat_rate": "10"` (`"KCT"`, `"0"`, `"5"`, `"8"`, `"10"`; `null` = theo mặc định chung).
+  `GET/PUT /api/settings/vat` (PUT: quản trị) `{"default_vat_rate": "8" | null}` (null hoặc `"KCT"` = không thuế).
+- Dòng phiếu mua / bán / trả hàng: `"vat_rate"` = `0 | 5 | 8 | 10 | null` (null = không thuế / KCT); không gửi ⇒ mặc định
+  của mặt hàng, rồi mặc định chung. Dòng dịch vụ có thuế được (dòng âm ⇒ thuế âm). Chuyển kho / tồn đầu / kiểm kê ⇒ gửi
+  thuế suất là 400. `tax_amount = round(amount × vat_rate / 100)` đến đồng, **từng dòng**; dòng thêm `"amount_with_tax"`.
+- Phiếu: `total_amount` = **tổng thanh toán** = tiền hàng + thuế; thêm `"goods_amount"`, `"tax_amount"`,
+  `"amount_in_words"` (bằng chữ của tổng thanh toán). Công nợ (hai phía, cả trả hàng), Nợ cũ / Tổng nợ, hạn mức (C8),
+  danh sách chứng từ dùng tổng thanh toán. Cảnh báo bán lỗ, lãi gộp, doanh thu dashboard dùng tiền **trước thuế**.
+- Báo cáo mua / bán: `amount` = trước thuế; dòng thêm `vat_rate`, `tax_amount`, `amount_with_tax`; báo cáo thêm
+  `total_tax`, `total_with_tax`, `vat_summary: [{"vat_rate", "label", "goods_amount", "tax_amount", "total"}]`.
+- `GET /api/reports/vat-summary?from=&to=[&format=xlsx|docx]` (`report.view`) → `{"from", "to", "sales": {"rows": [...],
+  "totals", "document_count"}, "purchases": {...} | null}` — bán ra = bán − khách trả; mua vào = mua − trả NCC; phần mua
+  vào cần `cost.view` (không có ⇒ `null`).
+- Người không có `cost.view`: `goods_amount`, `tax_amount`, `amount_with_tax`, `amount_in_words` của phiếu mua / trả NCC /
+  tồn đầu bị che (`null`).
+- Tắt: phiếu đã có thuế giữ nguyên số (công nợ không đổi khi bật / tắt), vẫn hiện các trường thuế; lưu lại giữ thuế suất
+  dòng có id; dòng mới không thuế; gửi một thuế suất (khác số đang lưu của dòng đó) ⇒ 400.
+- File xuất / in: cột Thuế suất, Tiền thuế; dòng Cộng tiền hàng / Tiền thuế GTGT / Tổng thanh toán; "Bằng chữ:".
+
+### 11.4 Mẫu in (`print_template`)
+- `GET /api/print-template` (mọi người dùng) → `{"template": {"paper_size_document": "A4", "paper_size_voucher": "A5",
+  "footer": "", "hide_unit_column": false, "hide_code_column": false, "signatures": {"sale": ["Người bán", "Người mua"]},
+  "has_logo": true, "logo_type": "image/png", "logo_updated_at": "…"}, "default_signatures": {"sale": [...], "receipt": [...], …}}`.
+- `PUT /api/print-template` (quản trị) body là `template` (không gồm phần logo): khổ giấy A4 / A5; chân trang ≤ 300 ký tự;
+  `signatures` theo khóa `purchase`, `sale`, `sale_return`, `purchase_return`, `transfer`, `opening`, `stocktake`,
+  `receipt`, `payment` (thiếu ⇒ mặc định), 1–6 ô, mỗi tên ≤ 60 ký tự. Có audit (entity `print_template`).
+- Logo: `PUT` hoặc `POST /api/print-template/logo` (quản trị) — thân là ảnh, hoặc multipart trường `file`; PNG / JPG
+  ≤ 500 KB, kiểm theo **nội dung** (giải mã được, ≤ 4000 × 4000); `GET` (người đã đăng nhập) trả ảnh; `DELETE` xóa.
+- File xuất phiếu / phiếu thu chi dùng tên ô ký, chân trang (trước dòng thời điểm xuất), ẩn cột ĐVT / Mã hàng. Chưa đặt gì
+  ⇒ file y như khi tắt tính năng. Khổ giấy và logo dùng cho bản in của giao diện.
+
+### 11.5 HTTPS (C13)
+Không phải công tắc: đặt `TLS_CERT` và `TLS_KEY` ⇒ máy chủ chạy HTTPS, cookie có `Secure` (xem CAI_DAT.md mục 4.1).

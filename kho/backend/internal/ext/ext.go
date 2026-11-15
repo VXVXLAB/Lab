@@ -47,6 +47,11 @@ var AvailableFeatures = map[string]bool{
 	FPriceList:    true,
 	FCreditLimit:  true,
 	FProfitReport: true,
+	// Đợt M3.
+	FStocktake:      true,
+	FUnitConversion: true,
+	FVAT:            true,
+	FPrintTemplate:  true,
 }
 
 // FeatureDescriptions là mô tả ngắn tiếng Việt của tính năng.

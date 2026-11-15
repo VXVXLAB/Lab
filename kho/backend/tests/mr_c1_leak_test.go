@@ -21,6 +21,8 @@ var mrCostMarks = []string{
 	"5439861", "5.439.861", // thành tiền tồn đầu 7 × 777.123
 	"313131", "313.131", // nợ phải trả đầu kỳ
 	"1621773", "1.621.773", // tổng phải trả = 313.131 + 1.962.963 − 654.321
+	// Đợt M3: phiếu mua 1 Hộp (= 2 Cái) @868.686, thuế 10% = 86.869, tổng 955.555; giá vốn theo đơn vị gốc 434.343.
+	"868686", "868.686", "86869", "86.869", "955555", "955.555", "434343", "434.343",
 }
 
 func leaks(body []byte) []string {
@@ -67,9 +69,15 @@ func TestMR_C1_KhongLoGiaVon(t *testing.T) {
 	e.Admin.OK("PUT", fmt.Sprintf("/api/partners/%d/prices", cus), map[string]any{"items": []any{map[string]any{"product_id": p, "price": 995000}}}, nil)
 	e.Admin.OK("PUT", fmt.Sprintf("/api/products/%d", p), map[string]any{"code": "P", "name": "Hàng giá vốn", "unit": "Cái", "sale_price": 990000, "purchase_price": 777123, "group_id": g, "min_stock": 100}, nil)
 	e.Admin.OK("PUT", fmt.Sprintf("/api/partners/%d", cus), map[string]any{"code": "KH", "name": "Khách", "is_customer": true, "credit_limit": 50000000, "payment_days": 30}, nil)
+	// Dữ liệu M3: đơn vị quy đổi, phiếu mua có thuế (NCC khác để không đổi các số phải trả ở trên), phiếu kiểm kê.
+	e.Admin.OK("PUT", fmt.Sprintf("/api/products/%d/units", p), map[string]any{"items": []any{map[string]any{"unit": "Hộp", "factor": 2}}}, nil)
+	sup2 := e.Partner("NCC2", "NCC thuế", false, true)
+	vatPur := e.Admin.Posted(DocBody("purchase", "2026-01-04", sup2, e.WH["KHO2"],
+		map[string]any{"product_id": p, "unit": "Hộp", "qty": 1, "unit_price": 868686, "vat_rate": 10}))
+	stk := e.Admin.Posted(DocBody("stocktake", "2026-01-20", 0, e.WH["KHO2"], Line(p, "3", nil)))
 	bh := mrUser(e, "banhang1", "banhang")
 	kt := mrUser(e, "ketoan1", "ketoan")
-	docsIDs := []int64{op.ID, pur.ID, pr.ID, sale.ID, draftPur.ID, tr.ID}
+	docsIDs := []int64{op.ID, pur.ID, pr.ID, sale.ID, draftPur.ID, tr.ID, vatPur.ID, stk.ID}
 
 	urls := map[string][]string{
 		"/api/health":                   {"/api/health"},
@@ -95,7 +103,7 @@ func TestMR_C1_KhongLoGiaVon(t *testing.T) {
 		"/api/partners/{id}/balance":    {fmt.Sprintf("/api/partners/%d/balance", sup.ID), fmt.Sprintf("/api/partners/%d/balance", cus)},
 		"/api/cash-accounts":            {"/api/cash-accounts"},
 		"/api/cash-accounts/{id}":       {fmt.Sprintf("/api/cash-accounts/%d", e.TM)},
-		"/api/documents":                {"/api/documents", "/api/documents?type=purchase", "/api/documents?type=sale", "/api/documents?type=purchase_return", "/api/documents?type=opening", "/api/documents?status=draft"},
+		"/api/documents":                {"/api/documents", "/api/documents?type=purchase", "/api/documents?type=sale", "/api/documents?type=purchase_return", "/api/documents?type=opening", "/api/documents?status=draft", "/api/documents?type=stocktake"},
 		"/api/vouchers":                 {"/api/vouchers"},
 		"/api/vouchers/{id}":            {fmt.Sprintf("/api/vouchers/%d", v.ID)},
 		"/api/vouchers/{id}/export":     {fmt.Sprintf("/api/vouchers/%d/export?format=xlsx", v.ID), fmt.Sprintf("/api/vouchers/%d/export?format=docx", v.ID)},
@@ -115,6 +123,12 @@ func TestMR_C1_KhongLoGiaVon(t *testing.T) {
 		"/api/reports/profit":           {"/api/reports/profit?from=2026-01-01&to=2026-12-31", "/api/reports/profit?from=2026-01-01&to=2026-12-31&group_by=product&format=xlsx", "/api/reports/profit?from=2026-01-01&to=2026-12-31&group_by=customer"},
 		"/api/partners/{id}/prices":     {fmt.Sprintf("/api/partners/%d/prices", cus)},
 		"/api/products/sale-price":      {fmt.Sprintf("/api/products/sale-price?partner_id=%d&ids=%d", cus, p)},
+		"/api/documents/stocktake-load": {fmt.Sprintf("/api/documents/stocktake-load?warehouse_id=%d&date=2026-12-31", e.WH["KHO2"])},
+		"/api/products/{id}/units":      {fmt.Sprintf("/api/products/%d/units", p)},
+		"/api/reports/vat-summary":      {"/api/reports/vat-summary?from=2026-01-01&to=2026-12-31", "/api/reports/vat-summary?from=2026-01-01&to=2026-12-31&format=xlsx"},
+		"/api/settings/vat":             {"/api/settings/vat"},
+		"/api/print-template":           {"/api/print-template"},
+		"/api/print-template/logo":      {"/api/print-template/logo"},
 		"/api/documents/{id}":           nil,
 		"/api/documents/{id}/check":     nil,
 		"/api/documents/{id}/export":    nil,

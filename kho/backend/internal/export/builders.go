@@ -23,6 +23,7 @@ var docTitles = map[string]string{
 	docs.TypePurchaseReturn: "PHIẾU XUẤT TRẢ HÀNG NHÀ CUNG CẤP",
 	docs.TypeTransfer:       "PHIẾU CHUYỂN KHO NỘI BỘ",
 	docs.TypeOpening:        "PHIẾU NHẬP TỒN ĐẦU KỲ",
+	docs.TypeStocktake:      "BIÊN BẢN KIỂM KÊ KHO",
 }
 
 func str(p *string) string {
@@ -50,6 +51,7 @@ var docPrints = map[string]docPrint{
 	docs.TypePurchaseReturn: {"Phiếu trả hàng nhà cung cấp", "Nhà cung cấp", "Xuất từ kho", true, false, []string{"Người lập phiếu", "Người nhận hàng", "Thủ kho"}},
 	docs.TypeTransfer:       {"Phiếu chuyển kho", "", "Kho xuất", false, false, []string{"Người lập phiếu", "Thủ kho xuất", "Thủ kho nhận"}},
 	docs.TypeOpening:        {"Phiếu nhập tồn đầu kỳ", "", "Nhập vào kho", true, false, []string{"Người lập phiếu", "Thủ kho"}},
+	docs.TypeStocktake:      {"Phiếu kiểm kê", "", "Kho kiểm kê", false, false, []string{"Người lập phiếu", "Thủ kho", "Kế toán"}},
 }
 
 // ServiceCodeOnPrint là mã hiển thị của dòng dịch vụ trên bản in / file xuất (đúng mẫu khách: "DICHVU").
@@ -153,8 +155,14 @@ func DocumentTableMasked(d *docs.Document, hideCost, hideDebt bool) Table {
 		t.Rows = append(t.Rows, row)
 	}
 	if cfg.hasPrice {
-		t.Footer = [][]any{{"Cộng", nil, nil, nil, nil, nil, d.TotalAmount}}
+		goods := d.TotalAmount
+		if d.DocVAT != nil {
+			goods = d.GoodsAmount
+		}
+		t.Footer = [][]any{{"Cộng", nil, nil, nil, nil, nil, goods}}
 		t.SumColumns = []int{6}
+	} else if mixedUnits(d) {
+		t.Footer = [][]any{{"Cộng", nil, nil, nil, nil}}
 	} else {
 		t.Footer = [][]any{{"Cộng", nil, nil, nil, goodsQty}}
 		t.SumColumns = []int{4}
@@ -165,6 +173,10 @@ func DocumentTableMasked(d *docs.Document, hideCost, hideDebt bool) Table {
 			{Label: "Nợ cũ:", Value: *d.OldDebt},
 			{Label: "Tổng nợ (đến ngày " + d.DocDate.VN() + "):", Value: *d.TotalDebt, Formula: "{s0}+{total}"},
 		}
+	}
+	vatColumns(d, &t, cfg.hasPrice)
+	if d.DocType == docs.TypeStocktake {
+		t = stocktakeTable(d, t)
 	}
 	t.SignDate = signDateLine
 	t.Signatures = cfg.signers

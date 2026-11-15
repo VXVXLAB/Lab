@@ -495,6 +495,29 @@ func movingAverage(events []costEvent, defaultCost decimal.Decimal) map[int64]co
 			if seen && qty.IsPositive() {
 				avg = val.DivRound(qty, 10)
 			}
+		case "stocktake":
+			// Kiểm kê thừa nhập theo giá bình quân hiện tại (chưa từng nhập ⇒ giá mua mặc định), thiếu xuất theo bình
+			// quân hiện tại — không sinh dòng giá vốn, chỉ đổi SL và giá trị tồn.
+			unit := avg
+			if !seen {
+				unit = defaultCost
+			}
+			wasEmpty := !qty.IsPositive()
+			qty = qty.Add(e.qty)
+			switch {
+			case !qty.IsPositive():
+				val = decimal.Zero
+			case e.qty.IsPositive() && wasEmpty:
+				val = qty.Mul(unit)
+			default:
+				val = val.Add(e.qty.Mul(unit))
+				if val.IsNegative() {
+					val = decimal.Zero
+				}
+			}
+			if seen && qty.IsPositive() && e.qty.IsPositive() {
+				avg = val.DivRound(qty, 10)
+			}
 		case "purchase_return":
 			qty = qty.Sub(e.qty)
 			val = val.Sub(e.amount)
@@ -544,7 +567,7 @@ func (s *Service) ProfitReport(ctx context.Context, p ProfitParams) (*Profit, er
 		w.Add(`l.product_id = ?`, *p.ProductID)
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT l.id, d.id, COALESCE(d.doc_no, d.draft_no), d.doc_date, d.doc_type, d.partner_id, pa.code, pa.name,
-			l.product_id, pr.code, pr.name, pr.unit, pr.is_service, pr.purchase_price, l.qty, l.amount
+			l.product_id, pr.code, pr.name, pr.unit, pr.is_service, pr.purchase_price, l.base_qty, l.amount
 		FROM document_lines l JOIN documents d ON d.id = l.document_id JOIN products pr ON pr.id = l.product_id
 		LEFT JOIN partners pa ON pa.id = d.partner_id`+w.SQL()+` ORDER BY d.doc_date, d.id, l.line_no`, w.Args...)
 	if err != nil {
@@ -581,12 +604,15 @@ func (s *Service) ProfitReport(ctx context.Context, p ProfitParams) (*Profit, er
 	}
 	costs := map[int64]costResult{}
 	if len(ids) > 0 {
-		crow, err := s.Pool.Query(ctx, `SELECT l.product_id, l.id, d.doc_type, l.qty, l.amount
+		// Kiểm kê (C9): chênh lệch thực tế − sổ sách (SL có dấu); thừa là nhập, thiếu là xuất trong cùng ngày.
+		crow, err := s.Pool.Query(ctx, `SELECT l.product_id, l.id, d.doc_type,
+				CASE WHEN d.doc_type = 'stocktake' THEN l.base_qty - COALESCE(l.book_qty, l.base_qty) ELSE l.base_qty END, l.amount
 			FROM document_lines l JOIN documents d ON d.id = l.document_id
-			WHERE d.status = 'posted' AND d.doc_type IN ('purchase', 'opening', 'sale_return', 'sale', 'purchase_return')
+			WHERE d.status = 'posted' AND d.doc_type IN ('purchase', 'opening', 'sale_return', 'sale', 'purchase_return', 'stocktake')
 			  AND l.product_id = ANY($1) AND d.doc_date <= $2
 			ORDER BY l.product_id, d.doc_date,
-			  CASE WHEN d.doc_type IN ('purchase', 'opening', 'sale_return') THEN 0 ELSE 1 END,
+			  CASE WHEN d.doc_type IN ('purchase', 'opening', 'sale_return') THEN 0
+			       WHEN d.doc_type = 'stocktake' AND l.base_qty > COALESCE(l.book_qty, l.base_qty) THEN 0 ELSE 1 END,
 			  d.posted_at NULLS LAST, d.id, l.line_no`, ids, p.To)
 		if err != nil {
 			return nil, err

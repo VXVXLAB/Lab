@@ -29,6 +29,7 @@ const (
 	KindOpeningStock = "opening_stock"
 	KindOpeningDebt  = "opening_debt"
 	KindPartnerPrice = "partner_prices" // bản mở rộng C6 (cần tính năng price_list)
+	KindProductUnits = "product_units"  // bản mở rộng C10 (cần tính năng unit_conversion)
 )
 
 // Giới hạn.
@@ -45,6 +46,7 @@ var KindNames = map[string]string{
 	KindOpeningStock: "Tồn đầu kỳ",
 	KindOpeningDebt:  "Công nợ đầu kỳ",
 	KindPartnerPrice: "Bảng giá riêng theo khách",
+	KindProductUnits: "Đơn vị quy đổi",
 }
 
 // column mô tả một cột: khóa, tiêu đề trong file mẫu, các tiêu đề được nhận diện (đã bỏ dấu), bắt buộc phải có cột.
@@ -86,6 +88,11 @@ var columns = map[string][]column{
 		{"product", "Mã hàng", []string{"ma hang", "ma vthh"}, true, false, "Bắt buộc, phải có trong danh mục."},
 		{"price", "Giá", []string{"gia", "gia ban", "gia rieng", "don gia"}, true, true, "Bắt buộc, ≥ 0. Giá bán riêng cho khách này."},
 		{"note", "Ghi chú", []string{"ghi chu"}, false, false, ""},
+	},
+	KindProductUnits: {
+		{"product", "Mã hàng", []string{"ma hang", "ma vthh"}, true, false, "Bắt buộc, hàng hóa có trong danh mục."},
+		{"unit", "Đơn vị", []string{"don vi", "don vi quy doi", "dvt"}, true, false, "Bắt buộc, khác đơn vị gốc của mặt hàng."},
+		{"factor", "Hệ số", []string{"he so", "he so quy doi", "quy doi"}, true, true, "Bắt buộc, > 0: 1 đơn vị này bằng bao nhiêu đơn vị gốc (tối đa 6 chữ số thập phân)."},
 	},
 	KindOpeningDebt: {
 		{"partner", "Mã đối tác", []string{"ma doi tac", "ma", "ma kh", "ma ncc"}, true, false, "Bắt buộc, phải có trong danh mục."},
@@ -400,6 +407,8 @@ func Run(ctx context.Context, pool *pgxpool.Pool, kind string, data []byte, opt 
 			apply, err = planOpeningDebt(ctx, tx, sd, res, opt)
 		case KindPartnerPrice:
 			apply, err = planPartnerPrices(ctx, tx, sd, res, opt)
+		case KindProductUnits:
+			apply, err = planProductUnits(ctx, tx, sd, res, opt)
 		}
 		if err != nil {
 			return err
@@ -1151,6 +1160,8 @@ func Template(ctx context.Context, q db.Q, kind string, feats map[string]bool) (
 		lines = append(lines, "", "Nhập lại file thì số đầu kỳ của các đối tác có trong file được THAY bằng số mới (không cộng dồn).")
 	case KindPartnerPrice:
 		lines = append(lines, "", "Mã khách + mã hàng đã có giá riêng ⇒ cập nhật giá; chưa có ⇒ thêm. Không xóa giá riêng nào.")
+	case KindProductUnits:
+		lines = append(lines, "", "Mã hàng + đơn vị đã có ⇒ cập nhật hệ số (đơn vị đã dùng trên chứng từ thì không đổi được hệ số); chưa có ⇒ thêm. Không xóa đơn vị nào.")
 	default:
 		lines = append(lines, "", "Mã đã có ⇒ cập nhật theo các ô có dữ liệu (ô trống giữ nguyên). Không xóa mã nào.")
 	}
@@ -1221,6 +1232,13 @@ func exampleRows(ctx context.Context, q db.Q, kind string) ([]map[string]string,
 			{"partner": cus, "product": codes[0], "price": "175000", "note": "Giá hợp đồng năm"},
 			{"partner": cus, "product": codes[1], "price": "12500"},
 		}, nil
+	case KindProductUnits:
+		var code string
+		_ = q.QueryRow(ctx, `SELECT code FROM products WHERE active AND NOT is_service ORDER BY code LIMIT 1`).Scan(&code)
+		if code == "" {
+			code = "MA-HANG"
+		}
+		return []map[string]string{{"product": code, "unit": "Thùng", "factor": "24"}, {"product": code, "unit": "Lốc", "factor": "6"}}, nil
 	case KindOpeningDebt:
 		rows, err := q.Query(ctx, `SELECT code FROM partners WHERE active ORDER BY code LIMIT 2`)
 		if err != nil {
@@ -1354,6 +1372,129 @@ func planPartnerPrices(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Resul
 			if err := b.add(`INSERT INTO partner_prices(partner_id, product_id, price, note, updated_by, updated_at) VALUES ($1,$2,$3,$4,$5,now())
 				ON CONFLICT (partner_id, product_id) DO UPDATE SET price=EXCLUDED.price, note=EXCLUDED.note, updated_by=EXCLUDED.updated_by, updated_at=now()`,
 				p.partner, p.product, p.price, p.note, opt.UserID); err != nil {
+				return err
+			}
+		}
+		return b.flush()
+	}, nil
+}
+
+// planProductUnits: đơn vị quy đổi (C10) — thêm / cập nhật hệ số theo (mã hàng, đơn vị).
+func planProductUnits(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result, opt Options) (func() error, error) {
+	type prod struct {
+		id      int64
+		unit    string
+		service bool
+	}
+	products := map[string]prod{}
+	rows, err := tx.Query(ctx, `SELECT id, upper(code), unit, is_service FROM products`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var c string
+		var p prod
+		if err := rows.Scan(&p.id, &c, &p.unit, &p.service); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		products[c] = p
+	}
+	rows.Close()
+	type cur struct {
+		factor decimal.Decimal
+		inUse  bool
+	}
+	existing := map[string]cur{}
+	erows, err := tx.Query(ctx, `SELECT u.product_id, lower(u.unit), u.factor, EXISTS(SELECT 1 FROM document_lines l
+		WHERE l.product_id = u.product_id AND lower(l.unit) = lower(u.unit) AND l.unit_factor = u.factor) FROM product_units u`)
+	if err != nil {
+		return nil, err
+	}
+	for erows.Next() {
+		var pid int64
+		var u string
+		var c cur
+		if err := erows.Scan(&pid, &u, &c.factor, &c.inUse); err != nil {
+			erows.Close()
+			return nil, err
+		}
+		existing[fmt.Sprint(pid, "|", u)] = c
+	}
+	erows.Close()
+	type plan struct {
+		product int64
+		unit    string
+		factor  decimal.Decimal
+		update  bool
+	}
+	var plans []plan
+	seen := map[string]int{}
+	k := KindProductUnits
+	for _, r := range sd.rows {
+		ok := true
+		p, has := products[strings.ToUpper(text(r, "product"))]
+		u := text(r, "unit")
+		switch {
+		case text(r, "product") == "":
+			addErr(res, r.num, k, "product", "Thiếu mã hàng")
+			ok = false
+		case !has:
+			addErr(res, r.num, k, "product", "Mã hàng "+text(r, "product")+" chưa có trong danh mục")
+			ok = false
+		case p.service:
+			addErr(res, r.num, k, "product", "Mã "+text(r, "product")+" là dịch vụ, không có đơn vị quy đổi")
+			ok = false
+		}
+		if u == "" {
+			addErr(res, r.num, k, "unit", "Thiếu đơn vị")
+			ok = false
+		} else if has && strings.EqualFold(u, p.unit) {
+			addErr(res, r.num, k, "unit", "Trùng đơn vị gốc "+p.unit)
+			ok = false
+		}
+		f, good := num(res, k, r, "factor", false)
+		if !good {
+			ok = false
+		} else if f == nil || !f.IsPositive() {
+			addErr(res, r.num, k, "factor", "Hệ số phải lớn hơn 0")
+			ok = false
+		} else if !f.Equal(f.Round(6)) {
+			addErr(res, r.num, k, "factor", "Hệ số tối đa 6 chữ số thập phân")
+			ok = false
+		}
+		if !ok {
+			continue
+		}
+		key := fmt.Sprint(p.id, "|", strings.ToLower(u))
+		if first, dup := seen[key]; dup {
+			addErr(res, r.num, k, "unit", fmt.Sprintf("Mã %s – đơn vị %s trùng với dòng %d trong file", text(r, "product"), u, first))
+			continue
+		}
+		seen[key] = r.num
+		c, upd := existing[key]
+		if upd && c.inUse && !c.factor.Equal(*f) {
+			addErr(res, r.num, k, "factor", fmt.Sprintf("Đơn vị %s đã dùng trên chứng từ với hệ số %s, không đổi được", u, c.factor.String()))
+			continue
+		}
+		if upd {
+			res.Updates++
+		} else {
+			res.Creates++
+		}
+		plans = append(plans, plan{product: p.id, unit: u, factor: *f, update: upd})
+	}
+	return func() error {
+		b := newBatcher(ctx, tx)
+		for _, p := range plans {
+			if p.update {
+				if err := b.add(`UPDATE product_units SET factor=$3, updated_by=$4, updated_at=now() WHERE product_id=$1 AND lower(unit)=lower($2)`,
+					p.product, p.unit, p.factor, opt.UserID); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := b.add(`INSERT INTO product_units(product_id, unit, factor, updated_by) VALUES ($1,$2,$3,$4)`, p.product, p.unit, p.factor, opt.UserID); err != nil {
 				return err
 			}
 		}

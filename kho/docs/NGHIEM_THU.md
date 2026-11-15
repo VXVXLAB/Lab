@@ -169,3 +169,17 @@ Các test chạy với tính năng được bật trong chính test; với mọi
 | Q-02 người bị che giá không đổi được đơn giá đang lưu bằng bất kỳ đường nào; 403 khi sửa / bỏ ghi sổ phiếu giá vốn đã ghi sổ | `TestMR_C1_NguoiBiCheGiaKhongDoiGiaDangLuu` | ĐẠT |
 | Q-05 hai phiếu ghi sổ đồng thời không cùng lọt hạn mức | `TestMR_C8_HanMucGhiSoDongThoi` | ĐẠT |
 | M-08, M-09, Q-03, Q-06, Q-08, Q-11 nhập Excel | `TestMR_C3_SuaLoiQA` | ĐẠT |
+
+## Bản mở rộng — đợt M3 (và sửa sau QA lần 2)
+
+| Hạng mục | Test | Kết quả |
+|---|---|---|
+| M-11 `/api/audit` to < from; M-12 nhật ký người dùng (không ghi mật khẩu); đăng nhập với mật khẩu / tên lưu dạng NFD, băm lại NFC | `TestMR_QA_NhatKyNguoiDungVaMatKhauNFD` | ĐẠT |
+| C9 kiểm kê: tồn sổ sách, chênh lệch, R6, thẻ kho, không vào công nợ / báo cáo mua bán, giá vốn bình quân với thừa / thiếu, nhập lùi ngày ⇒ báo lệch, sửa / bỏ ghi sổ / khóa sổ / quyền / tắt tính năng, biên bản xlsx | `TestMR_C9_KiemKe` | ĐẠT |
+| C9 ghi sổ kiểm kê đồng thời với phiếu bán (khóa trước khi tính tồn sổ sách) | `TestMR_C9_KiemKeDongThoiVoiBan` | ĐẠT |
+| C10 quy đổi đơn vị: khai báo / đang dùng 409, sổ kho theo đơn vị gốc, thiếu hàng, giá mặc định / giá gần nhất / giá riêng, cảnh báo lỗ theo đơn vị gốc, hàng cần đặt, lãi gộp, báo cáo bán, chuyển kho, kiểm kê, máy khách cũ, nhập Excel, tắt tính năng | `TestMR_C10_QuyDoiDonVi` | ĐẠT |
+| C11 thuế GTGT: mặc định mặt hàng / chung, thuế từng dòng, ba tổng, công nợ / Nợ cũ – Tổng nợ / hạn mức theo tổng thanh toán, lỗ + lãi gộp trước thuế, báo cáo bán + bảng kê, che thuế phiếu mua, xuất file, bật / tắt không đổi công nợ | `TestMR_C11_ThueGTGT` | ĐẠT |
+| Đơn vị × thuế × dịch vụ × giá riêng × hạn mức × bán lỗ trên một phiếu | `TestMR_M3_TuongTacMotPhieuBan` | ĐẠT |
+| C12 mẫu in: kiểm tra cấu hình, logo theo nội dung, quyền, file xuất dùng ô ký / chân trang / ẩn cột, mặc định = như tắt | `TestMR_C12_MauIn` | ĐẠT |
+| C13 HTTPS: chứng thư tự ký, cookie Secure, lỗi file rõ ràng, cảnh báo hết hạn | `TestMR_C13_HTTPS` | ĐẠT |
+| Ma trận quyền / không rò giá vốn mở rộng cho route M3 (phiếu mua có thuế + đơn vị quy đổi, kiểm kê) | `TestMR_C1_MaTranQuyenMoiEndpointGhi`, `TestMR_C1_KhongLoGiaVon` | ĐẠT |

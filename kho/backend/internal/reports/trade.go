@@ -2,13 +2,16 @@ package reports
 
 import (
 	"context"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
 
 	"kho/internal/apperr"
 	"kho/internal/debt"
+	"kho/internal/ext"
 	"kho/internal/util"
 )
 
@@ -46,17 +49,54 @@ type TradeRow struct {
 	Qty         decimal.Decimal  `json:"qty"`
 	UnitPrice   *decimal.Decimal `json:"unit_price"`
 	Amount      decimal.Decimal  `json:"amount"`
+	// Bản mở rộng: SL quy về đơn vị gốc (C10, chỉ khi có quy đổi / tính năng bật) và thuế GTGT (C11).
+	BaseQty   *decimal.Decimal `json:"base_qty,omitempty"`
+	*TradeVAT                  // amount ở trên là tiền trước thuế
+
+	baseQty decimal.Decimal
+}
+
+// TradeVAT là thuế của một dòng báo cáo mua/bán.
+type TradeVAT struct {
+	VatRate       *decimal.Decimal `json:"vat_rate"`
+	TaxAmount     decimal.Decimal  `json:"tax_amount"`
+	AmountWithTax decimal.Decimal  `json:"amount_with_tax"`
+}
+
+// VatSummaryRow là một dòng bảng kê thuế theo thuế suất (vat_rate null = không thuế / không chịu thuế).
+type VatSummaryRow struct {
+	VatRate     *decimal.Decimal `json:"vat_rate"`
+	Label       string           `json:"label"`
+	GoodsAmount decimal.Decimal  `json:"goods_amount"`
+	TaxAmount   decimal.Decimal  `json:"tax_amount"`
+	Total       decimal.Decimal  `json:"total"`
+}
+
+// TradeVATTotals là tổng thuế của báo cáo mua/bán và bảng kê theo thuế suất.
+type TradeVATTotals struct {
+	TotalTax     decimal.Decimal `json:"total_tax"`
+	TotalWithTax decimal.Decimal `json:"total_with_tax"`
+	VatSummary   []VatSummaryRow `json:"vat_summary"`
+}
+
+// VatLabel là nhãn thuế suất.
+func VatLabel(r *decimal.Decimal) string {
+	if r == nil {
+		return "Không thuế / KCT"
+	}
+	return r.String() + "%"
 }
 
 // Trade là báo cáo mua/bán.
 type Trade struct {
-	Kind        string          `json:"kind"` // sales | purchases
-	From        util.Date       `json:"from"`
-	To          util.Date       `json:"to"`
-	Rows        []TradeRow      `json:"rows"`
-	TotalQty    decimal.Decimal `json:"total_qty"`
-	TotalAmount decimal.Decimal `json:"total_amount"`
-	DocCount    int             `json:"document_count"`
+	Kind            string          `json:"kind"` // sales | purchases
+	From            util.Date       `json:"from"`
+	To              util.Date       `json:"to"`
+	Rows            []TradeRow      `json:"rows"`
+	TotalQty        decimal.Decimal `json:"total_qty"`
+	TotalAmount     decimal.Decimal `json:"total_amount"`
+	DocCount        int             `json:"document_count"`
+	*TradeVATTotals                 // C11: chỉ khi tính năng vat bật hoặc có dòng có thuế
 }
 
 // TradeReport chạy báo cáo bán hàng (kind=sales) hoặc mua hàng (kind=purchases).
@@ -102,7 +142,9 @@ func (s *Service) TradeReport(ctx context.Context, kind string, p TradeParams) (
 	rows, err := s.Pool.Query(ctx, `SELECT d.doc_date, d.doc_no, d.id, d.doc_type, d.partner_id, pa.code, pa.name, d.warehouse_id, w.name,
 			l.line_no, l.product_id, pr.code, pr.name, pr.is_service, l.description, l.unit,
 			CASE WHEN d.doc_type=$`+itoa(len(w.Args)+1)+` THEN l.qty ELSE -l.qty END, l.unit_price,
-			CASE WHEN d.doc_type=$`+itoa(len(w.Args)+1)+` THEN l.amount ELSE -l.amount END
+			CASE WHEN d.doc_type=$`+itoa(len(w.Args)+1)+` THEN l.amount ELSE -l.amount END,
+			CASE WHEN d.doc_type=$`+itoa(len(w.Args)+1)+` THEN l.base_qty ELSE -l.base_qty END, l.unit_factor, l.vat_rate,
+			CASE WHEN d.doc_type=$`+itoa(len(w.Args)+1)+` THEN l.tax_amount ELSE -l.tax_amount END
 		FROM document_lines l JOIN documents d ON d.id=l.document_id JOIN products pr ON pr.id=l.product_id
 		JOIN warehouses w ON w.id=d.warehouse_id LEFT JOIN partners pa ON pa.id=d.partner_id`+w.SQL()+`
 		ORDER BY d.doc_date, d.doc_no, l.line_no`, append(w.Args, main)...)
@@ -112,24 +154,91 @@ func (s *Service) TradeReport(ctx context.Context, kind string, p TradeParams) (
 	defer rows.Close()
 	out := &Trade{Kind: kind, From: p.From, To: p.To, Rows: []TradeRow{}, TotalQty: decimal.Zero, TotalAmount: decimal.Zero}
 	docs := map[int64]bool{}
+	st, err := ext.Load(ctx, s.Pool)
+	if err != nil {
+		return nil, err
+	}
+	showUnit, showVat := st.On(ext.FUnitConversion), st.On(ext.FVAT)
+	type vt struct {
+		rate       *decimal.Decimal
+		goods, tax decimal.Decimal
+	}
+	var taxes []TradeVAT
+	sum := map[string]*vt{}
+	var keys []string
 	for rows.Next() {
 		var r TradeRow
+		var factor decimal.Decimal
+		var tv TradeVAT
 		if err := rows.Scan(&r.Date, &r.DocNo, &r.DocumentID, &r.DocType, &r.PartnerID, &r.PartnerCode, &r.PartnerName, &r.WarehouseID, &r.Warehouse,
-			&r.LineNo, &r.ProductID, &r.ProductCode, &r.ProductName, &r.IsService, &r.Description, &r.Unit, &r.Qty, &r.UnitPrice, &r.Amount); err != nil {
+			&r.LineNo, &r.ProductID, &r.ProductCode, &r.ProductName, &r.IsService, &r.Description, &r.Unit, &r.Qty, &r.UnitPrice, &r.Amount,
+			&r.baseQty, &factor, &tv.VatRate, &tv.TaxAmount); err != nil {
 			return nil, err
 		}
 		if r.Description == "" {
 			r.Description = r.ProductName
 		}
 		if !r.IsService {
-			out.TotalQty = out.TotalQty.Add(r.Qty)
+			out.TotalQty = out.TotalQty.Add(r.baseQty)
 		}
+		if !factor.Equal(decimal.NewFromInt(1)) {
+			showUnit = true
+		}
+		if tv.VatRate != nil || !tv.TaxAmount.IsZero() {
+			showVat = true
+		}
+		tv.AmountWithTax = r.Amount.Add(tv.TaxAmount)
+		taxes = append(taxes, tv)
+		k := VatLabel(tv.VatRate)
+		if sum[k] == nil {
+			sum[k] = &vt{rate: tv.VatRate}
+			keys = append(keys, k)
+		}
+		sum[k].goods, sum[k].tax = sum[k].goods.Add(r.Amount), sum[k].tax.Add(tv.TaxAmount)
 		out.TotalAmount = out.TotalAmount.Add(r.Amount)
 		docs[r.DocumentID] = true
 		out.Rows = append(out.Rows, r)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	out.DocCount = len(docs)
-	return out, rows.Err()
+	if showUnit || showVat {
+		tot := &TradeVATTotals{TotalTax: decimal.Zero, TotalWithTax: out.TotalAmount, VatSummary: []VatSummaryRow{}}
+		for i := range out.Rows {
+			if showUnit {
+				b := out.Rows[i].baseQty
+				out.Rows[i].BaseQty = &b
+			}
+			if showVat {
+				tv := taxes[i]
+				out.Rows[i].TradeVAT = &tv
+				tot.TotalTax = tot.TotalTax.Add(tv.TaxAmount)
+			}
+		}
+		if showVat {
+			tot.TotalWithTax = out.TotalAmount.Add(tot.TotalTax)
+			sortVatKeys(keys, sum)
+			for _, k := range keys {
+				v := sum[k]
+				tot.VatSummary = append(tot.VatSummary, VatSummaryRow{VatRate: v.rate, Label: k, GoodsAmount: v.goods, TaxAmount: v.tax, Total: v.goods.Add(v.tax)})
+			}
+			out.TradeVATTotals = tot
+		}
+	}
+	return out, nil
+}
+
+// sortVatKeys sắp bảng kê: không thuế trước, rồi thuế suất tăng dần.
+func sortVatKeys[T any](keys []string, m map[string]*T) {
+	rank := func(k string) float64 {
+		if k == VatLabel(nil) {
+			return -1
+		}
+		f, _ := strconv.ParseFloat(strings.TrimSuffix(k, "%"), 64)
+		return f
+	}
+	sort.SliceStable(keys, func(i, j int) bool { return rank(keys[i]) < rank(keys[j]) })
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -464,9 +573,9 @@ func (s *Service) Dashboard(ctx context.Context, threshold decimal.Decimal) (*Da
 	err := s.Pool.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM documents WHERE status='draft')::int,
 		(SELECT count(*) FROM documents WHERE status='draft' AND doc_type='sale')::int,
-		COALESCE((SELECT sum(CASE WHEN doc_type='sale' THEN total_amount ELSE -total_amount END) FROM documents
+		COALESCE((SELECT sum(CASE WHEN doc_type='sale' THEN total_amount - tax_amount ELSE -(total_amount - tax_amount) END) FROM documents
 			WHERE status='posted' AND doc_type IN ('sale','sale_return') AND doc_date=$1),0),
-		COALESCE((SELECT sum(CASE WHEN doc_type='sale' THEN total_amount ELSE -total_amount END) FROM documents
+		COALESCE((SELECT sum(CASE WHEN doc_type='sale' THEN total_amount - tax_amount ELSE -(total_amount - tax_amount) END) FROM documents
 			WHERE status='posted' AND doc_type IN ('sale','sale_return') AND doc_date BETWEEN $2 AND $1),0)`, t, month).
 		Scan(&d.DraftCount, &d.DraftSaleCount, &d.RevenueToday, &d.RevenueMonth)
 	if err != nil {

@@ -411,7 +411,8 @@ func (s *Service) StockLedger(ctx context.Context, p LedgerParams) (*Ledger, err
 		w.Add(`d.doc_type <> 'transfer'`)
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT m.doc_date, COALESCE(d.doc_no, d.draft_no), d.id, d.doc_type, d.partner_id, pa.name,
-			fw.name, tw.name, d.note, m.warehouse_id, w.code, COALESCE(NULLIF(l.unit,''), pr.unit), m.qty_in, m.qty_out, m.unit_cost
+			fw.name, tw.name, d.note, m.warehouse_id, w.code,
+			CASE WHEN l.unit_factor = 1 THEN COALESCE(NULLIF(l.unit,''), pr.unit) ELSE pr.unit END, m.qty_in, m.qty_out, m.unit_cost
 		FROM stock_movements m
 		JOIN documents d ON d.id=m.document_id
 		JOIN document_lines l ON l.id=m.line_id
@@ -438,6 +439,15 @@ func (s *Service) StockLedger(ctx context.Context, p LedgerParams) (*Ledger, err
 		}
 		r.ProductCode = out.Product.Code
 		r.Description = Describe(r.DocType, r.PartnerName, &fw, tw, note)
+		if r.DocType == "stocktake" { // C9: thẻ kho ghi "Kiểm kê thừa/thiếu"
+			r.Description = "Kiểm kê thiếu"
+			if r.QtyIn.IsPositive() {
+				r.Description = "Kiểm kê thừa"
+			}
+			if note != "" {
+				r.Description += " - " + note
+			}
+		}
 		bal = bal.Add(r.QtyIn).Sub(r.QtyOut)
 		r.Balance = bal
 		out.TotalIn = out.TotalIn.Add(r.QtyIn)
@@ -478,7 +488,7 @@ type DemandRow struct {
 
 // DraftDemand tổng hợp SL trên phiếu bán tạm so với tồn tổng hiện tại.
 func (s *Service) DraftDemand(ctx context.Context, onlyShortage bool) ([]DemandRow, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT p.id, p.code, p.name, p.unit, d.id, d.draft_no, d.doc_date, d.partner_id, pa.name, sum(l.qty)
+	rows, err := s.Pool.Query(ctx, `SELECT p.id, p.code, p.name, p.unit, d.id, d.draft_no, d.doc_date, d.partner_id, pa.name, sum(l.base_qty)
 		FROM document_lines l JOIN documents d ON d.id=l.document_id JOIN products p ON p.id=l.product_id
 		LEFT JOIN partners pa ON pa.id=d.partner_id
 		WHERE d.status='draft' AND d.doc_type='sale' AND NOT p.is_service

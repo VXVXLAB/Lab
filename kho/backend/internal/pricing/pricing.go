@@ -44,6 +44,25 @@ type Quote struct {
 	DocNo      *string    `json:"doc_no"`
 	DocDate    *util.Date `json:"doc_date"`
 	Note       *string    `json:"note"` // ghi chú của giá riêng
+
+	// Bản mở rộng C10: mọi giá ở trên là theo ĐƠN VỊ GỐC. Giá bán gần nhất lấy từ dòng có đơn vị quy đổi được giữ
+	// nguyên đơn giá + hệ số của dòng đó để không lệch khi lập lại đúng đơn vị đó (PriceFor).
+	srcPrice, srcFactor decimal.Decimal
+}
+
+// PriceFor trả giá tự điền cho đơn vị có hệ số factor: cùng hệ số với dòng bán gần nhất ⇒ đúng đơn giá dòng đó;
+// ngược lại giá theo đơn vị gốc × hệ số, làm tròn 2 chữ số.
+func (q Quote) PriceFor(factor decimal.Decimal) decimal.Decimal {
+	if q.Source == SourceLastSale && !q.srcFactor.IsZero() {
+		if q.srcFactor.Equal(factor) {
+			return q.srcPrice
+		}
+		return q.srcPrice.Div(q.srcFactor).Mul(factor).Round(2)
+	}
+	if factor.Equal(decimal.NewFromInt(1)) {
+		return q.Price
+	}
+	return q.Price.Mul(factor).Round(2)
 }
 
 // Resolve tính giá tự điền cho nhiều mặt hàng (theo thứ tự ids; id không tồn tại bị bỏ qua) tại ngày date.
@@ -55,11 +74,11 @@ func Resolve(ctx context.Context, q db.Q, partnerID int64, ids []int64, date uti
 		return out, nil
 	}
 	rows, err := q.Query(ctx, `
-SELECT p.id, p.sale_price, pp.price, pp.note, ls.unit_price, ls.doc_id, ls.doc_no, ls.doc_date
+SELECT p.id, p.sale_price, pp.price, pp.note, ls.unit_price, ls.unit_factor, ls.doc_id, ls.doc_no, ls.doc_date
   FROM products p
   LEFT JOIN partner_prices pp ON pp.product_id = p.id AND pp.partner_id = $1
   LEFT JOIN LATERAL (
-    SELECT l.unit_price, d.id AS doc_id, d.doc_no, d.doc_date
+    SELECT l.unit_price, l.unit_factor, d.id AS doc_id, d.doc_no, d.doc_date
       FROM document_lines l JOIN documents d ON d.id = l.document_id
      WHERE l.product_id = p.id AND d.partner_id = $1 AND d.doc_type = 'sale' AND d.status = 'posted'
        AND d.doc_date <= $3 AND l.unit_price IS NOT NULL
@@ -73,12 +92,12 @@ SELECT p.id, p.sale_price, pp.price, pp.note, ls.unit_price, ls.doc_id, ls.doc_n
 	byID := map[int64]Quote{}
 	for rows.Next() {
 		var qt Quote
-		var cust, last decimal.NullDecimal
+		var cust, last, lastF decimal.NullDecimal
 		var note *string
 		var docID *int64
 		var docNo *string
 		var docDate *time.Time
-		if err := rows.Scan(&qt.ProductID, &qt.DefaultPrice, &cust, &note, &last, &docID, &docNo, &docDate); err != nil {
+		if err := rows.Scan(&qt.ProductID, &qt.DefaultPrice, &cust, &note, &last, &lastF, &docID, &docNo, &docDate); err != nil {
 			return nil, err
 		}
 		switch {
@@ -86,6 +105,10 @@ SELECT p.id, p.sale_price, pp.price, pp.note, ls.unit_price, ls.doc_id, ls.doc_n
 			qt.Price, qt.Source, qt.Note = cust.Decimal, SourceCustomer, note
 		case last.Valid:
 			qt.Price, qt.Source, qt.DocumentID, qt.DocNo = last.Decimal, SourceLastSale, docID, docNo
+			if lastF.Valid && !lastF.Decimal.Equal(decimal.NewFromInt(1)) {
+				qt.srcPrice, qt.srcFactor = last.Decimal, lastF.Decimal
+				qt.Price = last.Decimal.Div(lastF.Decimal).Round(2)
+			}
 			if docDate != nil {
 				d := util.NewDate(docDate.Year(), docDate.Month(), docDate.Day())
 				qt.DocDate = &d

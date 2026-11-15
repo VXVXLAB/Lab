@@ -123,11 +123,12 @@ func (m maskRules) maskObject(o map[string]any) {
 	if m.noCost {
 		nullKeys(o, "purchase_price", "cost_price", "unit_cost", "total_payable", "opening_payable", "payable", "cost_source")
 		if dt, ok := o["doc_type"].(string); ok && costDocTypes[dt] {
-			nullKeys(o, "unit_price", "amount", "total_amount", "old_debt", "total_debt")
+			nullKeys(o, "unit_price", "amount", "total_amount", "old_debt", "total_debt", "goods_amount", "tax_amount", "amount_in_words",
+				"amount_with_tax")
 			if lines, ok := o["lines"].([]any); ok {
 				for _, l := range lines {
 					if lm, ok := l.(map[string]any); ok {
-						nullKeys(lm, "unit_price", "amount")
+						nullKeys(lm, "unit_price", "amount", "tax_amount", "amount_with_tax")
 					}
 				}
 			}

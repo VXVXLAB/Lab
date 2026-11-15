@@ -22,7 +22,7 @@ func importAccess(r *http.Request) (string, error) {
 	}
 	kind := chi.URLParam(r, "kind")
 	if !importx.ValidKind(kind) {
-		return "", apperr.NotFound("loại nhập " + kind + " (products, partners, opening_stock, opening_debt, partner_prices)")
+		return "", apperr.NotFound("loại nhập " + kind + " (products, partners, opening_stock, opening_debt, partner_prices, product_units)")
 	}
 	switch kind {
 	case importx.KindProducts, importx.KindPartners:
@@ -34,6 +34,11 @@ func importAccess(r *http.Request) (string, error) {
 			return kind, err
 		}
 		return kind, need(r, ext.PSaleWrite)
+	case importx.KindProductUnits:
+		if err := featureOn(r, ext.FUnitConversion); err != nil {
+			return kind, err
+		}
+		return kind, need(r, ext.PCatalogWrite)
 	default:
 		if !userOf(r).IsAdmin() {
 			return kind, apperr.Forbidden("Chỉ quản trị mới có quyền nhập công nợ đầu kỳ")
@@ -117,6 +122,8 @@ func (s *Server) importRun(w http.ResponseWriter, r *http.Request) {
 			s.publishCatalog(r, "partner", 0, "imported")
 		case importx.KindPartnerPrice:
 			s.publishCatalog(r, "partner_prices", 0, "imported")
+		case importx.KindProductUnits:
+			s.publishCatalog(r, "product", 0, "imported")
 		case importx.KindOpeningStock:
 			for _, d := range res.Documents {
 				s.publish(r, events.Event{Type: "document.changed", ID: d.ID, DocType: "opening", Status: "draft", Action: "created"})

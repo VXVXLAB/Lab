@@ -20,6 +20,7 @@ import (
 	"kho/internal/pricing"
 	"kho/internal/stock"
 	"kho/internal/util"
+	"kho/internal/vat"
 )
 
 // Service xử lý chứng từ.
@@ -42,6 +43,11 @@ type pline struct {
 	UnitPrice   *decimal.Decimal
 	Amount      decimal.Decimal
 	Note        string
+	Factor      decimal.Decimal  // C10: hệ số quy đổi (1 = đơn vị gốc)
+	BaseQty     decimal.Decimal  // SL quy về đơn vị gốc = round(Qty × Factor, 3)
+	VatRate     *decimal.Decimal // C11: thuế suất (nil = không thuế)
+	Tax         decimal.Decimal  // tiền thuế dòng
+	BookQty     *decimal.Decimal // C9: tồn sổ sách (đơn vị gốc) khi ghi sổ phiếu kiểm kê
 }
 
 // header là phần đầu chứng từ đã kiểm tra.
@@ -64,10 +70,22 @@ func lineErr(i int, field, msg string) error {
 // Khi sửa phiếu cũ thì cho phép (dữ liệu cũ có thể tham chiếu mục đã ngừng).
 // oldPartner: đối tác hiện có trên phiếu (khi sửa / ghi sổ). Nếu phiếu giữ nguyên đối tác này thì không kiểm tra
 // lại cờ Khách hàng / Nhà cung cấp (đối tác có thể đã đổi cờ sau khi phát sinh) — chỉ kiểm khi đặt / đổi đối tác.
-func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, oldPartner *int64) (header, []pline, error) {
+// old: chứng từ đang có (khi sửa / ghi sổ / kiểm tra phiếu đang sửa) — dòng gửi lại id giữ các trường không gửi.
+func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, old *Document) (header, []pline, error) {
 	h := header{DocType: in.DocType, DocDate: in.DocDate, PartnerID: in.PartnerID, WarehouseID: in.WarehouseID, ToWarehouseID: in.ToWarehouseID, Note: strings.TrimSpace(in.Note)}
-	if _, ok := TypeNames[h.DocType]; !ok {
-		return h, nil, apperr.ValidationField("doc_type", "Loại chứng từ không hợp lệ (purchase, sale, sale_return, purchase_return, transfer, opening)")
+	var oldPartner *int64
+	if old != nil {
+		oldPartner = old.PartnerID
+	}
+	f, err := loadFeats(ctx, q)
+	if err != nil {
+		return h, nil, err
+	}
+	if !validType(h.DocType, f) {
+		if h.DocType == TypeStocktake && old != nil {
+			return h, nil, apperr.FeatureOff(ext.FeatureNames[ext.FStocktake])
+		}
+		return h, nil, typeErr(f)
 	}
 	if h.DocDate.Empty() {
 		h.DocDate = util.Today()
@@ -114,6 +132,11 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 			return h, nil, apperr.ValidationField("partner_id", "Phiếu tồn đầu kỳ không có đối tác")
 		}
 		h.ToWarehouseID = nil
+	case h.DocType == TypeStocktake:
+		if h.PartnerID != nil {
+			return h, nil, apperr.ValidationField("partner_id", "Phiếu kiểm kê không có đối tác")
+		}
+		h.ToWarehouseID = nil
 	default:
 		h.ToWarehouseID = nil
 		if h.PartnerID == nil {
@@ -141,7 +164,8 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 		return h, nil, apperr.ValidationField("lines", "Chứng từ tối đa 1000 dòng")
 	}
 	lines := make([]pline, 0, len(in.Lines))
-	var priceList *bool // bản mở rộng C6: nạp trạng thái tính năng khi cần
+	var priceList *bool        // bản mở rộng C6: nạp trạng thái tính năng khi cần
+	counted := map[int64]int{} // kiểm kê: mỗi mã một dòng
 	for i, li := range in.Lines {
 		var p *catalog.Product
 		var err error
@@ -166,11 +190,38 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 			return h, nil, lineErr(i, "product_id", "mặt hàng "+p.Code+" đã ngừng sử dụng")
 		}
 		pl := pline{ReqID: li.ID, LineNo: i + 1, Product: p, Description: strings.TrimSpace(li.Description), Note: strings.TrimSpace(li.Note)}
-		if li.Unit != nil {
-			pl.Unit = strings.TrimSpace(*li.Unit)
+		ol := oldLineOf(old, li.ID, p.ID)
+		if pl.Unit, pl.Factor, err = resolveUnit(ctx, q, f, p, li, ol, i); err != nil {
+			return h, nil, err
 		}
-		if pl.Unit == "" {
-			pl.Unit = p.Unit
+		if h.DocType == TypeStocktake {
+			if p.IsService {
+				return h, nil, lineErr(i, "product_id", "phiếu kiểm kê không có dòng dịch vụ")
+			}
+			if first, dup := counted[p.ID]; dup {
+				return h, nil, lineErr(i, "product_id", fmt.Sprintf("mã %s đã có ở dòng %d (mỗi mã một dòng)", p.Code, first))
+			}
+			counted[p.ID] = i + 1
+			if li.Qty == nil {
+				if in.lenient {
+					continue
+				}
+				return h, nil, lineErr(i, "qty", "vui lòng nhập số lượng thực tế (0 nếu không còn)")
+			}
+			if li.Qty.IsNegative() {
+				return h, nil, lineErr(i, "qty", "số lượng thực tế không được âm")
+			}
+			pl.Qty = li.Qty.Round(3)
+			pl.BaseQty = pl.Qty.Mul(pl.Factor).Round(3)
+			if pl.BaseQty.GreaterThanOrEqual(maxQty) {
+				return h, nil, lineErr(i, "qty", "số lượng quá lớn")
+			}
+			if li.UnitPrice != nil || (li.VatRate.Set && li.VatRate.Val != nil) {
+				return h, nil, lineErr(i, "unit_price", "phiếu kiểm kê không có đơn giá / thuế")
+			}
+			pl.Amount = decimal.Zero
+			lines = append(lines, pl)
+			continue
 		}
 		if p.IsService {
 			if !AllowsService(h.DocType) {
@@ -222,13 +273,17 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 								return h, nil, err
 							}
 							if len(qs) == 1 {
-								up = qs[0].Price
+								up = qs[0].PriceFor(pl.Factor)
+								pl.UnitPrice = &up
 							}
 						}
 					}
-					pl.UnitPrice = &up
+					if pl.UnitPrice == nil {
+						up = byFactor(up, pl.Factor)
+						pl.UnitPrice = &up
+					}
 				case TypePurchase, TypePurchaseReturn, TypeOpening:
-					up := p.PurchasePrice
+					up := byFactor(p.PurchasePrice, pl.Factor)
 					pl.UnitPrice = &up
 				}
 			}
@@ -238,6 +293,16 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 		}
 		if pl.Qty.GreaterThanOrEqual(maxQty) {
 			return h, nil, lineErr(i, "qty", "số lượng quá lớn")
+		}
+		pl.BaseQty = pl.Qty
+		if pl.Factor.Cmp(one) != 0 {
+			pl.BaseQty = pl.Qty.Mul(pl.Factor).Round(3)
+			if !pl.BaseQty.IsPositive() {
+				return h, nil, lineErr(i, "qty", "số lượng quy về đơn vị gốc bằng 0 (quá nhỏ)")
+			}
+			if pl.BaseQty.GreaterThanOrEqual(maxQty) {
+				return h, nil, lineErr(i, "qty", "số lượng quá lớn")
+			}
 		}
 		if pl.UnitPrice != nil && pl.UnitPrice.Abs().GreaterThanOrEqual(maxPrice) {
 			return h, nil, lineErr(i, "unit_price", "đơn giá quá lớn")
@@ -250,15 +315,28 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 		} else {
 			pl.Amount = decimal.Zero
 		}
+		if pl.VatRate, err = resolveVAT(f, h.DocType, p, li, ol, i); err != nil {
+			return h, nil, err
+		}
+		pl.Tax = vat.Tax(pl.Amount, pl.VatRate)
 		lines = append(lines, pl)
 	}
 	return h, lines, nil
 }
 
+// byFactor: giá theo đơn vị gốc × hệ số (làm tròn 2 chữ số) — giá mặc định của đơn vị quy đổi.
+func byFactor(price, factor decimal.Decimal) decimal.Decimal {
+	if factor.Cmp(one) == 0 {
+		return price
+	}
+	return price.Mul(factor).Round(2)
+}
+
+// total là tổng thanh toán của phiếu: tiền hàng + tiền thuế (công nợ, hạn mức dùng số này).
 func total(lines []pline) decimal.Decimal {
 	t := decimal.Zero
 	for _, l := range lines {
-		t = t.Add(l.Amount)
+		t = t.Add(l.lineTotal())
 	}
 	return t
 }
@@ -271,17 +349,38 @@ func movements(h header, lines []pline) []stock.Mov {
 			continue
 		}
 		m := stock.Mov{ProductID: l.Product.ID, WarehouseID: h.WarehouseID, Date: h.DocDate, In: decimal.Zero, Out: decimal.Zero}
-		if isInbound(h.DocType) {
-			m.In = l.Qty
-		} else {
-			m.Out = l.Qty
+		in, outQ := lineInOut(h, l)
+		if in.IsZero() && outQ.IsZero() {
+			continue
 		}
+		m.In, m.Out = in, outQ
 		out = append(out, m)
 		if h.DocType == TypeTransfer && h.ToWarehouseID != nil {
-			out = append(out, stock.Mov{ProductID: l.Product.ID, WarehouseID: *h.ToWarehouseID, Date: h.DocDate, In: l.Qty, Out: decimal.Zero})
+			out = append(out, stock.Mov{ProductID: l.Product.ID, WarehouseID: *h.ToWarehouseID, Date: h.DocDate, In: l.BaseQty, Out: decimal.Zero})
 		}
 	}
 	return out
+}
+
+// lineInOut: SL nhập / xuất (đơn vị gốc) của một dòng hàng tại kho chính của phiếu. Kiểm kê: chênh lệch thực tế − sổ
+// sách (BookQty phải đã được gán); không chênh ⇒ (0, 0).
+func lineInOut(h header, l pline) (decimal.Decimal, decimal.Decimal) {
+	switch {
+	case h.DocType == TypeStocktake:
+		book := decimal.Zero
+		if l.BookQty != nil {
+			book = *l.BookQty
+		}
+		d := l.BaseQty.Sub(book)
+		if d.IsNegative() {
+			return decimal.Zero, d.Neg()
+		}
+		return d, decimal.Zero
+	case isInbound(h.DocType):
+		return l.BaseQty, decimal.Zero
+	default:
+		return decimal.Zero, l.BaseQty
+	}
 }
 
 // lossWarnings tính các dòng bán dưới giá vốn (R4). Chỉ phiếu bán, không xét dòng dịch vụ.
@@ -308,12 +407,17 @@ func lossWarnings(ctx context.Context, q db.Q, h header, lines []pline) ([]Warni
 		if !ok || c.Source == "none" {
 			continue
 		}
-		if l.UnitPrice.LessThan(c.Price) {
+		// So theo đơn vị gốc (C10): giá bán / hệ số < giá vốn ⟺ giá bán < giá vốn × hệ số (giá trước thuế).
+		cost := c.Price
+		if !l.Factor.IsZero() && l.Factor.Cmp(one) != 0 {
+			cost = c.Price.Mul(l.Factor).Round(2)
+		}
+		if l.UnitPrice.LessThan(cost) {
 			out = append(out, Warning{
 				Type: "loss", LineNo: l.LineNo, ProductID: l.Product.ID, ProductCode: l.Product.Code, ProductName: l.Product.Name,
-				UnitPrice: *l.UnitPrice, CostPrice: c.Price, CostSource: c.Source,
+				UnitPrice: *l.UnitPrice, CostPrice: cost, CostSource: c.Source,
 				Message: fmt.Sprintf("Dòng %d (%s): giá bán %s thấp hơn giá mua %s — bán lỗ", l.LineNo, l.Product.Code,
-					util.FormatVND(*l.UnitPrice), util.FormatVND(c.Price)),
+					util.FormatVND(*l.UnitPrice), util.FormatVND(cost)),
 			})
 		}
 	}
@@ -377,20 +481,30 @@ func saveLines(ctx context.Context, tx pgx.Tx, docID int64, lines []pline) ([]in
 	for i, l := range lines {
 		if l.ReqID != 0 && keep[l.ReqID] && !used[l.ReqID] {
 			used[l.ReqID] = true
-			if _, err := tx.Exec(ctx, `UPDATE document_lines SET line_no=$3, product_id=$4, description=$5, unit=$6, qty=$7, unit_price=$8, amount=$9, note=$10
-				WHERE id=$1 AND document_id=$2`, l.ReqID, docID, l.LineNo, l.Product.ID, l.Description, l.Unit, l.Qty, l.UnitPrice, l.Amount, l.Note); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE document_lines SET line_no=$3, product_id=$4, description=$5, unit=$6, qty=$7, unit_price=$8, amount=$9, note=$10,
+				unit_factor=$11, vat_rate=$12, tax_amount=$13, book_qty=$14
+				WHERE id=$1 AND document_id=$2`, l.ReqID, docID, l.LineNo, l.Product.ID, l.Description, l.Unit, l.Qty, l.UnitPrice, l.Amount, l.Note,
+				factorOr1(l.Factor), l.VatRate, l.Tax, l.BookQty); err != nil {
 				return nil, err
 			}
 			ids[i] = l.ReqID
 			continue
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO document_lines(document_id,line_no,product_id,description,unit,qty,unit_price,amount,note)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-			docID, l.LineNo, l.Product.ID, l.Description, l.Unit, l.Qty, l.UnitPrice, l.Amount, l.Note).Scan(&ids[i]); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO document_lines(document_id,line_no,product_id,description,unit,qty,unit_price,amount,note,unit_factor,vat_rate,tax_amount,book_qty)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+			docID, l.LineNo, l.Product.ID, l.Description, l.Unit, l.Qty, l.UnitPrice, l.Amount, l.Note,
+			factorOr1(l.Factor), l.VatRate, l.Tax, l.BookQty).Scan(&ids[i]); err != nil {
 			return nil, err
 		}
 	}
 	return ids, nil
+}
+
+func factorOr1(f decimal.Decimal) decimal.Decimal {
+	if f.IsZero() {
+		return one
+	}
+	return f
 }
 
 // insertMovements sinh bút toán kho cho chứng từ đã ghi sổ.
@@ -402,12 +516,13 @@ func insertMovements(ctx context.Context, tx pgx.Tx, docID int64, h header, line
 		cost := decimal.Zero
 		if l.UnitPrice != nil {
 			cost = *l.UnitPrice
+			if f := factorOr1(l.Factor); f.Cmp(one) != 0 {
+				cost = cost.Div(f).Round(2) // giá theo đơn vị gốc
+			}
 		}
-		in, out := decimal.Zero, decimal.Zero
-		if isInbound(h.DocType) {
-			in = l.Qty
-		} else {
-			out = l.Qty
+		in, out := lineInOut(h, l)
+		if in.IsZero() && out.IsZero() {
+			continue // kiểm kê không chênh lệch
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO stock_movements(document_id,line_id,product_id,warehouse_id,doc_date,qty_in,qty_out,unit_cost)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, docID, lineIDs[i], l.Product.ID, h.WarehouseID, h.DocDate, in, out, cost); err != nil {
@@ -415,7 +530,7 @@ func insertMovements(ctx context.Context, tx pgx.Tx, docID int64, h header, line
 		}
 		if h.DocType == TypeTransfer && h.ToWarehouseID != nil {
 			if _, err := tx.Exec(ctx, `INSERT INTO stock_movements(document_id,line_id,product_id,warehouse_id,doc_date,qty_in,qty_out,unit_cost)
-				VALUES ($1,$2,$3,$4,$5,$6,0,$7)`, docID, lineIDs[i], l.Product.ID, *h.ToWarehouseID, h.DocDate, l.Qty, cost); err != nil {
+				VALUES ($1,$2,$3,$4,$5,$6,0,$7)`, docID, lineIDs[i], l.Product.ID, *h.ToWarehouseID, h.DocDate, l.BaseQty, cost); err != nil {
 				return err
 			}
 		}
@@ -502,9 +617,9 @@ func (s *Service) Create(ctx context.Context, userID int64, in Input) (*Document
 			return err
 		}
 		draftNo := fmt.Sprintf("TAM%06d", n)
-		err = tx.QueryRow(ctx, `INSERT INTO documents(doc_type,draft_no,doc_date,status,partner_id,warehouse_id,to_warehouse_id,note,total_amount,version,created_by,updated_by)
-			VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,$8,1,$9,$9) RETURNING id`,
-			h.DocType, draftNo, h.DocDate, h.PartnerID, h.WarehouseID, h.ToWarehouseID, h.Note, total(lines), userID).Scan(&id)
+		err = tx.QueryRow(ctx, `INSERT INTO documents(doc_type,draft_no,doc_date,status,partner_id,warehouse_id,to_warehouse_id,note,total_amount,version,created_by,updated_by,tax_amount)
+			VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,$8,1,$9,$9,$10) RETURNING id`,
+			h.DocType, draftNo, h.DocDate, h.PartnerID, h.WarehouseID, h.ToWarehouseID, h.Note, total(lines), userID, taxTotal(lines)).Scan(&id)
 		if err != nil {
 			return err
 		}
@@ -544,7 +659,7 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Docu
 		if err != nil {
 			return err
 		}
-		h, lines, err := s.validate(ctx, tx, in, false, before.PartnerID)
+		h, lines, err := s.validate(ctx, tx, in, false, before)
 		if err != nil {
 			return err
 		}
@@ -556,14 +671,26 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Docu
 			if len(lines) == 0 {
 				return apperr.ValidationField("lines", "Phiếu đã ghi sổ phải có ít nhất một dòng")
 			}
-			newMovs := movements(h, lines)
 			oldPairs, err := existingPairs(ctx, tx, id)
 			if err != nil {
 				return err
 			}
-			pairs := stock.MergePairs(oldPairs, stock.PairsOf(newMovs))
-			if err := stock.LockPairs(ctx, tx, pairs); err != nil {
-				return err
+			// Kiểm kê: khóa cặp mặt hàng+kho rồi mới tính tồn sổ sách; mọi khóa lấy một lần, theo thứ tự cố định.
+			stp := stocktakePairs(h, lines)
+			if h.DocType == TypeStocktake {
+				if err := stock.LockPairs(ctx, tx, stock.MergePairs(oldPairs, stp)); err != nil {
+					return err
+				}
+				if err := fillBook(ctx, tx, id, h, lines); err != nil {
+					return err
+				}
+			}
+			newMovs := movements(h, lines)
+			pairs := stock.MergePairs(oldPairs, stock.PairsOf(newMovs), stp)
+			if h.DocType != TypeStocktake {
+				if err := stock.LockPairs(ctx, tx, pairs); err != nil {
+					return err
+				}
 			}
 			sh, err := stock.CheckShortages(ctx, tx, id, newMovs, pairs)
 			if err != nil {
@@ -601,8 +728,8 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Docu
 			}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE documents SET doc_date=$2, partner_id=$3, warehouse_id=$4, to_warehouse_id=$5, note=$6,
-			total_amount=$7, version=version+1, updated_by=$8, updated_at=now() WHERE id=$1`,
-			id, h.DocDate, h.PartnerID, h.WarehouseID, h.ToWarehouseID, h.Note, total(lines), userID); err != nil {
+			total_amount=$7, version=version+1, updated_by=$8, updated_at=now(), tax_amount=$9 WHERE id=$1`,
+			id, h.DocDate, h.PartnerID, h.WarehouseID, h.ToWarehouseID, h.Note, total(lines), userID, taxTotal(lines)); err != nil {
 			return err
 		}
 		after, err := s.Get(ctx, tx, id)
@@ -627,11 +754,12 @@ func (s *Service) loadForPost(ctx context.Context, q db.Q, d *Document) (header,
 	in := Input{DocType: d.DocType, DocDate: d.DocDate, PartnerID: d.PartnerID, WarehouseID: d.WarehouseID, ToWarehouseID: d.ToWarehouseID, Note: d.Note}
 	for _, l := range d.Lines {
 		qty := l.Qty
-		li := LineInput{ProductID: l.ProductID, Description: l.Description, Unit: &l.Unit, Qty: &qty, Note: l.Note}
+		unit := l.Unit
+		li := LineInput{ID: l.ID, ProductID: l.ProductID, Description: l.Description, Unit: &unit, Qty: &qty, Note: l.Note}
 		if l.UnitPrice != nil {
 			up := *l.UnitPrice
 			li.UnitPrice = &up
-		} else if !l.IsService && d.DocType == TypeTransfer {
+		} else if !l.IsService && (d.DocType == TypeTransfer || d.DocType == TypeStocktake) {
 			li.UnitPrice = nil
 		} else if !l.IsService {
 			z := decimal.Zero
@@ -639,7 +767,7 @@ func (s *Service) loadForPost(ctx context.Context, q db.Q, d *Document) (header,
 		}
 		in.Lines = append(in.Lines, li)
 	}
-	return s.validate(ctx, q, in, false, d.PartnerID)
+	return s.validate(ctx, q, in, false, d)
 }
 
 // Post ghi sổ phiếu tạm: cấp số chính thức, sinh bút toán kho, phát sinh công nợ (R5, R6).
@@ -683,10 +811,21 @@ func (s *Service) PostWith(ctx context.Context, userID, id int64, pp PostParams)
 		if err != nil {
 			return err
 		}
+		stp := stocktakePairs(h, lines)
+		if h.DocType == TypeStocktake {
+			if err := stock.LockPairs(ctx, tx, stp); err != nil {
+				return err
+			}
+			if err := fillBook(ctx, tx, id, h, lines); err != nil {
+				return err
+			}
+		}
 		newMovs := movements(h, lines)
-		pairs := stock.PairsOf(newMovs)
-		if err := stock.LockPairs(ctx, tx, pairs); err != nil {
-			return err
+		pairs := stock.MergePairs(stock.PairsOf(newMovs), stp)
+		if h.DocType != TypeStocktake {
+			if err := stock.LockPairs(ctx, tx, pairs); err != nil {
+				return err
+			}
 		}
 		sh, err := stock.CheckShortages(ctx, tx, id, newMovs, pairs)
 		if err != nil {
@@ -723,6 +862,13 @@ func (s *Service) PostWith(ctx context.Context, userID, id int64, pp PostParams)
 		}
 		if err := insertMovements(ctx, tx, id, h, lines, lineIDs); err != nil {
 			return err
+		}
+		if h.DocType == TypeStocktake {
+			for i, l := range lines {
+				if _, err := tx.Exec(ctx, `UPDATE document_lines SET book_qty=$2 WHERE id=$1`, lineIDs[i], l.BookQty); err != nil {
+					return err
+				}
+			}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE documents SET status='posted', doc_no=$2, posted_by=$3, posted_at=clock_timestamp(),
 			version=version+1, updated_by=$3, updated_at=now() WHERE id=$1`, id, *docNo, userID); err != nil {
@@ -780,6 +926,9 @@ func (s *Service) Unpost(ctx context.Context, userID, id int64, version int) (*D
 			return insufficient(sh)
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM stock_movements WHERE document_id=$1`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE document_lines SET book_qty=NULL WHERE document_id=$1 AND book_qty IS NOT NULL`, id); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE documents SET status='draft', posted_by=NULL, posted_at=NULL,
@@ -845,6 +994,9 @@ func (s *Service) Check(ctx context.Context, id int64) (*CheckResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := fillBook(ctx, s.Pool, id, h, lines); err != nil {
+		return nil, err
+	}
 	newMovs := movements(h, lines)
 	oldPairs, err := existingPairs(ctx, s.Pool, id)
 	if err != nil {
@@ -870,7 +1022,7 @@ func (s *Service) Check(ctx context.Context, id int64) (*CheckResult, error) {
 func (s *Service) CheckInput(ctx context.Context, in Input, id int64) (*CheckResult, error) {
 	in.lenient = true
 	strict := true
-	var oldPartner *int64
+	var oldDoc *Document
 	if id != 0 {
 		d, err := s.Get(ctx, s.Pool, id)
 		if err != nil {
@@ -882,10 +1034,13 @@ func (s *Service) CheckInput(ctx context.Context, in Input, id int64) (*CheckRes
 		if in.DocType != d.DocType {
 			return nil, apperr.ValidationField("doc_type", "Không được đổi loại chứng từ")
 		}
-		strict, oldPartner = false, d.PartnerID
+		strict, oldDoc = false, d
 	}
-	h, lines, err := s.validate(ctx, s.Pool, in, strict, oldPartner)
+	h, lines, err := s.validate(ctx, s.Pool, in, strict, oldDoc)
 	if err != nil {
+		return nil, err
+	}
+	if err := fillBook(ctx, s.Pool, id, h, lines); err != nil {
 		return nil, err
 	}
 	newMovs := movements(h, lines)
@@ -909,7 +1064,7 @@ func (s *Service) CheckInput(ctx context.Context, in Input, id int64) (*CheckRes
 const docSelect = `SELECT d.id, d.doc_type, d.doc_no, d.draft_no, d.doc_date, d.status,
 	d.partner_id, p.code, p.name, p.address, p.phone,
 	d.warehouse_id, w.code, w.name, d.to_warehouse_id, tw.code, tw.name,
-	d.note, d.total_amount, d.version,
+	d.note, d.total_amount, d.version, d.tax_amount,
 	d.created_by, cu.full_name, d.updated_by, uu.full_name, d.posted_by, pu.full_name, d.posted_at, d.created_at, d.updated_at
 FROM documents d
 LEFT JOIN partners p ON p.id=d.partner_id
@@ -925,7 +1080,7 @@ func (s *Service) Get(ctx context.Context, q db.Q, id int64) (*Document, error) 
 	err := q.QueryRow(ctx, docSelect+` WHERE d.id=$1`, id).Scan(&d.ID, &d.DocType, &d.DocNo, &d.DraftNo, &d.DocDate, &d.Status,
 		&d.PartnerID, &d.PartnerCode, &d.PartnerName, &d.PartnerAddress, &d.PartnerPhone,
 		&d.WarehouseID, &d.WarehouseCode, &d.WarehouseName, &d.ToWarehouseID, &d.ToWarehouseCode, &d.ToWarehouseName,
-		&d.Note, &d.TotalAmount, &d.Version,
+		&d.Note, &d.TotalAmount, &d.Version, &d.taxAmount,
 		&d.CreatedBy, &d.CreatedByName, &d.UpdatedBy, &d.UpdatedByName, &d.PostedBy, &d.PostedByName, &d.PostedAt, &d.CreatedAt, &d.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, apperr.NotFound("chứng từ")
@@ -938,20 +1093,31 @@ func (s *Service) Get(ctx context.Context, q db.Q, id int64) (*Document, error) 
 	if d.Status == StatusPosted && d.DocNo != nil {
 		d.DisplayNo = *d.DocNo
 	}
-	rows, err := q.Query(ctx, `SELECT l.id, l.line_no, l.product_id, p.code, p.name, p.is_service, l.description, l.unit, l.qty, l.unit_price, l.amount, l.note
+	rows, err := q.Query(ctx, `SELECT l.id, l.line_no, l.product_id, p.code, p.name, p.is_service, l.description, l.unit, l.qty, l.unit_price, l.amount, l.note,
+			l.unit_factor, l.base_qty, l.vat_rate, l.tax_amount, l.book_qty, p.unit
 		FROM document_lines l JOIN products p ON p.id=l.product_id WHERE l.document_id=$1 ORDER BY l.line_no, l.id`, id)
 	if err != nil {
 		return nil, err
 	}
-	d.Lines, err = pgx.CollectRows(rows, pgx.RowToStructByPos[Line])
-	if err != nil {
+	d.Lines = []Line{}
+	for rows.Next() {
+		var l Line
+		if err := rows.Scan(&l.ID, &l.LineNo, &l.ProductID, &l.ProductCode, &l.ProductName, &l.IsService, &l.Description, &l.Unit, &l.Qty,
+			&l.UnitPrice, &l.Amount, &l.Note, &l.factor, &l.baseQty, &l.vatRate, &l.tax, &l.bookQty, &l.baseUnit); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		d.Lines = append(d.Lines, l)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	// Cảnh báo bán lỗ.
 	h := header{DocType: d.DocType, DocDate: d.DocDate}
 	pls := make([]pline, len(d.Lines))
 	for i, l := range d.Lines {
-		pls[i] = pline{LineNo: l.LineNo, Product: &catalog.Product{ID: l.ProductID, Code: l.ProductCode, Name: l.ProductName, IsService: l.IsService}, UnitPrice: l.UnitPrice, Qty: l.Qty}
+		pls[i] = pline{LineNo: l.LineNo, Product: &catalog.Product{ID: l.ProductID, Code: l.ProductCode, Name: l.ProductName, IsService: l.IsService}, UnitPrice: l.UnitPrice, Qty: l.Qty, Factor: l.factor}
 	}
 	d.Warnings, err = lossWarnings(ctx, q, h, pls)
 	if err != nil {
@@ -973,6 +1139,9 @@ func (s *Service) Get(ctx context.Context, q db.Q, id int64) (*Document, error) 
 		}
 		t := old.Add(d.TotalAmount)
 		d.OldDebt, d.TotalDebt = &old, &t
+	}
+	if err := decorate(ctx, q, &d); err != nil {
+		return nil, err
 	}
 	return &d, nil
 }
@@ -998,8 +1167,12 @@ type ListResult struct {
 func (s *Service) List(ctx context.Context, f Filter) (ListResult, error) {
 	var w util.Where
 	if len(f.Type) > 0 {
+		ft, err := loadFeats(ctx, s.Pool)
+		if err != nil {
+			return ListResult{}, err
+		}
 		for _, t := range f.Type {
-			if _, ok := TypeNames[t]; !ok {
+			if !validType(t, ft) {
 				return ListResult{}, apperr.ValidationField("type", "Loại chứng từ không hợp lệ: "+t)
 			}
 		}

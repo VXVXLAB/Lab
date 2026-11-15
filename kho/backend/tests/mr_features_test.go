@@ -31,8 +31,10 @@ func TestMR_Features_MacDinhTatVaBatTat(t *testing.T) {
 			t.Fatalf("mục tính năng: %+v", it)
 		}
 	}
-	// Tính năng chưa làm xong không bật được.
-	e.Admin.Expect(400, "VALIDATION", "PUT", "/api/features", map[string]any{"features": map[string]bool{"vat": true}})
+	// Tính năng chưa làm xong không bật được (từ đợt M3 mọi khóa đều đã làm xong ⇒ không còn khóa nào để thử).
+	if k := unavailableKey(); k != "" {
+		e.Admin.Expect(400, "VALIDATION", "PUT", "/api/features", map[string]any{"features": map[string]bool{k: true}})
+	}
 	var me struct {
 		Permissions []string        `json:"permissions"`
 		Features    map[string]bool `json:"features"`
@@ -163,22 +165,26 @@ func TestMR_Features_MacDinhTheoBanCai(t *testing.T) {
 	if f = get(); f.Edition != "base" || f.Features["permissions"] || f.Features["period_lock"] || !f.Features["import_excel"] {
 		t.Fatalf("bản chuẩn: %+v", f)
 	}
-	// Tính năng chưa làm xong: luôn tắt, PUT ⇒ 400, kể cả khi giá trị lưu (cũ) là true.
-	if _, err := e.Pool.Exec(ctx, `UPDATE settings SET features='{"vat": true}'`); err != nil {
+	// Tính năng chưa làm xong: luôn tắt, PUT ⇒ 400, kể cả khi giá trị lưu (cũ) là true (bỏ qua khi mọi khóa đã làm xong).
+	uk := unavailableKey()
+	if uk == "" {
+		return
+	}
+	if _, err := e.Pool.Exec(ctx, `UPDATE settings SET features=jsonb_build_object($1::text, true)`, uk); err != nil {
 		t.Fatal(err)
 	}
 	if err := ext.SetEdition(ctx, e.Pool, "extended"); err != nil {
 		t.Fatal(err)
 	}
-	if f = get(); f.Features["vat"] || f.Features["stocktake"] {
+	if f = get(); f.Features[uk] {
 		t.Fatalf("chưa làm xong luôn tắt: %+v", f.Features)
 	}
 	for _, it := range f.Items {
-		if it.Key == "vat" && (it.Available || it.Enabled) {
+		if it.Key == uk && (it.Available || it.Enabled) {
 			t.Fatalf("vat: %+v", it)
 		}
 	}
-	e.Admin.Expect(400, "VALIDATION", "PUT", "/api/features", map[string]any{"features": map[string]bool{"stocktake": false}})
+	e.Admin.Expect(400, "VALIDATION", "PUT", "/api/features", map[string]any{"features": map[string]bool{uk: false}})
 }
 
 // Tắt phân quyền khi còn người dùng mang vai trò mới ⇒ 409 nêu tên, trừ khi confirm; sau đó họ như kế toán.
@@ -203,4 +209,14 @@ func TestMR_Features_TatPhanQuyenCanXacNhan(t *testing.T) {
 	if len(me.Permissions) != 10 {
 		t.Fatalf("tắt phân quyền ⇒ vai trò mới như kế toán: %v", me.Permissions)
 	}
+}
+
+// unavailableKey trả một khóa tính năng chưa làm xong ("" nếu mọi khóa đã làm xong).
+func unavailableKey() string {
+	for _, k := range ext.FeatureKeys {
+		if !ext.AvailableFeatures[k] {
+			return k
+		}
+	}
+	return ""
 }

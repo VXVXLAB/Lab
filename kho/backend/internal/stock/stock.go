@@ -225,7 +225,8 @@ func CostPrices(ctx context.Context, q db.Q, productIDs []int64, date util.Date)
 SELECT p.id, p.purchase_price, lp.unit_price
   FROM products p
   LEFT JOIN LATERAL (
-    SELECT l.unit_price FROM document_lines l JOIN documents d ON d.id=l.document_id
+    SELECT CASE WHEN l.unit_factor = 1 THEN l.unit_price ELSE round(l.unit_price / l.unit_factor, 2) END AS unit_price
+      FROM document_lines l JOIN documents d ON d.id=l.document_id
      WHERE l.product_id=p.id AND d.doc_type='purchase' AND d.status='posted' AND d.doc_date <= $2 AND l.unit_price IS NOT NULL
      ORDER BY d.doc_date DESC, d.posted_at DESC NULLS LAST, d.id DESC, l.line_no DESC
      LIMIT 1) lp ON TRUE
