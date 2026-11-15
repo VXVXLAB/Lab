@@ -98,7 +98,10 @@ def run_all(selected=None):
         try:
             fn()
         except Fatal as e:
-            pass
+            # require() records its failure before raising; helpers (ok(), posted(), draft(), login()...) do not.
+            # A Fatal that was not recorded must still fail the test (it used to be swallowed -> false PASS).
+            if not c.failures or c.failures[-1] != str(e):
+                c.failures.append("FATAL (test aborted): " + str(e)[:1500])
         except Exception as e:  # noqa
             c.failures.append("EXCEPTION: " + "".join(traceback.format_exception(e))[-1500:])
         if c.failures:

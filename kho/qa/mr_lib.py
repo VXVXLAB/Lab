@@ -44,7 +44,9 @@ def test(tag, name=None):
             try:
                 fn()
             except Fatal as e:
-                fail("FATAL (test aborted): " + str(e)[:600])
+                c = lib.ctx()
+                if c is None or not c.failures or c.failures[-1] != str(e):
+                    fail("FATAL (test aborted): " + str(e)[:600])
         wrapped.__name__ = fn.__name__
         lib.TESTS.append((name or fn.__name__, [tag], wrapped))
         return fn
