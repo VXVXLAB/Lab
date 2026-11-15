@@ -51,7 +51,7 @@ func main() {
 	if err := db.Seed(ctx, pool, db.SeedOptions{AdminPassword: envOr("ADMIN_PASSWORD", "admin123")}); err != nil {
 		log.Fatal(err)
 	}
-	if err := ext.SeedFeatures(ctx, pool, os.Getenv("KHO_EDITION")); err != nil {
+	if err := ext.SetEdition(ctx, pool, os.Getenv("KHO_EDITION")); err != nil {
 		log.Fatal(err)
 	}
 	var n int

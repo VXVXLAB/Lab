@@ -11,14 +11,17 @@ import (
 	"testing"
 
 	"github.com/xuri/excelize/v2"
+
+	"kho/internal/ext"
 )
 
-// mrEnable bật các tính năng mở rộng (rỗng ⇒ bật hết).
+// mrEnable bật các tính năng mở rộng (rỗng ⇒ bật mọi tính năng đã có).
 func mrEnable(e *Env, keys ...string) {
 	e.t.Helper()
 	if len(keys) == 0 {
-		keys = []string{"permissions", "period_lock", "import_excel", "min_stock", "price_list", "credit_limit",
-			"profit_report", "stocktake", "unit_conversion", "vat", "print_template"}
+		for k := range ext.AvailableFeatures {
+			keys = append(keys, k)
+		}
 	}
 	m := map[string]bool{}
 	for _, k := range keys {

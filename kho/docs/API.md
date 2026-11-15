@@ -595,10 +595,20 @@ Mọi tính năng mở rộng **tắt** ⇒ mọi endpoint ở các mục 1–7 
 Mã lỗi mới: `FEATURE_OFF` (404), `PERIOD_LOCKED` (422), `IMPORT_INVALID` (422).
 
 ### 8.1 Công tắc tính năng
-- `GET /api/features` (mọi người dùng) → `{"features": {"permissions": false, "period_lock": false, "import_excel": false, "min_stock": false, "price_list": false, "credit_limit": false, "profit_report": false, "stocktake": false, "unit_conversion": false, "vat": false, "print_template": false}, "keys": [{"key": "permissions", "name": "Phân quyền"}, …]}`.
-- `PUT /api/features` (quản trị) body `{"features": {"permissions": true, "import_excel": true}, "confirm": false}` — chỉ đổi các khóa gửi lên → `{"features": {…đủ 11 khóa}}`. Khóa lạ ⇒ 400. Có audit (entity `features`) và phát SSE `{"type":"features","action":"updated",…}` (cũng phát khi đổi ma trận quyền / ngày khóa sổ) — giao diện tải lại `/api/features`, `/api/auth/me`.
+- `GET /api/features` (mọi người dùng) →
+  ```json
+  {"edition": "extended",
+   "features": {"permissions": true, "period_lock": true, "import_excel": true, "min_stock": false, "price_list": false, "credit_limit": false,
+                "profit_report": false, "stocktake": false, "unit_conversion": false, "vat": false, "print_template": false},
+   "items": [{"key": "permissions", "name": "Phân quyền", "description": "Vai trò Bán hàng, …", "available": true, "enabled": true},
+             {"key": "min_stock", "name": "Tồn tối thiểu từng mã", "description": "…", "available": false, "enabled": false}, …],
+   "keys": [{"key": "permissions", "name": "Phân quyền"}, …]}
+  ```
+  `edition`: `"extended"` | `"base"`. `features` = giá trị **hiệu lực** (đủ 11 khóa). `items` (11 phần tử, theo thứ tự hiển thị): `available:false` = tính năng chưa có trong phiên bản này (đợt M2/M3) — luôn `enabled:false`, giao diện hiện mờ/ẩn. `keys` giữ từ M1 để tương thích (nên dùng `items`).
+  Giá trị hiệu lực của một khóa có sẵn = giá trị quản trị đã đặt nếu có, ngược lại theo bản cài: `KHO_EDITION=extended` ⇒ bật, bản chuẩn ⇒ tắt (đọc lại mỗi lần máy chủ khởi động; bản mở rộng nâng cấp lên phiên bản có tính năng mới ⇒ tính năng mới bật, bản chuẩn ⇒ tắt).
+- `PUT /api/features` (quản trị) body `{"features": {"permissions": true, "import_excel": true}, "confirm": false}` — chỉ lưu các khóa gửi lên (thành giá trị quản trị đặt) → cùng hình dạng như GET. Khóa lạ hoặc khóa `available:false` ⇒ 400. Có audit (entity `features`) và phát SSE `{"type":"features","action":"updated",…}` (cũng phát khi đổi ma trận quyền / ngày khóa sổ) — giao diện tải lại `/api/features`, `/api/auth/me`.
   Tắt `permissions` khi còn người dùng mang vai trò `banhang`/`muahang`/`thukho` ⇒ `409 IN_USE`, message nêu tên, `details.users`; gửi lại với `"confirm": true` để tắt (họ được coi như `ketoan`).
-- Bản cài: biến môi trường `KHO_EDITION=extended` ⇒ lần khởi động đầu tiên bật hết; không đặt ⇒ tắt hết. Chỉ áp dụng một lần (cột `settings.features_initialized`), sau đó chỉ quản trị đổi.
+- Bản cài: biến môi trường `KHO_EDITION=extended` ⇒ mọi tính năng có sẵn mà quản trị chưa đặt đều bật; không đặt ⇒ tắt. Lựa chọn của quản trị không bao giờ bị đè.
 - `GET /api/auth/me` có thêm `"permissions": ["sale.write", …]` (tính năng tắt ⇒ đủ 10 quyền) và `"features": {…}`.
 
 ### 8.2 Phân quyền (`permissions`)
@@ -641,7 +651,8 @@ Quyền: `sale.write`, `purchase.write`, `stock.write`, `cash.write`, `catalog.w
   - ghi sổ, bỏ ghi sổ chứng từ có ngày ≤ L; sửa chứng từ **đã ghi sổ** có ngày cũ hoặc ngày mới ≤ L (không sửa trong kỳ, không dời vào/ra kỳ);
   - sửa / xóa phiếu thu chi có ngày cũ hoặc mới ≤ L;
   - phiếu **tạm** đã nằm trong kỳ khóa: sửa, xóa, dời ngày ra ngoài kỳ được; không ghi sổ được; không được dời phiếu tạm từ ngoài vào trong kỳ;
-  - nhập tồn đầu kỳ từ Excel với `date` ≤ L (cả `dry_run`).
+  - nhập tồn đầu kỳ từ Excel với `date` ≤ L (cả `dry_run`);
+  - **số dư đầu kỳ không có ngày**: đổi `opening_receivable` / `opening_payable` của đối tác, `opening_balance` của tài khoản tiền (tạo mới với số khác 0, hoặc sửa thành số khác), và nhập `opening_debt` từ Excel (cả `dry_run`) ⇒ `422 PERIOD_LOCKED` ("… Quản trị cần bỏ khóa sổ trước …"). Tạo mới với số 0 và sửa các trường khác (giữ nguyên số dư) vẫn được.
 - Tính năng tắt ⇒ không áp dụng khóa (ngày khóa đã lưu vẫn giữ để bật lại).
 
 ### 8.4 Nhập từ Excel (`import_excel`)

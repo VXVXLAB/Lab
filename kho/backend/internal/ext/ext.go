@@ -38,6 +38,28 @@ const (
 var FeatureKeys = []string{FPermissions, FPeriodLock, FImportExcel, FMinStock, FPriceList, FCreditLimit,
 	FProfitReport, FStocktake, FUnitConversion, FVAT, FPrintTemplate}
 
+// AvailableFeatures là các tính năng ĐÃ làm xong (bật/tắt được). Đợt sau chỉ cần thêm khóa vào đây.
+var AvailableFeatures = map[string]bool{
+	FPermissions: true,
+	FPeriodLock:  true,
+	FImportExcel: true,
+}
+
+// FeatureDescriptions là mô tả ngắn tiếng Việt của tính năng.
+var FeatureDescriptions = map[string]string{
+	FPermissions:    "Vai trò Bán hàng, Mua hàng, Thủ kho; ma trận quyền; che giá vốn với người không có quyền.",
+	FPeriodLock:     "Khóa sổ đến một ngày: không tạo, sửa, ghi sổ, bỏ ghi sổ, xóa chứng từ và phiếu thu chi trong kỳ đã khóa.",
+	FImportExcel:    "Nhập danh mục hàng hóa, đối tác, tồn đầu kỳ, công nợ đầu kỳ từ file Excel.",
+	FMinStock:       "Tồn tối thiểu riêng cho từng mã hàng.",
+	FPriceList:      "Giá bán riêng theo từng khách hàng.",
+	FCreditLimit:    "Hạn mức công nợ và báo cáo tuổi nợ.",
+	FProfitReport:   "Báo cáo lãi gộp theo phiếu, mặt hàng, khách hàng.",
+	FStocktake:      "Phiếu kiểm kê kho.",
+	FUnitConversion: "Quy đổi nhiều đơn vị tính cho một mặt hàng.",
+	FVAT:            "Thuế GTGT trên phiếu mua/bán.",
+	FPrintTemplate:  "Mẫu in: logo, khổ giấy, chân trang, tên ô ký.",
+}
+
 // FeatureNames là tên tiếng Việt của tính năng.
 var FeatureNames = map[string]string{
 	FPermissions:    "Phân quyền",
@@ -54,13 +76,42 @@ var FeatureNames = map[string]string{
 }
 
 // State là trạng thái tính năng & khóa sổ đọc từ settings.
+// Flags là giá trị HIỆU LỰC: tính năng chưa làm xong luôn false; còn lại = giá trị quản trị đặt (stored) nếu có,
+// ngược lại theo bản cài (edition "extended" ⇒ true).
 type State struct {
 	Flags    map[string]bool
+	stored   map[string]bool
+	Edition  string
 	lockDate *util.Date
 }
 
 // On cho biết tính năng đang bật.
 func (s *State) On(key string) bool { return s != nil && s.Flags[key] }
+
+// Stored trả các khóa quản trị đã đặt tường minh.
+func (s *State) Stored() map[string]bool {
+	out := map[string]bool{}
+	for k, v := range s.stored {
+		out[k] = v
+	}
+	return out
+}
+
+func effective(stored map[string]bool, edition string) map[string]bool {
+	out := map[string]bool{}
+	for _, k := range FeatureKeys {
+		if !AvailableFeatures[k] {
+			out[k] = false
+			continue
+		}
+		if v, ok := stored[k]; ok {
+			out[k] = v
+		} else {
+			out[k] = edition == "extended"
+		}
+	}
+	return out
+}
 
 // LockDate trả ngày khóa sổ đang có hiệu lực (nil nếu không khóa hoặc tính năng khóa sổ tắt).
 func (s *State) LockDate() *util.Date {
@@ -78,7 +129,8 @@ func Load(ctx context.Context, q db.Q) (*State, error) {
 	var raw []byte
 	var lock *util.Date
 	var d util.Date
-	err := q.QueryRow(ctx, `SELECT features, lock_date FROM settings WHERE id=1`).Scan(&raw, &d)
+	var edition string
+	err := q.QueryRow(ctx, `SELECT features, lock_date, edition FROM settings WHERE id=1`).Scan(&raw, &d, &edition)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return &State{Flags: map[string]bool{}}, nil
 	}
@@ -88,16 +140,13 @@ func Load(ctx context.Context, q db.Q) (*State, error) {
 	if !d.Empty() {
 		lock = &d
 	}
-	st := &State{Flags: map[string]bool{}, lockDate: lock}
+	st := &State{stored: map[string]bool{}, Edition: edition, lockDate: lock}
 	if len(raw) > 0 {
-		m := map[string]bool{}
-		if err := json.Unmarshal(raw, &m); err != nil {
+		if err := json.Unmarshal(raw, &st.stored); err != nil {
 			return nil, err
 		}
-		for _, k := range FeatureKeys {
-			st.Flags[k] = m[k]
-		}
 	}
+	st.Flags = effective(st.stored, edition)
 	return st, nil
 }
 
@@ -346,15 +395,18 @@ func SaveRoleMatrix(ctx context.Context, pool *pgxpool.Pool, userID int64, m map
 
 // ---------- Ghi công tắc / khóa sổ ----------
 
-// SaveFeatures cập nhật công tắc (chỉ các khóa gửi lên). Tắt `permissions` khi còn người dùng mang vai trò mới
-// ⇒ 409 nêu tên, trừ khi confirm.
-func SaveFeatures(ctx context.Context, pool *pgxpool.Pool, userID int64, changes map[string]bool, confirm bool) (map[string]bool, error) {
+// SaveFeatures lưu các khóa quản trị đặt tường minh (chỉ khóa gửi lên). Tính năng chưa làm xong ⇒ 400.
+// Tắt `permissions` khi còn người dùng mang vai trò mới ⇒ 409 nêu tên, trừ khi confirm. Trả giá trị hiệu lực.
+func SaveFeatures(ctx context.Context, pool *pgxpool.Pool, userID int64, changes map[string]bool, confirm bool) (*State, error) {
 	for k := range changes {
 		if _, ok := FeatureNames[k]; !ok {
 			return nil, apperr.ValidationField("features", "Khóa tính năng không hợp lệ: "+k)
 		}
+		if !AvailableFeatures[k] {
+			return nil, apperr.ValidationField("features", "Tính năng \""+FeatureNames[k]+"\" chưa có trong phiên bản này, chưa bật/tắt được")
+		}
 	}
-	var out map[string]bool
+	var out *State
 	err := db.InTx(ctx, pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM settings WHERE id=1 FOR UPDATE`); err != nil {
 			return err
@@ -363,11 +415,12 @@ func SaveFeatures(ctx context.Context, pool *pgxpool.Pool, userID int64, changes
 		if err != nil {
 			return err
 		}
-		before := st.AllFlags()
-		after := st.AllFlags()
+		before := st.Flags
+		stored := st.Stored()
 		for k, v := range changes {
-			after[k] = v
+			stored[k] = v
 		}
+		after := effective(stored, st.Edition)
 		if before[FPermissions] && !after[FPermissions] && !confirm {
 			rows, err := tx.Query(ctx, `SELECT username || ' (' || full_name || ', ' || role || ')' FROM users WHERE role IN ('banhang','muahang','thukho') ORDER BY username`)
 			if err != nil {
@@ -383,12 +436,15 @@ func SaveFeatures(ctx context.Context, pool *pgxpool.Pool, userID int64, changes
 					map[string]any{"users": names})
 			}
 		}
-		b, _ := json.Marshal(after)
-		if _, err := tx.Exec(ctx, `UPDATE settings SET features=$1, features_initialized=TRUE, updated_by=$2, updated_at=now() WHERE id=1`, b, userID); err != nil {
+		b, _ := json.Marshal(stored)
+		if _, err := tx.Exec(ctx, `UPDATE settings SET features=$1, updated_by=$2, updated_at=now() WHERE id=1`, b, userID); err != nil {
 			return err
 		}
-		out = after
-		return db.Audit(ctx, tx, userID, "features", 1, "updated", before, after)
+		if err := db.Audit(ctx, tx, userID, "features", 1, "updated", before, map[string]any{"effective": after, "stored": stored}); err != nil {
+			return err
+		}
+		out, err = Load(ctx, tx)
+		return err
 	})
 	return out, err
 }
@@ -417,15 +473,19 @@ func SetLockDate(ctx context.Context, pool *pgxpool.Pool, userID int64, lock *ut
 	return lock, err
 }
 
-// SeedFeatures gán công tắc lần đầu theo bản cài (KHO_EDITION=extended ⇒ bật hết, ngược lại tắt hết).
-// Chỉ có hiệu lực khi dòng settings chưa từng được gán (features_initialized = false); không bao giờ đè lại.
-// Gọi sau db.Seed (máy chủ và seeddemo).
-func SeedFeatures(ctx context.Context, pool *pgxpool.Pool, edition string) error {
-	m := map[string]bool{}
-	for _, k := range FeatureKeys {
-		m[k] = edition == "extended"
+// SetEdition ghi bản cài hiện tại (từ KHO_EDITION, mỗi lần máy chủ khởi động): "extended" ⇒ mọi tính năng đã làm
+// xong mà quản trị chưa đặt tường minh sẽ bật; ngược lại tắt. Không bao giờ đổi giá trị quản trị đã đặt.
+func SetEdition(ctx context.Context, pool *pgxpool.Pool, edition string) error {
+	if edition != "extended" {
+		edition = ""
 	}
-	b, _ := json.Marshal(m)
-	_, err := pool.Exec(ctx, `UPDATE settings SET features=$1, features_initialized=TRUE WHERE id=1 AND NOT features_initialized`, b)
+	_, err := pool.Exec(ctx, `UPDATE settings SET edition=$1 WHERE id=1`, edition)
 	return err
+}
+
+// OpeningLockedErr: đang khóa sổ ⇒ không đổi số dư đầu kỳ (không có ngày) của đối tác / tài khoản tiền.
+func OpeningLockedErr(lock util.Date) error {
+	return apperr.New(http.StatusUnprocessableEntity, apperr.CodePeriodLocked,
+		fmt.Sprintf("Đang khóa sổ đến %s: số dư đầu kỳ (công nợ đầu kỳ, số dư đầu tài khoản tiền) không có ngày nên không được thay đổi khi đã khóa sổ. Quản trị cần bỏ khóa sổ trước, sửa xong rồi khóa lại.", lock.VN()),
+		map[string]any{"lock_date": lock})
 }

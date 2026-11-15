@@ -233,12 +233,26 @@ func (s *Server) withExt(next http.Handler) http.Handler {
 
 // ---------- Endpoint: tính năng, ma trận quyền, khóa sổ ----------
 
-func (s *Server) getFeatures(w http.ResponseWriter, r *http.Request) {
-	keys := make([]map[string]string, 0, len(ext.FeatureKeys))
+// featuresResponse: {"edition", "features": {key: bật}, "items": [{key, name, description, available, enabled}]}.
+func featuresResponse(st *ext.State) map[string]any {
+	items := make([]map[string]any, 0, len(ext.FeatureKeys))
+	for _, k := range ext.FeatureKeys {
+		items = append(items, map[string]any{"key": k, "name": ext.FeatureNames[k], "description": ext.FeatureDescriptions[k],
+			"available": ext.AvailableFeatures[k], "enabled": st.On(k)})
+	}
+	edition := "base"
+	if st.Edition == "extended" {
+		edition = "extended"
+	}
+	keys := make([]map[string]string, 0, len(ext.FeatureKeys)) // giữ từ M1 để tương thích; dùng "items"
 	for _, k := range ext.FeatureKeys {
 		keys = append(keys, map[string]string{"key": k, "name": ext.FeatureNames[k]})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"features": extOf(r).st.AllFlags(), "keys": keys})
+	return map[string]any{"edition": edition, "features": st.AllFlags(), "items": items, "keys": keys}
+}
+
+func (s *Server) getFeatures(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, featuresResponse(extOf(r).st))
 }
 
 func (s *Server) putFeatures(w http.ResponseWriter, r *http.Request) {
@@ -250,13 +264,13 @@ func (s *Server) putFeatures(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	out, err := ext.SaveFeatures(r.Context(), s.Pool, userOf(r).ID, in.Features, in.Confirm)
+	st, err := ext.SaveFeatures(r.Context(), s.Pool, userOf(r).ID, in.Features, in.Confirm)
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
 	s.publish(r, eventFeatures())
-	writeJSON(w, http.StatusOK, map[string]any{"features": out})
+	writeJSON(w, http.StatusOK, featuresResponse(st))
 }
 
 func (s *Server) getRolePermissions(w http.ResponseWriter, r *http.Request) {

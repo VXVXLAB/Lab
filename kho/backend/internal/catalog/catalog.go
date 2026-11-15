@@ -13,6 +13,7 @@ import (
 
 	"kho/internal/apperr"
 	"kho/internal/db"
+	"kho/internal/ext"
 	"kho/internal/stock"
 	"kho/internal/util"
 )
@@ -566,6 +567,17 @@ func (s *Service) SavePartner(ctx context.Context, userID, id int64, in PartnerI
 		key := util.Fold(in.Code + " " + in.Name + " " + in.Phone + " " + in.TaxCode)
 		var before *Partner
 		var newID int64
+		if id != 0 {
+			b, err := s.GetPartner(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if err := openingLock(ctx, tx, !b.OpeningReceivable.Equal(or) || !b.OpeningPayable.Equal(op)); err != nil {
+				return err
+			}
+		} else if err := openingLock(ctx, tx, !or.IsZero() || !op.IsZero()); err != nil {
+			return err
+		}
 		if id == 0 {
 			err := tx.QueryRow(ctx, `INSERT INTO partners(code,name,address,phone,tax_code,is_customer,is_supplier,opening_receivable,opening_payable,active,search_key)
 				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
@@ -684,6 +696,17 @@ func (s *Service) SaveCashAccount(ctx context.Context, userID, id int64, in Cash
 	err := db.InTx(ctx, s.Pool, func(tx pgx.Tx) error {
 		var before *CashAccount
 		var newID int64
+		if id != 0 {
+			b, err := s.GetCashAccount(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if err := openingLock(ctx, tx, !b.OpeningBalance.Equal(ob)); err != nil {
+				return err
+			}
+		} else if err := openingLock(ctx, tx, !ob.IsZero()); err != nil {
+			return err
+		}
 		if id == 0 {
 			if err := tx.QueryRow(ctx, `INSERT INTO cash_accounts(code,name,kind,opening_balance,active) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
 				in.Code, in.Name, in.Kind, ob, activeOr(in.Active)).Scan(&newID); err != nil {
@@ -772,4 +795,19 @@ func (s *Service) ListProductsWithStock(ctx context.Context, f ProductFilter, wa
 		out.Items = append(out.Items, it)
 	}
 	return out, nil
+}
+
+// openingLock: đang khóa sổ (bản mở rộng C4) mà số dư đầu kỳ (không có ngày) bị thay đổi ⇒ 422 PERIOD_LOCKED.
+func openingLock(ctx context.Context, q db.Q, changed bool) error {
+	if !changed {
+		return nil
+	}
+	st, err := ext.Load(ctx, q)
+	if err != nil {
+		return err
+	}
+	if lock := st.LockDate(); lock != nil {
+		return ext.OpeningLockedErr(*lock)
+	}
+	return nil
 }

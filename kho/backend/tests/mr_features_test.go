@@ -16,15 +16,9 @@ import (
 func TestMR_Features_MacDinhTatVaBatTat(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	var f struct {
-		Features map[string]bool `json:"features"`
-		Keys     []struct {
-			Key  string `json:"key"`
-			Name string `json:"name"`
-		} `json:"keys"`
-	}
+	var f featResp
 	e.Admin.OK("GET", "/api/features", nil, &f)
-	if len(f.Features) != 11 || len(f.Keys) != 11 {
+	if len(f.Features) != 11 || len(f.Items) != 11 || f.Edition != "base" {
 		t.Fatalf("11 khóa: %+v", f)
 	}
 	for k, v := range f.Features {
@@ -32,6 +26,13 @@ func TestMR_Features_MacDinhTatVaBatTat(t *testing.T) {
 			t.Fatalf("bản chuẩn phải tắt %s", k)
 		}
 	}
+	for _, it := range f.Items {
+		if it.Name == "" || it.Description == "" || it.Enabled || it.Available != ext.AvailableFeatures[it.Key] {
+			t.Fatalf("mục tính năng: %+v", it)
+		}
+	}
+	// Tính năng chưa làm xong không bật được.
+	e.Admin.Expect(400, "VALIDATION", "PUT", "/api/features", map[string]any{"features": map[string]bool{"vat": true}})
 	var me struct {
 		Permissions []string        `json:"permissions"`
 		Features    map[string]bool `json:"features"`
@@ -53,7 +54,7 @@ func TestMR_Features_MacDinhTatVaBatTat(t *testing.T) {
 	// Vai trò mới chỉ dùng khi bật phân quyền.
 	e.Admin.Expect(400, "VALIDATION", "POST", "/api/users", map[string]any{"username": "bh", "password": "123456", "full_name": "BH", "role": "banhang"})
 	// Chỉ quản trị bật/tắt; khóa lạ ⇒ 400.
-	kt.Expect(403, "FORBIDDEN", "PUT", "/api/features", map[string]any{"features": map[string]bool{"vat": true}})
+	kt.Expect(403, "FORBIDDEN", "PUT", "/api/features", map[string]any{"features": map[string]bool{"import_excel": true}})
 	e.Admin.Expect(400, "VALIDATION", "PUT", "/api/features", map[string]any{"features": map[string]bool{"khong_co": true}})
 
 	// SSE "features" tới máy khác.
@@ -78,7 +79,7 @@ func TestMR_Features_MacDinhTatVaBatTat(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	e.Admin.OK("PUT", "/api/features", map[string]any{"features": map[string]bool{"import_excel": true}}, &f)
-	if !f.Features["import_excel"] || f.Features["vat"] {
+	if !f.Features["import_excel"] || f.Features["period_lock"] {
 		t.Fatalf("chỉ đổi khóa gửi lên: %+v", f.Features)
 	}
 	select {
@@ -100,46 +101,84 @@ func TestMR_Features_MacDinhTatVaBatTat(t *testing.T) {
 	}
 }
 
-// KHO_EDITION=extended chỉ bật hết ở lần seed đầu; không bao giờ đè lựa chọn của quản trị.
-func TestMR_Features_SeedBanCaiChiLanDau(t *testing.T) {
+type featResp struct {
+	Edition  string          `json:"edition"`
+	Features map[string]bool `json:"features"`
+	Items    []struct {
+		Key         string `json:"key"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Available   bool   `json:"available"`
+		Enabled     bool   `json:"enabled"`
+	} `json:"items"`
+}
+
+// Giá trị hiệu lực = giá trị quản trị đặt (nếu có), ngược lại theo bản cài (KHO_EDITION). Tính năng chưa làm xong luôn tắt.
+// Bản mở rộng nâng cấp lên phiên bản có tính năng mới ⇒ tính năng mới BẬT; bản chuẩn ⇒ TẮT.
+func TestMR_Features_MacDinhTheoBanCai(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	// Cài bản mở rộng mới tinh.
 	e := newEnv(t)
-	if err := ext.SeedFeatures(ctx, e.Pool, "extended"); err != nil {
+	get := func() featResp {
+		var f featResp
+		e.Admin.OK("GET", "/api/features", nil, &f)
+		return f
+	}
+	if err := ext.SetEdition(ctx, e.Pool, "extended"); err != nil {
 		t.Fatal(err)
 	}
-	var f struct {
-		Features map[string]bool `json:"features"`
+	f := get()
+	if f.Edition != "extended" {
+		t.Fatalf("edition: %+v", f)
 	}
-	e.Admin.OK("GET", "/api/features", nil, &f)
-	for k, v := range f.Features {
-		if !v {
-			t.Fatalf("bản mở rộng bật hết, %s đang tắt", k)
+	for _, k := range ext.FeatureKeys {
+		if f.Features[k] != ext.AvailableFeatures[k] {
+			t.Fatalf("bản mở rộng: %s = %v (có sẵn = %v)", k, f.Features[k], ext.AvailableFeatures[k])
 		}
 	}
-	e.Admin.OK("PUT", "/api/features", map[string]any{"features": map[string]bool{"vat": false}}, nil)
-	if err := ext.SeedFeatures(ctx, e.Pool, "extended"); err != nil {
+	// Quản trị tắt một tính năng ⇒ chỉ khóa đó được lưu; khởi động lại vẫn tắt.
+	e.Admin.OK("PUT", "/api/features", map[string]any{"features": map[string]bool{"period_lock": false}}, nil)
+	var stored []byte
+	if err := e.Pool.QueryRow(ctx, `SELECT features FROM settings`).Scan(&stored); err != nil || string(stored) != `{"period_lock": false}` {
+		t.Fatalf("chỉ lưu khóa quản trị đặt: %s %v", stored, err)
+	}
+	if err := ext.SetEdition(ctx, e.Pool, "extended"); err != nil {
 		t.Fatal(err)
 	}
-	e.Admin.OK("GET", "/api/features", nil, &f)
-	if f.Features["vat"] {
-		t.Fatal("khởi động lại không được đè lựa chọn của quản trị")
+	if f = get(); f.Features["period_lock"] || !f.Features["permissions"] || !f.Features["import_excel"] {
+		t.Fatalf("giữ lựa chọn của quản trị: %+v", f.Features)
 	}
-	// Cài bản chuẩn rồi sau đó đặt KHO_EDITION=extended: không bật gì.
-	e2 := newEnv(t)
-	if err := ext.SeedFeatures(ctx, e2.Pool, ""); err != nil {
+	// Mô phỏng "tính năng mới xuất hiện ở phiên bản sau": khóa không có trong giá trị đã lưu ⇒ theo bản cài.
+	if _, err := e.Pool.Exec(ctx, `UPDATE settings SET features='{}'`); err != nil {
 		t.Fatal(err)
 	}
-	if err := ext.SeedFeatures(ctx, e2.Pool, "extended"); err != nil {
+	if f = get(); !f.Features["period_lock"] {
+		t.Fatal("bản mở rộng: khóa chưa đặt ⇒ bật")
+	}
+	// Bản chuẩn: khóa chưa đặt ⇒ tắt; khóa quản trị đã bật vẫn bật.
+	e.Admin.OK("PUT", "/api/features", map[string]any{"features": map[string]bool{"import_excel": true}}, nil)
+	if err := ext.SetEdition(ctx, e.Pool, ""); err != nil {
 		t.Fatal(err)
 	}
-	e2.Admin.OK("GET", "/api/features", nil, &f)
-	for k, v := range f.Features {
-		if v {
-			t.Fatalf("đã cài bản chuẩn thì không tự bật %s", k)
+	if f = get(); f.Edition != "base" || f.Features["permissions"] || f.Features["period_lock"] || !f.Features["import_excel"] {
+		t.Fatalf("bản chuẩn: %+v", f)
+	}
+	// Tính năng chưa làm xong: luôn tắt, PUT ⇒ 400, kể cả khi giá trị lưu (cũ) là true.
+	if _, err := e.Pool.Exec(ctx, `UPDATE settings SET features='{"vat": true}'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := ext.SetEdition(ctx, e.Pool, "extended"); err != nil {
+		t.Fatal(err)
+	}
+	if f = get(); f.Features["vat"] || f.Features["stocktake"] {
+		t.Fatalf("chưa làm xong luôn tắt: %+v", f.Features)
+	}
+	for _, it := range f.Items {
+		if it.Key == "vat" && (it.Available || it.Enabled) {
+			t.Fatalf("vat: %+v", it)
 		}
 	}
+	e.Admin.Expect(400, "VALIDATION", "PUT", "/api/features", map[string]any{"features": map[string]bool{"stocktake": false}})
 }
 
 // Tắt phân quyền khi còn người dùng mang vai trò mới ⇒ 409 nêu tên, trừ khi confirm; sau đó họ như kế toán.

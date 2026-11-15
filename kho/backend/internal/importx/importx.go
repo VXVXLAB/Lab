@@ -891,6 +891,13 @@ func planOpeningStock(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result
 // ---------- Công nợ đầu kỳ ----------
 
 func planOpeningDebt(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result, opt Options) (func() error, error) {
+	st, err := ext.Load(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if lock := st.LockDate(); lock != nil {
+		return nil, ext.OpeningLockedErr(*lock)
+	}
 	ids := map[string]int64{}
 	rows, err := tx.Query(ctx, `SELECT id, upper(code) FROM partners`)
 	if err != nil {
