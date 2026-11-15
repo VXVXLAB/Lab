@@ -417,7 +417,6 @@ test.describe('Câu chuyện 15: tìm rồi Enter trên mọi ô tìm', () => {
     await expect(page.locator('[data-search-pending]')).toHaveCount(0);
     await page.keyboard.press('Enter');
     await expect.poll(stockCardPick).toBe('KT40');
-    await page.keyboard.press('Escape'); // F-17: danh sách còn mở sau khi chọn
     await combo.focus();
     await page.keyboard.type('GL26', { delay: 60 });
     await expect(page.locator('[data-search-pending]')).toHaveCount(0);
@@ -427,51 +426,50 @@ test.describe('Câu chuyện 15: tìm rồi Enter trên mọi ô tìm', () => {
     expect(res).toEqual(['THANHCONG', 'THANHCONG', 'THANHCONG', `↓: ${second}`, `không kết quả: ${second}, chữ "zzqx khong co"`, 'GL26']);
   });
 
-  // PHÁT HIỆN F-17 (BAO_CAO_E2E.md, vòng 3): ô chọn mặt hàng ở bộ lọc (Thẻ kho, Lịch sử bán theo mặt hàng): gõ mã rồi Enter
-  // chọn đúng, nhưng danh sách gợi ý KHÔNG đóng — nó hiện lại toàn bộ danh mục, che bảng kết quả, mục đầu ("DV – Dịch vụ" /
-  // "AA-MOI") được tô sáng; Enter thêm lần nữa (thói quen "Enter, Enter") đổi lựa chọn sang mục đầu đó. Mã nguồn có ghi ý
-  // định "đóng danh sách" (searchGuard) nhưng thực tế không đóng. Trước vòng 3 danh sách đóng sau Enter.
-  test.fail('REQ-012 REQ-021 REQ-UX F-17 Ô chọn mặt hàng ở bộ lọc: Enter chọn xong thì danh sách đóng; Enter lần nữa không đổi lựa chọn', async () => {
-    const res = {};
+  // F-17 (vòng 3: ô chọn ở bộ lọc, Enter chọn xong danh sách vẫn mở, Enter lần nữa đổi lựa chọn) — ĐÃ SỬA ở vòng 4. Kiểm
+  // trên MỌI ô chọn khách/NCC/đối tác/mặt hàng có tìm kiếm ở bộ lọc: Thẻ kho, Lịch sử bán, Chi tiết bán/mua, danh sách
+  // Phiếu bán / Phiếu nhập / Thu tiền. Mỗi ô: gõ, Enter ⇒ chọn đúng; 0,8 s sau danh sách đã đóng; Enter lần nữa ⇒ không đổi.
+  test('REQ-012 REQ-021 REQ-037 REQ-067 REQ-UX F-17 Mọi ô chọn có tìm ở bộ lọc: Enter chọn xong thì danh sách đóng; Enter lần nữa không đổi lựa chọn', async () => {
+    const report = (btn) => async () => {
+      await ui.menu(page, 'Báo cáo');
+      await page.getByRole('button', { name: btn }).click();
+    };
+    const CASES = [
+      ['Thẻ kho', () => ui.menu(page, 'Kho', 'Thẻ kho / NXT'), 'Chọn mặt hàng cần xem thẻ kho…', 'GL26', 'GL26'],
+      ['Lịch sử bán: mặt hàng', report(/Lịch sử bán theo mặt hàng/), 'Mặt hàng…', 'GL26', 'GL26'],
+      ['Lịch sử bán: khách', report(/Lịch sử bán theo mặt hàng/), 'Khách hàng…', 'an phu', 'ANPHU'],
+      ['Chi tiết bán: khách', report(/Chi tiết bán hàng/), 'Khách hàng…', 'an phu', 'ANPHU'],
+      ['Chi tiết bán: mặt hàng', report(/Chi tiết bán hàng/), 'Mặt hàng…', 'KT40', 'KT40'],
+      ['Chi tiết mua: NCC', report(/Chi tiết mua hàng/), 'Nhà cung cấp…', 'viet han', 'VIETHAN'],
+      ['Phiếu bán: khách', () => ui.menu(page, 'Bán hàng', 'Phiếu bán'), 'Khách hàng…', 'an phu', 'ANPHU'],
+      ['Phiếu bán: có mặt hàng', () => ui.menu(page, 'Bán hàng', 'Phiếu bán'), 'Có mặt hàng…', 'GL26', 'GL26'],
+      ['Phiếu nhập: NCC', () => ui.menu(page, 'Mua hàng', 'Phiếu nhập'), 'Nhà cung cấp…', 'tan thanh', 'TANTHANH'],
+      ['Thu tiền: đối tác', () => ui.menu(page, 'Quỹ & Ngân hàng', 'Thu tiền'), 'Đối tác…', 'an phu', 'ANPHU'],
+    ];
+    const res = [];
     await leaveEditor();
-    // Thẻ kho
-    await page.goto('/kho/the-kho');
-    let combo = page.locator('.toolbar .ant-select').first().getByRole('combobox');
-    await combo.focus();
-    await page.keyboard.type('GL26', { delay: 40 });
-    await expect(page.locator('[data-search-pending]')).toHaveCount(0);
-    await page.keyboard.press('Enter');
-    await expect.poll(stockCardPick).toBe('GL26');
-    await page.waitForTimeout(800); // người dùng nhìn kết quả
-    res['thẻ kho: danh sách còn mở'] = await openOpts().count() > 0;
-    await ui.shot(page, 'F17-the-kho-danh-sach-con-mo');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(800);
-    res['thẻ kho: sau Enter thứ hai'] = await stockCardPick();
-    // Lịch sử bán theo mặt hàng
-    await ui.menu(page, 'Báo cáo');
-    await page.getByRole('button', { name: /Lịch sử bán theo mặt hàng/ }).click();
-    await expect(page.getByRole('heading', { name: 'Lịch sử bán hàng theo mặt hàng' })).toBeVisible();
-    const sel = page.locator('.toolbar .ant-select').nth(2);
-    combo = sel.getByRole('combobox');
-    await combo.focus();
-    await page.keyboard.type('GL26', { delay: 40 });
-    await expect(page.locator('[data-search-pending]')).toHaveCount(0);
-    await page.keyboard.press('Enter');
-    await expect(sel.locator('.ant-select-selection-item')).toContainText('GL26');
-    await page.waitForTimeout(800);
-    res['lịch sử bán: danh sách còn mở'] = await openOpts().count() > 0;
-    await ui.shot(page, 'F17-lich-su-ban-danh-sach-con-mo');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(800);
-    res['lịch sử bán: sau Enter thứ hai'] = ((await sel.locator('.ant-select-selection-item').innerText().catch(() => '')) || '(chưa chọn)').split(' – ')[0];
-    await page.keyboard.press('Escape');
-    expect(res).toEqual({
-      'thẻ kho: danh sách còn mở': false,
-      'thẻ kho: sau Enter thứ hai': 'GL26',
-      'lịch sử bán: danh sách còn mở': false,
-      'lịch sử bán: sau Enter thứ hai': 'GL26',
-    });
+    for (const [name, nav, ph, q, want] of CASES) {
+      await page.goto('/');
+      await nav();
+      const root = await page.locator('.ant-select').filter({ hasText: ph }).first().elementHandle();
+      const combo = await root.$('input[role="combobox"]');
+      const picked = async () => ((await root.$eval('.ant-select-selection-item', (e) => e.textContent).catch(() => '')) || '(chưa chọn)').trim();
+      await combo.focus();
+      await page.keyboard.type(q, { delay: 40 });
+      await expect(page.locator('[data-search-pending]')).toHaveCount(0);
+      await expect(openOpts().first()).toBeVisible();
+      await page.keyboard.press('Enter');
+      await expect.poll(picked).toContain(want);
+      await page.waitForTimeout(800); // người dùng nhìn kết quả
+      const open = (await openOpts().count()) > 0;
+      if (open) await ui.shot(page, `F17-${name.replace(/[^a-z0-9]+/gi, '-')}-danh-sach-con-mo`);
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(800);
+      const after = await picked();
+      res.push(`${name}: ${open ? 'danh sách CÒN MỞ' : 'đóng'}, sau Enter thứ hai ${after.includes(want) ? 'giữ' : `ĐỔI thành ${after}`}`);
+      await page.keyboard.press('Escape');
+    }
+    expect(res).toEqual(CASES.map(([name]) => `${name}: đóng, sau Enter thứ hai giữ`));
   });
 
   // F-14 (vòng 2: tải lại trang thì báo sai "phiên đăng nhập trước bị ngắt") — ĐÃ SỬA ở vòng 3: tải lại trang báo đúng câu

@@ -275,8 +275,8 @@ test.describe('Câu chuyện 14: bàn phím, chặn rời trang, phiên hết h�
     await expect(p.locator('.ant-message-notice').filter({ hasText: RESTORED })).toHaveCount(0);
     expect(await ui.readLines(p)).toEqual([]);
     await expect(p.getByLabel('Ghi chú', { exact: true })).toHaveValue('');
-    // PHÁT HIỆN F-19 (BAO_CAO_E2E.md, chập chờn ~1/10–1/20, KHÔNG gắn test.fail vì không tái hiện chắc chắn): đôi khi phiếu
-    // mới TRỐNG của hoa (chưa gõ gì) hiện "Đã khôi phục … từ lần mở trước", báo "Có thay đổi chưa lưu", bấm menu thì hỏi "Phiếu chưa lưu". Kiểm thẳng ở đây (sau khi kho mặc định đã điền) để lỗi tự nói rõ.
+    // F-19 (vòng 3, chập chờn: phiếu mới TRỐNG của hoa hiện "Đã khôi phục…" và "Có thay đổi chưa lưu") — báo đã sửa ở vòng 4;
+    // kiểm thẳng ở đây và lặp nhiều lần ở test F-19 bên dưới. Kiểm thẳng ở đây (sau khi kho mặc định đã điền) để lỗi tự nói rõ.
     await expect(p.locator('#warehouse').locator('xpath=ancestor::div[contains(@class,"ant-select")][1]')).toContainText('Kho');
     await p.waitForTimeout(500); // để mọi giá trị tự điền chạy xong rồi mới đọc
     if (await p.getByText('Có thay đổi chưa lưu').count()) await ui.shot(p, 'F19-phieu-trong-bao-chua-luu');
@@ -314,6 +314,135 @@ test.describe('Câu chuyện 14: bàn phím, chặn rời trang, phiên hết h�
     await expect(p.locator('.ant-message-notice').filter({ hasText: RESTORED })).toHaveCount(0);
     await c5.close();
     await w4.ctx.close();
+  });
+
+  // ---------- F-19 (vòng 3, chập chờn) — đã sửa ở vòng 4: phiếu chưa đụng tới KHÔNG được lưu bản gõ dở ----------
+  // Bắt mọi lần ghi khóa "kho.unsaved.*" vào sessionStorage (kể cả ghi rồi xóa ngay trong một nhịp vẽ) bằng một móc cài
+  // trước khi trang chạy, và đọc trực tiếp sessionStorage ở nhiều thời điểm trong giây đầu.
+  const UNSAVED_HOOK = () => {
+    const orig = Storage.prototype.setItem;
+    window.__unsavedWrites = [];
+    Storage.prototype.setItem = function (k, v) {
+      if (String(k).startsWith('kho.unsaved.')) window.__unsavedWrites.push(`${k} @${Math.round(performance.now())}ms`);
+      return orig.call(this, k, v);
+    };
+  };
+  const unsavedKeys = (p) => p.evaluate(() => Object.keys(sessionStorage).filter((k) => k.startsWith('kho.unsaved.')));
+  /** Mở `open()`, đợi `ready`, rồi lấy mẫu sessionStorage ở 0/100/250/500/1000/1500 ms; trả các lần thấy khóa + các lần ghi. */
+  async function sampleUntouched(p, open, ready) {
+    await open();
+    await expect(ready).toBeVisible();
+    const seen = [];
+    let t0 = Date.now();
+    for (const at of [0, 100, 250, 500, 1000, 1500]) {
+      const wait = at - (Date.now() - t0);
+      if (wait > 0) await p.waitForTimeout(wait); // lấy mẫu theo mốc thời gian (yêu cầu kiểm "nhiều thời điểm trong giây đầu")
+      const ks = await unsavedKeys(p);
+      if (ks.length) seen.push(`${at}ms: ${ks.join(',')}`);
+    }
+    const writes = await p.evaluate(() => window.__unsavedWrites ?? []);
+    const dirty = await p.getByText('Có thay đổi chưa lưu').count();
+    return { seen, writes, dirty };
+  }
+
+  test('REQ-UX F-19 Mở phiếu/phiếu thu chi mới (cả loại điền sẵn) mà chưa gõ gì ⇒ sessionStorage KHÔNG có bản gõ dở ở bất kỳ thời điểm nào', async ({ browser }) => {
+    const { ctx: c, page: p } = await openAs(browser, 'lan', 'lan123456', 'lan (F-19 chưa đụng)');
+    await p.context().addInitScript(UNSAVED_HOOK);
+    // dữ liệu cho phiếu điền sẵn: một phiếu tạm bán vượt tồn (⇒ "Hàng cần đặt") và một phiếu bán đã ghi sổ (⇒ "Thu tiền phiếu này")
+    const kho1 = await api.wh('KHO1');
+    const tc = await api.findByCode('partners', 'THANHCONG');
+    await api.post('/documents', { doc_type: 'sale', partner_id: tc.id, warehouse_id: kho1.id, doc_date: '2026-11-03', lines: [{ product_code: 'COS10', qty: 500 }] });
+    const sold = await api.postedDoc({ doc_type: 'sale', doc_date: '2026-11-03', partner_id: tc.id, warehouse_id: kho1.id, lines: [{ product_code: QUE.code, qty: 1 }] });
+    const res = {};
+    const NEW = p.getByText('PHIẾU MỚI — chưa lưu', { exact: true });
+    for (const t of ['sale', 'sale_return', 'purchase', 'purchase_return', 'transfer', 'opening']) {
+      res[`phiếu ${t}`] = await sampleUntouched(p, () => p.goto(`/chung-tu/moi?loai=${t}`), NEW);
+    }
+    for (const t of ['receipt', 'payment']) {
+      res[`phiếu ${t}`] = await sampleUntouched(p, () => p.goto(`/phieu-thu-chi/moi?loai=${t}`), NEW);
+    }
+    // phiếu mới bằng F2 từ danh sách (không tải lại trang)
+    res['F2 phiếu bán'] = await sampleUntouched(p, async () => { await p.goto('/'); await ui.menu(p, 'Bán hàng', 'Phiếu bán'); await p.evaluate(() => (window.__unsavedWrites = [])); await p.locator('body').press('F2'); }, NEW);
+    res['F2 thu tiền'] = await sampleUntouched(p, async () => { await p.goto('/'); await ui.menu(p, 'Quỹ & Ngân hàng', 'Thu tiền'); await p.evaluate(() => (window.__unsavedWrites = [])); await p.locator('body').press('F2'); }, NEW);
+    // điền sẵn: "Lập phiếu nhập cho … mã thiếu" và "Thu tiền phiếu này"
+    res['phiếu nhập điền sẵn (Hàng cần đặt)'] = await sampleUntouched(
+      p,
+      async () => {
+        await p.goto('/');
+        await ui.menu(p, 'Mua hàng', 'Hàng cần đặt');
+        await p.evaluate(() => (window.__unsavedWrites = []));
+        await p.getByRole('button', { name: /Lập phiếu nhập cho \d+ mã thiếu/ }).click();
+      },
+      p.getByText(/Đã điền sẵn \d+ mã thiếu/),
+    );
+    res['phiếu thu điền sẵn (Thu tiền phiếu này)'] = await sampleUntouched(
+      p,
+      async () => {
+        await p.goto(`/chung-tu/${sold.id}`);
+        await expect(p.getByText('ĐÃ GHI SỔ', { exact: true })).toBeVisible();
+        await p.evaluate(() => (window.__unsavedWrites = []));
+        await p.getByRole('button', { name: 'Thu tiền phiếu này' }).click();
+      },
+      NEW,
+    );
+    await ui.shot(p, 'F19-phieu-moi-khong-luu-ban-go-do');
+    const bad = Object.entries(res).filter(([, r]) => r.seen.length || r.writes.length || r.dirty).map(([k, r]) => `${k}: ${JSON.stringify(r)}`);
+    expect(bad).toEqual([]);
+    // đối chứng: gõ thật một chữ ghi chú ⇒ CÓ bản gõ dở (móc bắt được ghi thật)
+    await p.goto('/chung-tu/moi?loai=sale');
+    await expect(NEW).toBeVisible();
+    await p.getByLabel('Ghi chú', { exact: true }).fill('x');
+    await ui.focusBlankCode(p);
+    await ui.typeLine(p, { code: QUE.code, qty: 1 });
+    await expect.poll(() => unsavedKeys(p)).toHaveLength(1);
+    expect((await p.evaluate(() => window.__unsavedWrites)).length).toBeGreaterThan(0); // móc ghi nhận được lần ghi thật
+    await p.getByRole('complementary').getByRole('link', { name: 'Tổng quan', exact: true }).click();
+    await p.locator('.ant-modal-confirm').filter({ hasText: 'Phiếu chưa lưu' }).getByRole('button', { name: 'Bỏ thay đổi, rời đi' }).click();
+    await expect.poll(() => unsavedKeys(p)).toEqual([]);
+    await c.close();
+  });
+
+  test('REQ-UX F-04 F-19 Lặp 8 lần: phiên lan ngắt giữa chừng, hoa đăng nhập cùng cửa sổ ⇒ hoa KHÔNG BAO GIỜ thấy "Đã khôi phục"; lan quay lại thì được khôi phục phiếu của mình', async ({ browser }) => {
+    const users = (await api.get('/users')).items;
+    const hoaId = users.find((u) => u.username === 'hoa').id;
+    const lanId = users.find((u) => u.username === 'lan').id;
+    const res = [];
+    for (let i = 0; i < 8; i++) {
+      const { ctx: c, page: p } = await openAs(browser, 'lan', 'lan123456', `lan→hoa ${i}`);
+      const note = `Phiếu riêng của Lan ${i}`;
+      await ui.enterDoc(p, { type: 'sale', partner: 'THANHCONG', partnerName: THANHCONG.name, wh: 'KHO1', note, lines: [{ code: QUE.code, qty: i + 1 }], action: 'none' });
+      await killLan();
+      await p.keyboard.press('Control+s');
+      await reLogin(p, 'hoa', 'hoa123456');
+      await p.goto('/chung-tu/moi?loai=sale');
+      await expect(p.getByText('PHIẾU MỚI — chưa lưu', { exact: true })).toBeVisible();
+      await p.waitForTimeout(1500); // mọi giá trị tự điền và thông báo (nếu có) đã hiện
+      const notes = await p.locator('.ant-message-notice').filter({ hasText: RESTORED }).count();
+      const dirty = await p.getByText('Có thay đổi chưa lưu').count();
+      const keys = await unsavedKeys(p);
+      const hoaKeys = keys.filter((k) => k.startsWith(`kho.unsaved.${hoaId}.`));
+      const lanKeys = keys.filter((k) => k.startsWith(`kho.unsaved.${lanId}.`));
+      // hoa đi xem màn khác: không bị hỏi "Phiếu chưa lưu"
+      await ui.clickMenu(p, 'Kho', 'Tồn kho');
+      const asked = await p.locator('.ant-modal-confirm').filter({ hasText: 'Phiếu chưa lưu' }).waitFor({ timeout: 1000 }).then(() => true, () => false);
+      if (notes || dirty || asked) await ui.shot(p, `F19-hoa-lan-${i}`);
+      let lanBack = '-';
+      if (i % 3 === 0) {
+        // lan quay lại: hoa đăng xuất, lan đăng nhập ⇒ phiếu gõ dở của lan được khôi phục
+        await p.goto('/');
+        await p.getByRole('button', { name: /Đăng xuất/ }).click();
+        await p.locator('.ant-modal-confirm').getByRole('button', { name: 'Đăng xuất' }).click();
+        await ui.login(p, 'lan', 'lan123456');
+        await p.goto('/chung-tu/moi?loai=sale');
+        await expect(p.locator('.ant-message-notice').filter({ hasText: RESTORED })).toBeVisible();
+        await expect.poll(async () => (await ui.readLines(p)).map((l) => `${l.code}:${ui.vnNum(l.qty)}`)).toEqual([`${QUE.code}:${i + 1}`]);
+        await expect(p.getByLabel('Ghi chú', { exact: true })).toHaveValue(note);
+        lanBack = 'khôi phục';
+      }
+      res.push(`${i}: hoa thông báo=${notes} thayđổi=${dirty} hỏi=${asked} khóa hoa=${hoaKeys.length} khóa lan=${lanKeys.length} lan quay lại=${lanBack}`);
+      await c.close();
+    }
+    expect(res).toEqual([...Array(8).keys()].map((i) => `${i}: hoa thông báo=0 thayđổi=0 hỏi=false khóa hoa=0 khóa lan=1 lan quay lại=${i % 3 === 0 ? 'khôi phục' : '-'}`));
   });
 
   test('REQ-UX Ô đầu phiếu có nhãn thật (bấm/đọc theo tên): Ngày hạch toán, Khách hàng, Xuất từ kho, Ghi chú', async ({ browser }) => {

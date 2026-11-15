@@ -30,9 +30,9 @@ async function setCell(page, name, col, value, nth = 0) {
   await page.keyboard.type(String(value));
   await page.keyboard.press('Tab');
 }
-async function deleteRow(page, name) {
+async function deleteRow(page, name, nth = 0) {
   const n = await rowOf(page, name).count();
-  await rowOf(page, name).first().locator('input.code-input').click();
+  await rowOf(page, name).nth(nth).locator('input.code-input').click();
   await page.keyboard.press('Control+Delete');
   await expect(rowOf(page, name)).toHaveCount(n - 1);
 }
@@ -228,13 +228,13 @@ test.describe('Câu chuyện 8: hai máy cùng làm một phiếu tạm', () => 
     });
   });
 
-  test('REQ-082 F-10 vòng 6: máy kia XÓA dòng, tôi SỬA, chọn "Dùng của tôi" ⇒ dòng còn với số của tôi', async () => {
+  test('REQ-082 F-10 vòng 6: máy kia XÓA dòng, tôi SỬA, chọn "Dùng của tôi" ⇒ dòng còn với số của tôi, về đúng chỗ cũ', async () => {
     await round({
       m1Edit: (p) => setCell(p, 'Găng tay hàn da', 'qty', 16),
       m2Edit: (p) => deleteRow(p, 'Găng tay hàn da'),
       choices: [['Máy kia đã xóa dòng này', 'mine']],
-      // dòng được giữ lại đứng cuối (thứ tự lấy của máy kia — nơi dòng đã bị xóa); chấp nhận, miễn là màn hình = bản lưu = máy kia
-      expected: ['MATNA:5@350000', 'KINHBH:4@55000', 'GANGTAY:16@44000'],
+      // quy tắc (vòng 4): dòng giữ lại về đúng chỗ cũ — sau dòng đứng trước nó lúc tải (MATNA)
+      expected: ['MATNA:5@350000', 'GANGTAY:16@44000', 'KINHBH:4@55000'],
     });
   });
 
@@ -243,7 +243,7 @@ test.describe('Câu chuyện 8: hai máy cùng làm một phiếu tạm', () => 
       m1Edit: (p) => deleteRow(p, 'Mặt nạ hàn tự động'),
       m2Edit: (p) => setCell(p, 'Mặt nạ hàn tự động', 'qty', 7),
       panel: ['Máy kia đã sửa MATNA | Máy kia đã sửa dòng này, bạn đã xóa'],
-      expected: ['MATNA:7@350000', 'KINHBH:4@55000', 'GANGTAY:16@44000'],
+      expected: ['MATNA:7@350000', 'GANGTAY:16@44000', 'KINHBH:4@55000'],
     });
   });
 
@@ -251,16 +251,16 @@ test.describe('Câu chuyện 8: hai máy cùng làm một phiếu tạm', () => 
     const items = await round({
       m1Edit: (p) => moveRow(p, 'Mặt nạ hàn tự động', 'down'),
       m2Edit: (p) => setCell(p, 'Kính bảo hộ hàn', 'qty', 9),
-      expected: ['KINHBH:9@55000', 'MATNA:7@350000', 'GANGTAY:16@44000'],
+      expected: ['GANGTAY:16@44000', 'MATNA:7@350000', 'KINHBH:9@55000'],
     });
     expect(items.some((x) => x.startsWith('Đổi thứ tự'))).toBe(true);
   });
 
   test('REQ-082 F-10 vòng 9: hai máy cùng dời dòng mỗi máy một kiểu ⇒ "Cùng đổi thứ tự", mặc định thứ tự của máy kia', async () => {
     const items = await round({
-      m1Edit: (p) => moveRow(p, 'Găng tay hàn da', 'up'), // tôi: KINHBH, GANGTAY, MATNA
-      m2Edit: (p) => moveRow(p, 'Kính bảo hộ hàn', 'down'), // máy kia: MATNA, KINHBH, GANGTAY
-      expected: ['MATNA:7@350000', 'KINHBH:9@55000', 'GANGTAY:16@44000'],
+      m1Edit: (p) => moveRow(p, 'Kính bảo hộ hàn', 'up'), // tôi: GANGTAY, KINHBH, MATNA
+      m2Edit: (p) => moveRow(p, 'Găng tay hàn da', 'down'), // máy kia: MATNA, GANGTAY, KINHBH
+      expected: ['MATNA:7@350000', 'GANGTAY:16@44000', 'KINHBH:9@55000'],
     });
     expect(items.some((x) => x.startsWith('Cùng đổi thứ tự'))).toBe(true);
   });
@@ -303,7 +303,6 @@ test.describe('Câu chuyện 8: hai máy cùng làm một phiếu tạm', () => 
     await expect(m1.page.getByRole('row', { name: new RegExp(tam) })).toHaveCount(0);
   });
 
-  const posted = {};
   test('REQ-038 REQ-082 F-10 phiếu ĐÃ GHI SỔ: hai máy cùng F8 sửa (máy 2 giá, máy 1 SL) ⇒ gộp, lưu; tồn kho và công nợ tính lại đúng', async () => {
     await m1.page.goto(docUrl);
     await m2.page.goto(docUrl);
@@ -318,17 +317,10 @@ test.describe('Câu chuyện 8: hai máy cùng làm một phiếu tạm', () => 
     await m2.page.keyboard.press('Control+s');
     await ui.toast(m2.page, /Đã lưu thay đổi phiếu/);
     const stash = await conflictReload(m1.page);
-    // Ghi lại trạng thái ngay sau "Tải bản mới" (F-18, kiểm ở test sau): phiếu thoát chế độ sửa, khung vàng chỉ có Chép/Ẩn.
-    posted.afterReload = {
-      'đang sửa': await m1.page.getByText('ĐANG SỬA phiếu đã ghi sổ', { exact: true }).isVisible(),
-      'có nút "Thêm các dòng này vào phiếu"': await stash.getByRole('button', { name: 'Thêm các dòng này vào phiếu' }).isVisible(),
-    };
+    // F-18 (vòng 3) đã sửa ở vòng 4: còn thay đổi chưa lưu ⇒ vẫn ở chế độ sửa, có ngay nút gộp (không cần F8)
+    await expect(m1.page.getByText('ĐANG SỬA phiếu đã ghi sổ', { exact: true })).toBeVisible();
+    await expect(stash.getByRole('button', { name: 'Thêm các dòng này vào phiếu' })).toBeVisible();
     await ui.shot(m1.page, 'F18-phieu-ghi-so-sau-tai-ban-moi');
-    if (!posted.afterReload['đang sửa']) {
-      // người dùng bấm lại "Sửa phiếu" (F8) ⇒ khung vàng hiện nút gộp
-      await m1.page.keyboard.press('F8');
-      await expect(m1.page.getByText('ĐANG SỬA phiếu đã ghi sổ', { exact: true })).toBeVisible();
-    }
     await applyStash(stash);
     const expected = ['MATNA:8@340000', 'GANGTAY:20@44000', 'KINHBH:9@55000'];
     expect(await linesWithPrice(m1.page)).toEqual(expected);
@@ -343,14 +335,7 @@ test.describe('Câu chuyện 8: hai máy cùng làm một phiếu tạm', () => 
     await expect.poll(() => linesWithPrice(m2.page), { timeout: 10_000 }).toEqual(expected);
   });
 
-  // PHÁT HIỆN F-18 (BAO_CAO_E2E.md, vòng 3, thấp): đang sửa phiếu ĐÃ GHI SỔ (F8) thì máy khác lưu trước; bấm "Tải bản mới" ⇒
-  // phiếu thoát hẳn chế độ sửa, khung vàng chỉ có "Chép" / "Ẩn", không có "Thêm các dòng này vào phiếu" và không nói phải
-  // bấm F8 lại. Bấm F8 thì nút gộp hiện và gộp đúng (test trên). Phiếu tạm không bị (nút gộp hiện ngay).
-  test.fail('REQ-038 REQ-082 F-18 Phiếu đã ghi sổ: sau "Tải bản mới" vẫn ở chế độ sửa và có ngay nút "Thêm các dòng này vào phiếu"', async () => {
-    expect(posted.afterReload).toEqual({ 'đang sửa': true, 'có nút "Thêm các dòng này vào phiếu"': true });
-  });
-
-  test('REQ-082 F-10 cùng mặt hàng trên BA dòng: mỗi máy sửa một dòng ⇒ đúng dòng; cùng sửa một dòng ⇒ hỏi, cả hai lựa chọn', async () => {
+  test('REQ-082 F-10 cùng mặt hàng trên BA dòng: mỗi máy sửa một dòng ⇒ đúng dòng; cùng sửa ⇒ hỏi; dòng giữ lại về đúng chỗ (đầu, giữa, cuối)', async () => {
     const cus = await api.findByCode('partners', 'HOANGLONG');
     const kho1 = await api.wh('KHO1');
     const d = await api.post('/documents', {
@@ -387,6 +372,35 @@ test.describe('Câu chuyện 8: hai máy cùng làm một phiếu tạm', () => 
       m2Edit: (p) => setCell(p, 'Búa gõ xỉ hàn', 'qty', 2, 2),
       choices: [['máy kia: 2, bạn: 7', 'mine']],
       expected: ['BUAGO:6@35000', 'BUAGO:3@30000', 'BUAGO:7@32000', 'MATNA:1@350000'],
+    });
+    // d) quy tắc chỗ của dòng giữ lại: dòng ĐẦU (không có dòng đứng trước) bị máy kia xóa, tôi sửa, giữ của tôi ⇒ về lại đầu
+    //    (đứng trước dòng kế nó)
+    await round({
+      m1Edit: (p) => setCell(p, 'Búa gõ xỉ hàn', 'qty', 9, 0),
+      m2Edit: (p) => deleteRow(p, 'Búa gõ xỉ hàn', 0),
+      choices: [['Máy kia đã xóa dòng này', 'mine']],
+      expected: ['BUAGO:9@35000', 'BUAGO:3@30000', 'BUAGO:7@32000', 'MATNA:1@350000'],
+    });
+    // e) máy kia xóa CẢ dòng 2 (đứng trước) lẫn dòng 3; tôi sửa dòng 3, giữ của tôi ⇒ dòng 3 đứng trước dòng kế (MATNA);
+    //    dòng 2 (tôi không sửa) mất
+    await round({
+      m1Edit: (p) => setCell(p, 'Búa gõ xỉ hàn', 'qty', 8, 2),
+      m2Edit: async (p) => {
+        await deleteRow(p, 'Búa gõ xỉ hàn', 1);
+        await deleteRow(p, 'Búa gõ xỉ hàn', 1);
+      },
+      choices: [['Máy kia đã xóa dòng này', 'mine']],
+      expected: ['BUAGO:9@35000', 'BUAGO:8@32000', 'MATNA:1@350000'],
+    });
+    // f) dòng CUỐI bị máy kia xóa (không có dòng kế; dòng đứng trước cũng bị xóa) ⇒ cuối phiếu
+    await round({
+      m1Edit: (p) => setCell(p, 'Mặt nạ hàn tự động', 'qty', 2),
+      m2Edit: async (p) => {
+        await deleteRow(p, 'Búa gõ xỉ hàn', 1);
+        await deleteRow(p, 'Mặt nạ hàn tự động');
+      },
+      choices: [['Máy kia đã xóa dòng này', 'mine']],
+      expected: ['BUAGO:9@35000', 'MATNA:2@350000'],
     });
   });
 

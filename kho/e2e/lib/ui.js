@@ -84,24 +84,10 @@ async function selectByTyping(page, combo, text, optionRe) {
   // nhìn thấy rồi mới Enter. (Ô lọc tại máy, như Kho/Nhóm, không có cờ chờ.)
   await expect(page.locator('[data-search-pending]')).toHaveCount(0);
   await expect(dd.locator('.ant-select-item-option').first()).toContainText(optionRe ?? text);
-  // (đọc trước khi Enter: sau khi chọn, ô có thể không còn khớp bộ định vị — vd. lọc theo chữ "Mặt hàng…")
-  // F-17 chỉ ở ô tìm có "chặn Enter" (.search-guard: khách, mặt hàng) nằm ngoài biểu mẫu có ô kế tiếp. Ô chọn thường (Nhóm,
-  // Kho…) tự đóng khi Enter — KHÔNG bấm Esc ở đó (Esc khi danh sách đang đóng dần sẽ đóng luôn hộp thoại).
-  const inForm = await combo.evaluate((el) => !el.closest('.search-guard') || !!el.closest('[data-enter-scope]'));
-  const input = await combo.elementHandle();
   // F-11 (b) đã sửa ở vòng 3: Enter chọn kết quả đầu tiên kể cả khi không mục nào sáng — không bấm ↓ hộ người dùng nữa.
+  // F-17 đã sửa ở vòng 4: chọn xong danh sách tự đóng — không bấm Esc hộ người dùng nữa (các test sau thao tác trên bảng,
+  // nếu danh sách còn che thì sẽ hỏng ngay).
   await combo.press('Enter');
-  // PHÁT HIỆN F-17 (BAO_CAO_E2E.md): ở ô chọn mặt hàng/khách của bộ lọc (báo cáo, thẻ kho — không nằm trong biểu mẫu
-  // có "ô kế tiếp"), chọn xong bằng Enter thì danh sách VẪN MỞ, che bảng, mục đầu ("DV – Dịch vụ") sáng ⇒ Enter lần nữa
-  // đổi lựa chọn. Người dùng thấy danh sách còn mở thì bấm Esc (giữ nguyên lựa chọn) — làm như vậy ở đây; lỗi được
-  // kiểm nghiêm (test.fail) ở tests/15.
-  if (!inForm) {
-    await expect(page.locator('[data-search-owner]')).toHaveCount(0);
-    if (await dd.isVisible()) {
-      await input.press('Escape');
-      await expect(dd).toHaveCount(0);
-    }
-  }
 }
 
 /** Danh sách thả xuống của đúng ô chọn này (theo aria-controls). */
