@@ -1,6 +1,6 @@
+import { useDocAccess } from '../../auth/guard';
 import type { DocumentFull } from '../../api/types';
 import { formatDate, formatDateTime, formatMoney, formatQty } from '../../lib/format';
-import { DOC_TYPES } from './docTypes';
 import { useSettings } from '../../api/hooks';
 
 const SIGNERS: Record<DocumentFull['doc_type'], string[]> = {
@@ -17,7 +17,8 @@ const SIGNERS: Record<DocumentFull['doc_type'], string[]> = {
  * Phiếu tạm in tiêu đề "PHIẾU TẠM (chưa ghi sổ)"; phiếu chính thức chỉ có khi đã ghi sổ.
  */
 export function PrintSheet({ doc }: { doc: DocumentFull }) {
-  const cfg = DOC_TYPES[doc.doc_type];
+  // bản mở rộng: giá vốn / công nợ bị che ⇒ bỏ cột giá, Nợ cũ/Tổng nợ (khớp file xuất của máy chủ)
+  const cfg = useDocAccess(doc.doc_type).cfg;
   const co = useSettings().data;
   const draft = doc.status === 'draft';
   const no = draft ? doc.draft_no : (doc.doc_no ?? doc.display_no);

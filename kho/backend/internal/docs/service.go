@@ -17,6 +17,7 @@ import (
 	"kho/internal/db"
 	"kho/internal/debt"
 	"kho/internal/ext"
+	"kho/internal/pricing"
 	"kho/internal/stock"
 	"kho/internal/util"
 )
@@ -140,6 +141,7 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 		return h, nil, apperr.ValidationField("lines", "Chứng từ tối đa 1000 dòng")
 	}
 	lines := make([]pline, 0, len(in.Lines))
+	var priceList *bool // bản mở rộng C6: nạp trạng thái tính năng khi cần
 	for i, li := range in.Lines {
 		var p *catalog.Product
 		var err error
@@ -201,9 +203,29 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 				pl.UnitPrice = &up
 			} else {
 				// Đơn giá mặc định theo danh mục (REQ-026); vẫn sửa được khi nhập phiếu (REQ-027).
+				// Bản mở rộng C6 (price_list bật): phiếu bán lấy giá riêng của khách / giá bán gần nhất cho khách.
 				switch h.DocType {
 				case TypeSale, TypeSaleReturn:
 					up := p.SalePrice
+					if h.DocType == TypeSale && h.PartnerID != nil {
+						if priceList == nil {
+							st, err := ext.Load(ctx, q)
+							if err != nil {
+								return h, nil, err
+							}
+							on := st.On(ext.FPriceList)
+							priceList = &on
+						}
+						if *priceList {
+							qs, err := pricing.Resolve(ctx, q, *h.PartnerID, []int64{p.ID}, h.DocDate)
+							if err != nil {
+								return h, nil, err
+							}
+							if len(qs) == 1 {
+								up = qs[0].Price
+							}
+						}
+					}
 					pl.UnitPrice = &up
 				case TypePurchase, TypePurchaseReturn, TypeOpening:
 					up := p.PurchasePrice
@@ -503,6 +525,7 @@ func (s *Service) Create(ctx context.Context, userID int64, in Input) (*Document
 
 // Update sửa chứng từ (phiếu tạm hoặc đã ghi sổ — R3).
 func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Document, error) {
+	var creditConfirmed *CreditInfo
 	err := db.InTx(ctx, s.Pool, func(tx pgx.Tx) error {
 		r, err := lockDoc(ctx, tx, id)
 		if err != nil {
@@ -553,8 +576,15 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Docu
 			if err != nil {
 				return err
 			}
-			if len(lw) > 0 && !in.ConfirmLoss {
-				return lossErr(lw)
+			ci, err := creditCheck(ctx, tx, h, total(lines), &prevSale{partnerID: before.PartnerID, total: before.TotalAmount})
+			if err != nil {
+				return err
+			}
+			if err := confirmations(lw, ci, in.ConfirmLoss, in.ConfirmCredit); err != nil {
+				return err
+			}
+			if ci != nil {
+				creditConfirmed = ci
 			}
 		}
 		// Bút toán kho luôn dựng lại từ đầu; dòng giữ id nếu client gửi id dòng của chính phiếu này.
@@ -578,6 +608,11 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Docu
 		after, err := s.Get(ctx, tx, id)
 		if err != nil {
 			return err
+		}
+		if creditConfirmed != nil {
+			if err := db.Audit(ctx, tx, userID, "document", id, "credit_confirmed", nil, creditConfirmed); err != nil {
+				return err
+			}
 		}
 		return db.Audit(ctx, tx, userID, "document", id, "updated", before, after)
 	})
@@ -609,6 +644,20 @@ func (s *Service) loadForPost(ctx context.Context, q db.Q, d *Document) (header,
 
 // Post ghi sổ phiếu tạm: cấp số chính thức, sinh bút toán kho, phát sinh công nợ (R5, R6).
 func (s *Service) Post(ctx context.Context, userID, id int64, version int, confirmLoss bool) (*Document, error) {
+	return s.PostWith(ctx, userID, id, PostParams{Version: version, ConfirmLoss: confirmLoss})
+}
+
+// PostParams là tham số ghi sổ.
+type PostParams struct {
+	Version       int
+	ConfirmLoss   bool
+	ConfirmCredit bool // bản mở rộng C8
+}
+
+// PostWith ghi sổ với các xác nhận cảnh báo.
+func (s *Service) PostWith(ctx context.Context, userID, id int64, pp PostParams) (*Document, error) {
+	version, confirmLoss := pp.Version, pp.ConfirmLoss
+	var creditConfirmed *CreditInfo
 	err := db.InTx(ctx, s.Pool, func(tx pgx.Tx) error {
 		r, err := lockDoc(ctx, tx, id)
 		if err != nil {
@@ -650,9 +699,14 @@ func (s *Service) Post(ctx context.Context, userID, id int64, version int, confi
 		if err != nil {
 			return err
 		}
-		if len(lw) > 0 && !confirmLoss {
-			return lossErr(lw)
+		ci, err := creditCheck(ctx, tx, h, total(lines), nil)
+		if err != nil {
+			return err
 		}
+		if err := confirmations(lw, ci, confirmLoss, pp.ConfirmCredit); err != nil {
+			return err
+		}
+		creditConfirmed = ci
 		docNo := r.DocNo
 		if docNo == nil {
 			prefix := NumberPrefix[r.DocType]
@@ -677,6 +731,11 @@ func (s *Service) Post(ctx context.Context, userID, id int64, version int, confi
 		after, err := s.Get(ctx, tx, id)
 		if err != nil {
 			return err
+		}
+		if creditConfirmed != nil {
+			if err := db.Audit(ctx, tx, userID, "document", id, "credit_confirmed", nil, creditConfirmed); err != nil {
+				return err
+			}
 		}
 		return db.Audit(ctx, tx, userID, "document", id, "posted", before, after)
 	})
@@ -1048,6 +1107,89 @@ func checkUpdateLock(ctx context.Context, q db.Q, posted bool, oldDate, newDate 
 	}
 	if oldDate.After(lock.Time) && !newDate.After(lock.Time) {
 		return ext.LockedErr(*lock)
+	}
+	return nil
+}
+
+// ---------- Hạn mức công nợ (bản mở rộng C8) ----------
+
+// CreditInfo là chi tiết cảnh báo vượt hạn mức công nợ.
+type CreditInfo struct {
+	PartnerID      int64           `json:"partner_id"`
+	PartnerName    string          `json:"partner_name"`
+	Receivable     decimal.Decimal `json:"receivable"`      // nợ phải thu hiện tại (không gồm phiếu này)
+	DocumentAmount decimal.Decimal `json:"document_amount"` // tổng tiền phiếu này
+	TotalAfter     decimal.Decimal `json:"total_after"`     // nợ sau khi ghi sổ
+	CreditLimit    decimal.Decimal `json:"credit_limit"`
+	Over           decimal.Decimal `json:"over"` // vượt bao nhiêu
+}
+
+type prevSale struct {
+	partnerID *int64
+	total     decimal.Decimal
+}
+
+// creditCheck: phiếu bán, tính năng credit_limit bật, khách có hạn mức ⇒ nợ phải thu hiện tại (mọi ngày, không gồm phiếu
+// này) + tổng phiếu > hạn mức ⇒ trả thông tin cảnh báo. Sửa phiếu đã ghi sổ: chỉ xét khi tổng tiền tăng (cùng khách)
+// hoặc đổi sang khách khác.
+func creditCheck(ctx context.Context, tx pgx.Tx, h header, newTotal decimal.Decimal, prev *prevSale) (*CreditInfo, error) {
+	if h.DocType != TypeSale || h.PartnerID == nil {
+		return nil, nil
+	}
+	st, err := ext.Load(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if !st.On(ext.FCreditLimit) {
+		return nil, nil
+	}
+	var limit decimal.NullDecimal
+	var name string
+	if err := tx.QueryRow(ctx, `SELECT name, credit_limit FROM partners WHERE id=$1`, *h.PartnerID).Scan(&name, &limit); err != nil {
+		return nil, err
+	}
+	if !limit.Valid {
+		return nil, nil
+	}
+	rec, err := debt.Balance(ctx, tx, debt.Receivable, *h.PartnerID, nil)
+	if err != nil {
+		return nil, err
+	}
+	if prev != nil && prev.partnerID != nil && *prev.partnerID == *h.PartnerID {
+		if !newTotal.GreaterThan(prev.total) {
+			return nil, nil
+		}
+		rec = rec.Sub(prev.total) // nợ hiện tại đang gồm bản cũ của phiếu này
+	}
+	after := rec.Add(newTotal)
+	if !after.GreaterThan(limit.Decimal) {
+		return nil, nil
+	}
+	return &CreditInfo{PartnerID: *h.PartnerID, PartnerName: name, Receivable: rec, DocumentAmount: newTotal,
+		TotalAfter: after, CreditLimit: limit.Decimal, Over: after.Sub(limit.Decimal)}, nil
+}
+
+// confirmations gộp cảnh báo bán lỗ và vượt hạn mức để người dùng xác nhận một lần:
+// còn vượt hạn mức chưa xác nhận ⇒ 409 CREDIT_WARNING (kèm các dòng lỗ chưa xác nhận nếu có);
+// chỉ còn bán lỗ ⇒ 409 LOSS_WARNING như cũ.
+func confirmations(lw []Warning, ci *CreditInfo, confirmLoss, confirmCredit bool) error {
+	lossPending := len(lw) > 0 && !confirmLoss
+	if ci != nil && !confirmCredit {
+		need := []string{"confirm_credit"}
+		loss := []Warning{}
+		msg := fmt.Sprintf("Khách %s vượt hạn mức công nợ: nợ hiện tại %s + phiếu này %s = %s, hạn mức %s (vượt %s). Bấm xác nhận để vẫn ghi sổ.",
+			ci.PartnerName, util.FormatVND(ci.Receivable), util.FormatVND(ci.DocumentAmount), util.FormatVND(ci.TotalAfter),
+			util.FormatVND(ci.CreditLimit), util.FormatVND(ci.Over))
+		if lossPending {
+			need = append(need, "confirm_loss")
+			loss = lw
+			msg += " Phiếu cũng có mặt hàng bán thấp hơn giá mua (bán lỗ)."
+		}
+		return apperr.New(http.StatusConflict, apperr.CodeCreditWarning, msg,
+			map[string]any{"credit": ci, "loss_lines": loss, "confirm": need})
+	}
+	if lossPending {
+		return lossErr(lw)
 	}
 	return nil
 }

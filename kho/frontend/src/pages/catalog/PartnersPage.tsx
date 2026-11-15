@@ -1,3 +1,5 @@
+import { useOpeningDebtVisibility } from '../../auth/guard';
+import { lockedOpeningHint, useLockDate } from '../../lib/periodLock';
 import { useMemo } from 'react';
 import { Button, Checkbox, Col, Form, Input, Row, Switch, Tag, Tooltip } from 'antd';
 import { SolutionOutlined } from '@ant-design/icons';
@@ -41,6 +43,8 @@ export function PartnersPage({ type }: { type: PartnerType }) {
   const ed = useEditor<Partner>();
   const rec = ed.record;
   const extraParams = useMemo(() => ({ type }), [type]);
+  const debtVis = useOpeningDebtVisibility();
+  const openingVisible = type === 'customer' ? debtVis.receivable : debtVis.payable;
 
   const columns: ColumnsType<Partner> = [
     { title: 'Mã', dataIndex: 'code', width: 120, className: 'col-code', ellipsis: true },
@@ -56,13 +60,17 @@ export function PartnersPage({ type }: { type: PartnerType }) {
     },
     { title: 'Điện thoại', dataIndex: 'phone', width: 130 },
     { title: 'Mã số thuế', dataIndex: 'tax_code', width: 118 },
-    {
-      title: mode.openingLabel,
-      dataIndex: mode.openingField,
-      width: 150,
-      align: 'right',
-      render: (n: number) => (n ? formatMoney(n) : <span className="muted">–</span>),
-    },
+    ...(openingVisible
+      ? [
+          {
+            title: mode.openingLabel,
+            dataIndex: mode.openingField,
+            width: 150,
+            align: 'right' as const,
+            render: (n: number | null) => (n ? formatMoney(n) : <span className="muted">–</span>),
+          },
+        ]
+      : []),
     {
       title: 'Vai trò',
       key: 'roles',
@@ -140,6 +148,8 @@ export function PartnerFormModal({
   const mode = MODE[type];
   const [form] = Form.useForm<PartnerBody>();
   const qc = useQueryClient();
+  const debtVis = useOpeningDebtVisibility();
+  const lockDate = useLockDate();
   return (
       <EntityFormModal<PartnerBody>
         open={open}
@@ -159,8 +169,9 @@ export function PartnerFormModal({
             is_customer: !!v.is_customer,
             is_supplier: !!v.is_supplier,
             // ô đang ẩn (bỏ chọn KH/NCC) vẫn giữ số cũ, không âm thầm xóa về 0
-            opening_receivable: (form.getFieldValue('opening_receivable') as number | null) ?? 0,
-            opening_payable: (form.getFieldValue('opening_payable') as number | null) ?? 0,
+            // không được xem (bản mở rộng) ⇒ null: máy chủ giữ số cũ
+            opening_receivable: debtVis.receivable ? ((form.getFieldValue('opening_receivable') as number | null) ?? 0) : null,
+            opening_payable: debtVis.payable ? ((form.getFieldValue('opening_payable') as number | null) ?? 0) : null,
             active: v.active,
           };
           const saved = await (rec ? partnersApi.update(rec.id, body) : partnersApi.create(body));
@@ -226,14 +237,14 @@ export function PartnerFormModal({
         <Form.Item noStyle shouldUpdate={(a, b) => a.is_customer !== b.is_customer || a.is_supplier !== b.is_supplier}>
           {({ getFieldValue }) => (
             <>
-              {getFieldValue('is_customer') && (
-                <Form.Item label="Nợ phải thu đầu kỳ" name="opening_receivable" extra="Số khách còn nợ mình lúc bắt đầu dùng phần mềm">
-                  <NumberInput style={{ width: 200 }} suffix="đ" />
+              {getFieldValue('is_customer') && debtVis.receivable && (
+                <Form.Item label="Nợ phải thu đầu kỳ" name="opening_receivable" extra={lockDate ? lockedOpeningHint(lockDate) : 'Số khách còn nợ mình lúc bắt đầu dùng phần mềm'}>
+                  <NumberInput style={{ width: 200 }} suffix="đ" disabled={!!lockDate} />
                 </Form.Item>
               )}
-              {getFieldValue('is_supplier') && (
-                <Form.Item label="Nợ phải trả đầu kỳ" name="opening_payable" extra="Số mình còn nợ nhà cung cấp lúc bắt đầu dùng phần mềm">
-                  <NumberInput style={{ width: 200 }} suffix="đ" />
+              {getFieldValue('is_supplier') && debtVis.payable && (
+                <Form.Item label="Nợ phải trả đầu kỳ" name="opening_payable" extra={lockDate ? lockedOpeningHint(lockDate) : 'Số mình còn nợ nhà cung cấp lúc bắt đầu dùng phần mềm'}>
+                  <NumberInput style={{ width: 200 }} suffix="đ" disabled={!!lockDate} />
                 </Form.Item>
               )}
             </>

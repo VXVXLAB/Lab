@@ -8,6 +8,7 @@ import { ApiError, errorMessage } from '../api/client';
 import { qk } from '../api/queryKeys';
 import type { CatalogEntity, ListParams, Paged } from '../api/types';
 import { isTypingTarget, useHotkeys } from '../lib/keyboard';
+import { useCan } from '../auth/AuthContext';
 import { useDebouncedFlush, useElementHeight } from '../lib/useDebounced';
 import { useListSearchEnter } from '../lib/searchGuard';
 import { Kbd } from './Kbd';
@@ -63,9 +64,9 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
     filters,
     columns,
     describe,
-    onCreate,
-    onEdit,
-    onDelete,
+    onCreate: onCreateRaw,
+    onEdit: onEditRaw,
+    onDelete: onDeleteRaw,
     onDeactivate,
     searchPlaceholder = 'Tìm theo mã, tên…',
     showActiveFilter = true,
@@ -77,6 +78,12 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
   } = props;
   const { modal, message } = App.useApp();
   const qc = useQueryClient();
+  // Bản mở rộng: không có quyền "Sửa danh mục" ⇒ chỉ xem (không thêm / sửa / xóa). Người dùng: màn chỉ quản trị.
+  const writable = useCan('catalog.write') || entity === 'user';
+  const noop = () => undefined;
+  const onCreate = writable ? onCreateRaw : noop;
+  const onEdit = writable ? onEditRaw : noop;
+  const onDelete = writable ? onDeleteRaw : undefined;
   const [q, setQ] = useState('');
   const [dq, flushQ] = useDebouncedFlush(q.trim(), 250);
   const [active, setActive] = useState<ActiveFilter>('true');
@@ -266,15 +273,17 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
   const actionCol: ColumnType<T> = {
     key: '__actions',
     title: '',
-    width: (onDelete ? 84 : 48) + extraActionsWidth,
+    width: (writable ? (onDelete ? 84 : 48) : 0) + extraActionsWidth,
     align: 'center',
     fixed: 'right',
     render: (_, row) => (
       <span className="row-actions" onClick={(e) => e.stopPropagation()}>
         {extraActions?.(row)}
-        <Tooltip title="Sửa (Enter)">
-          <Button type="text" size="small" icon={<EditOutlined />} aria-label="Sửa" onClick={() => onEdit(row)} />
-        </Tooltip>
+        {writable && (
+          <Tooltip title="Sửa (Enter)">
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Sửa" onClick={() => onEdit(row)} />
+          </Tooltip>
+        )}
         {onDelete && (
           <Tooltip title="Xóa (Delete)">
             <Button type="text" size="small" danger icon={<DeleteOutlined />} aria-label="Xóa" onClick={() => askDelete(row)} />
@@ -290,9 +299,11 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
         title={title}
         count={query.data ? total : undefined}
         actions={
-          <Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>
-            {createLabel} <Kbd>F2</Kbd>
-          </Button>
+          writable ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>
+              {createLabel} <Kbd>F2</Kbd>
+            </Button>
+          ) : undefined
         }
       />
       <div className="toolbar">
@@ -333,7 +344,7 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
         <Table<T>
           rowKey="id"
           size="small"
-          columns={[...columns, actionCol]}
+          columns={writable || extraActions ? [...columns, actionCol] : columns}
           dataSource={rows}
           loading={query.isLoading || (query.isFetching && query.isPlaceholderData)}
           tableLayout="fixed"
@@ -367,14 +378,25 @@ export function CatalogList<T extends { id: number; active: boolean }>(props: Ca
             ) : dq ? (
               `Không có ${noun} nào khớp "${dq}"`
             ) : (
-              `Chưa có ${noun} nào. Bấm F2 (Thêm mới) để thêm.`
+              `Chưa có ${noun} nào.${writable ? ' Bấm F2 (Thêm mới) để thêm.' : ''}`
             ),
           }}
         />
       </div>
       <div className="hint-bar">
-        <Kbd>F2</Kbd> thêm mới · <Kbd>F3</Kbd>/<Kbd>/</Kbd> tìm · <Kbd>↑</Kbd>
-        <Kbd>↓</Kbd> chọn dòng · <Kbd>Enter</Kbd> hoặc nhấp đúp để sửa
+        {writable && (
+          <>
+            <Kbd>F2</Kbd> thêm mới ·{' '}
+          </>
+        )}
+        <Kbd>F3</Kbd>/<Kbd>/</Kbd> tìm · <Kbd>↑</Kbd>
+        <Kbd>↓</Kbd> chọn dòng
+        {writable && (
+          <>
+            {' '}
+            · <Kbd>Enter</Kbd> hoặc nhấp đúp để sửa
+          </>
+        )}
         {onDelete && (
           <>
             {' '}

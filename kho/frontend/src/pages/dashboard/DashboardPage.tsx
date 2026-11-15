@@ -173,8 +173,11 @@ export function DashboardPage() {
           tone={d.draft_count ? 'warn' : 'default'}
           to={paths.drafts}
         />
-        <Tile label="Doanh thu hôm nay" value={money(d.revenue_today)} sub="Bán − khách trả, đã ghi sổ" to={paths.sales} />
-        <Tile label={`Doanh thu tháng ${month}`} value={money(d.revenue_month)} sub="Từ đầu tháng đến hôm nay" to={paths.reports} />
+        {/* số bị che (bản mở rộng, thiếu quyền xem) ⇒ không hiện ô đó */}
+        {d.revenue_today !== null && <Tile label="Doanh thu hôm nay" value={money(d.revenue_today)} sub="Bán − khách trả, đã ghi sổ" to={paths.sales} />}
+        {d.revenue_month !== null && (
+          <Tile label={`Doanh thu tháng ${month}`} value={money(d.revenue_month)} sub="Từ đầu tháng đến hôm nay" to={paths.reports} />
+        )}
         <Tile
           label="Hàng sắp hết"
           value={d.low_stock_count}
@@ -192,10 +195,14 @@ export function DashboardPage() {
           tone={d.out_of_stock_count > 0 ? 'bad' : d.low_stock_count > 0 || d.draft_shortage_count > 0 ? 'warn' : 'good'}
           to={d.draft_shortage_count > 0 ? paths.reorder : paths.stock}
         />
-        <Tile label="Khách hàng còn nợ (phải thu)" value={money(d.total_receivable)} to={paths.receivable} />
-        <Tile label="Còn nợ nhà cung cấp (phải trả)" value={money(d.total_payable)} to={paths.payable} />
-        <Tile label="Tiền mặt tồn quỹ" value={money(d.cash_balance)} tone={d.cash_balance < 0 ? 'bad' : 'default'} to={paths.cashBook} />
-        <Tile label="Tiền gửi ngân hàng" value={money(d.bank_balance)} tone={d.bank_balance < 0 ? 'bad' : 'default'} to={paths.cashBook} />
+        {d.total_receivable !== null && <Tile label="Khách hàng còn nợ (phải thu)" value={money(d.total_receivable)} to={paths.receivable} />}
+        {d.total_payable !== null && <Tile label="Còn nợ nhà cung cấp (phải trả)" value={money(d.total_payable)} to={paths.payable} />}
+        {d.cash_balance !== null && (
+          <Tile label="Tiền mặt tồn quỹ" value={money(d.cash_balance)} tone={d.cash_balance < 0 ? 'bad' : 'default'} to={paths.cashBook} />
+        )}
+        {d.bank_balance !== null && (
+          <Tile label="Tiền gửi ngân hàng" value={money(d.bank_balance)} tone={d.bank_balance < 0 ? 'bad' : 'default'} to={paths.cashBook} />
+        )}
       </div>
 
       <div className="panel">
@@ -223,7 +230,7 @@ export function DashboardPage() {
             },
             { title: 'Ngày phiếu', dataIndex: 'doc_date', width: 105, render: (s: string) => formatDate(s) },
             { title: 'Khách hàng / Nhà cung cấp', dataIndex: 'partner_name', render: (s: string | null) => s ?? <span className="muted">–</span> },
-            { title: 'Tổng tiền', dataIndex: 'total_amount', width: 130, align: 'right', render: (n: number) => formatMoney(n) },
+            { title: 'Tổng tiền', dataIndex: 'total_amount', width: 130, align: 'right', render: (n: number | null) => (n === null ? <span className="muted">—</span> : formatMoney(n)) },
             { title: 'Người sửa cuối', dataIndex: 'updated_by_name', width: 200 },
             { title: 'Lúc', dataIndex: 'updated_at', width: 135, render: (s: string) => formatDateTime(s) },
           ]}

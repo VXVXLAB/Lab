@@ -425,16 +425,18 @@ func (s *Service) CashBook(ctx context.Context, p CashBookParams) (*CashBook, er
 
 // Dashboard là số liệu màn hình tổng quan.
 type Dashboard struct {
-	Today            util.Date       `json:"today"`
-	DraftCount       int             `json:"draft_count"`
-	DraftSaleCount   int             `json:"draft_sale_count"`
-	RevenueToday     decimal.Decimal `json:"revenue_today"`
-	RevenueMonth     decimal.Decimal `json:"revenue_month"`
-	TotalReceivable  decimal.Decimal `json:"total_receivable"`
-	TotalPayable     decimal.Decimal `json:"total_payable"`
-	LowStockCount    int             `json:"low_stock_count"`
-	OutOfStockCount  int             `json:"out_of_stock_count"`
-	LowStockThresh   decimal.Decimal `json:"low_stock_threshold"`
+	Today           util.Date       `json:"today"`
+	DraftCount      int             `json:"draft_count"`
+	DraftSaleCount  int             `json:"draft_sale_count"`
+	RevenueToday    decimal.Decimal `json:"revenue_today"`
+	RevenueMonth    decimal.Decimal `json:"revenue_month"`
+	TotalReceivable decimal.Decimal `json:"total_receivable"`
+	TotalPayable    decimal.Decimal `json:"total_payable"`
+	LowStockCount   int             `json:"low_stock_count"`
+	OutOfStockCount int             `json:"out_of_stock_count"`
+	LowStockThresh  decimal.Decimal `json:"low_stock_threshold"`
+	// LowStockRule (bản mở rộng C5): "min_stock" khi "sắp hết" tính theo tồn tối thiểu từng mã; tắt ⇒ không có trường.
+	LowStockRule     *string         `json:"low_stock_rule,omitempty"`
 	CashBalance      decimal.Decimal `json:"cash_balance"`
 	BankBalance      decimal.Decimal `json:"bank_balance"`
 	RecentDrafts     []RecentDraft   `json:"recent_drafts"`

@@ -1,5 +1,5 @@
 // API của bản mở rộng (docs/API.md §8). Chỉ gọi khi tính năng tương ứng đang bật (tắt ⇒ máy chủ trả 404 FEATURE_OFF).
-import { api } from './client';
+import { api, buildUrl } from './client';
 import type { FeatureKey, FeaturesResponse, ImportKind, ImportResult, PeriodLock, Permission, Role, RolePermissions } from './types';
 
 export const featuresApi = {
@@ -19,7 +19,7 @@ export const periodLockApi = {
 };
 
 export const importApi = {
-  templateUrl: (kind: ImportKind) => `/import/${kind}/template`,
+  templateUrl: (kind: ImportKind) => buildUrl(`/import/${kind}/template`),
   run: (kind: ImportKind, file: File, opts: { dryRun: boolean; date?: string }, onProgress?: (pct: number) => void) => {
     const form = new FormData();
     form.append('file', file);

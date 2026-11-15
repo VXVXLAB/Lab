@@ -680,3 +680,73 @@ Quyền: `sale.write`, `purchase.write`, `stock.write`, `cash.write`, `catalog.w
 | 71–72 | GET, PUT | `/api/role-permissions` |
 | 73–74 | GET, PUT | `/api/period-lock` |
 | 75–76 | GET, POST | `/api/import/{loai}/template`, `/api/import/{loai}` |
+
+
+## 9. Bản mở rộng — đợt M2
+
+Khóa có sẵn từ đợt này: `min_stock`, `price_list`, `credit_limit`, `profit_report` (`available: true` trong `/api/features`).
+Trường mới trên danh mục **chỉ xuất hiện trong JSON khi tính năng tương ứng bật** (tắt ⇒ JSON y như bản chuẩn). Trường
+nhập mới chỉ được áp dụng khi **có gửi** và tính năng bật (không gửi ⇒ giữ nguyên; gửi `null` ⇒ xóa).
+
+### 9.1 Tồn tối thiểu (`min_stock`)
+- Mặt hàng: `"min_stock": 20` (số, tính trên **tổng các kho**; `null` = không đặt ⇒ không bao giờ bị coi là sắp hết). Gửi trong POST/PUT `/api/products`; âm ⇒ 400.
+- `GET /api/dashboard`: khi bật, `low_stock_count` = số mã (đang dùng, không phải dịch vụ, đã đặt `min_stock`) có tồn tổng hiện tại ≤ `min_stock`, và có thêm `"low_stock_rule": "min_stock"` (`low_stock_threshold` bị bỏ qua). Tắt ⇒ quy tắc ≤ 5 như cũ, không có `low_stock_rule`.
+- `GET /api/reports/low-stock[?format=xlsx|docx]` → `{"items": [{"product_id", "code", "name", "unit", "group_name", "min_stock", "total_stock", "need"}]}` (`need = min_stock − total_stock`).
+- `GET /api/reports/draft-demand`: khi bật, mỗi dòng thêm `"min_stock"` và `"order_more"` = max(0, min_stock − (tồn tổng − SL trên phiếu tạm)); có thêm cả các mã dưới tồn tối thiểu dù không nằm trên phiếu tạm (`drafts: []`). `only_shortage=true` giữ dòng thiếu cho phiếu tạm hoặc `order_more > 0`. Excel thêm cột "Tồn tối thiểu", "Cần đặt thêm". Tắt ⇒ như cũ.
+- Nhập Excel mặt hàng: khi bật, mẫu và file nhận thêm cột "Tồn tối thiểu".
+
+### 9.2 Giá theo khách (`price_list`)
+- `GET /api/partners/{id}/prices` (mọi vai trò) → `{"partner_id", "items": [{"product_id", "product_code", "product_name", "unit", "price", "default_price", "note", "updated_by_name", "updated_at"}]}`. Đối tác không phải khách hàng ⇒ 400.
+- `PUT /api/partners/{id}/prices` (`sale.write`) body `{"items": [{"product_id": 12 | "product_code": "A", "price": 900, "note": "Hợp đồng"}], "replace": false}` — thêm/sửa từng mã; `replace: true` xóa các giá riêng không có trong danh sách. Giá < 0, mã lặp, mã không có ⇒ 400 (`details.line_no`). Dùng cho nút "Lưu giá này cho khách" (gửi một dòng). Có audit.
+- `DELETE /api/partners/{id}/prices/{product_id}` (`sale.write`) → `{"ok": true}`; chưa có ⇒ 404.
+- `GET /api/products/sale-price?partner_id=&ids=1,2,3&date=YYYY-MM-DD` (mọi vai trò; `date` mặc định hôm nay = ngày phiếu) → giá tự điền và nguồn:
+  ```json
+  {"partner_id": 5, "date": "2026-12-31", "items": [
+    {"product_id": 1, "price": 900, "source": "customer", "source_name": "Giá riêng của khách", "default_price": 1000, "document_id": null, "doc_no": null, "doc_date": null, "note": "Hợp đồng"},
+    {"product_id": 2, "price": 1850, "source": "last_sale", "source_name": "Giá bán gần nhất cho khách", "default_price": 2000, "document_id": 31, "doc_no": "XK00012", "doc_date": "2026-02-01", "note": null},
+    {"product_id": 3, "price": 3000, "source": "default", "source_name": "Giá bán mặc định", "default_price": 3000, …}]}
+  ```
+  Thứ tự: (1) giá riêng của khách; (2) đơn giá dòng **phiếu bán** (không tính khách trả hàng, phiếu tạm) **đã ghi sổ** cho khách này có ngày ≤ `date`, mới nhất theo ngày rồi thứ tự ghi sổ; (3) giá bán mặc định. Tối đa 500 id.
+- Khi bật, dòng phiếu **bán** gửi lên không có `unit_price` được máy chủ tự điền theo đúng thứ tự trên (phiếu khách trả hàng vẫn dùng giá bán mặc định).
+- Xóa mặt hàng / đối tác (khi chưa phát sinh chứng từ) xóa luôn giá riêng của nó.
+- Nhập Excel loại `partner_prices` (cần bật `price_list` và `import_excel`, quyền `sale.write`): cột Mã khách hàng*, Mã hàng*, Giá*, Ghi chú.
+
+### 9.3 Hạn mức và tuổi nợ (`credit_limit`)
+- Đối tác: `"credit_limit": 50000000` (`null` = không hạn mức), `"payment_days": 30` (`null` = 0 ngày; 0–3650).
+- Ghi sổ phiếu **bán** (và sửa phiếu bán đã ghi sổ làm **tăng** tổng tiền hoặc đổi sang khách khác): nếu nợ phải thu hiện tại của khách (mọi chứng từ đã ghi sổ, không gồm phiếu này) + tổng phiếu > hạn mức ⇒ `409 CREDIT_WARNING`:
+  ```json
+  {"error": {"code": "CREDIT_WARNING", "message": "Khách … vượt hạn mức công nợ: nợ hiện tại 700 + phiếu này 400 = 1.100, hạn mức 1.000 (vượt 100). …",
+   "details": {"credit": {"partner_id": 5, "partner_name": "…", "receivable": 700, "document_amount": 400, "total_after": 1100, "credit_limit": 1000, "over": 100},
+               "loss_lines": [ …Warning, chỉ khi còn bán lỗ chưa xác nhận… ],
+               "confirm": ["confirm_credit", "confirm_loss"]}}}
+  ```
+  Gửi lại `POST /documents/{id}/post` (hoặc PUT) với `"confirm_credit": true` (và `"confirm_loss": true` nếu `confirm` có). Thứ tự: thiếu hàng (422) trước; sau đó nếu còn vượt hạn mức chưa xác nhận ⇒ `CREDIT_WARNING` (gộp cả các dòng lỗ chưa xác nhận để xác nhận một lần); nếu chỉ còn bán lỗ ⇒ `LOSS_WARNING` như cũ. Hai cờ độc lập. Ghi sổ sau khi xác nhận ⇒ audit `credit_confirmed` (người xác nhận, số liệu). Người không có `debt.view` nhận các con số `receivable`, `total_after`, `credit_limit`, `over` là `null`.
+- `GET /api/reports/debt-aging?as_of=YYYY-MM-DD&partner_id=&q=[&format=xlsx|docx]` (`debt.view`) — tuổi nợ phải thu đến hết ngày `as_of` (mặc định hôm nay):
+  ```json
+  {"as_of": "2026-04-30",
+   "items": [{"partner_id": 5, "partner_code": "K", "partner_name": "…", "payment_days": 10,
+              "in_term": 500, "d1_30": 0, "d31_60": 2000, "d61_90": 0, "over_90": 500, "opening": 0, "prepaid": 0, "total": 3000,
+              "items": [{"date": "2026-01-01", "due_date": "2026-01-11", "ref_no": "XK00001", "ref_type": "sale", "document_id": 7, "voucher_id": null,
+                         "amount": 1000, "remaining": 500, "days_overdue": 109, "bucket": "over_90"}, …]}],
+   "totals": {"in_term": …, …, "total": 2800}}
+  ```
+  Các khoản giảm nợ (khách trả hàng, phiếu thu) trừ vào khoản tăng nợ cũ nhất trước (FIFO); nợ đầu kỳ (không có ngày) là khoản cũ nhất, phần còn lại nằm ở cột `opening`; hạn = ngày phát sinh + `payment_days`; `in_term` = chưa quá hạn (≤ 0 ngày). Khách trả thừa ⇒ cột `prepaid` (âm), được bù vào khoản tăng nợ phát sinh sau. Phiếu chi trả lại tiền khách là khoản tăng nợ. **Tổng các cột = `total` = số dư sổ công nợ phải thu cùng ngày.** `items` của từng khách là các khoản còn mở (mở chứng từ / phiếu thu chi).
+
+### 9.4 Lãi gộp (`profit_report`)
+`GET /api/reports/profit?from=&to=&group_by=document|product|customer&partner_id=&product_id=[&format=xlsx|docx]` (cần `report.view` + `cost.view`; `from/to` mặc định đầu tháng → hôm nay):
+```json
+{"from": "2026-01-01", "to": "2026-12-31", "group_by": "document",
+ "items": [{"document_id": 12, "doc_no": "XK00002", "doc_date": "2026-02-15", "doc_type": "sale", "partner_id": 5, "partner_code": "K2", "partner_name": "…",
+            "revenue": 950, "cost": 400, "profit": 550, "margin": 57.89, "estimated": false}],
+ "totals": {"revenue": 950, "cost": 467, "profit": 483, "margin": 50.84, "estimated": false},
+ "estimated_lines": 0}
+```
+- `group_by=product`: khóa `product_id, product_code, product_name, unit, qty` (SL bán ròng); `group_by=customer`: `partner_id, partner_code, partner_name`. `margin` = lãi / doanh thu × 100 (null khi doanh thu 0).
+- Giá vốn một dòng = round(SL × giá nhập bình quân gia quyền, 0): bình quân trên toàn bộ dòng **nhập mua** và **tồn đầu kỳ** đã ghi sổ có ngày ≤ ngày bán (mọi kho), **trả hàng NCC** trừ cả SL và giá trị (theo thành tiền của chính nó); chuyển kho, khách trả hàng không tính là nhập. Chưa có lượng nhập nào (hoặc SL lũy kế ≤ 0) ⇒ giá mua mặc định, `estimated: true`. Dịch vụ: giá vốn 0 (doanh thu vẫn tính). Khách trả hàng: doanh thu và giá vốn âm, giá vốn tính cùng cách tại ngày trả. Tính lại mỗi lần xem ⇒ sửa / nhập lùi ngày phiếu mua thay đổi lãi quá khứ.
+- Ba cách nhóm có cùng tổng; tổng doanh thu = `/reports/sales?include_returns=true` cùng kỳ.
+
+| # | Phương thức | Đường dẫn (đợt M2) |
+|---|---|---|
+| 77–79 | GET, PUT, DELETE | `/api/partners/{id}/prices`, `/api/partners/{id}/prices/{product_id}` |
+| 80 | GET | `/api/products/sale-price` |
+| 81–83 | GET | `/api/reports/low-stock`, `/api/reports/debt-aging`, `/api/reports/profit` |

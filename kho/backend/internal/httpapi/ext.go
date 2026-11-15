@@ -140,7 +140,8 @@ func (m maskRules) maskObject(o map[string]any) {
 		}
 	}
 	if m.noDebt {
-		nullKeys(o, "old_debt", "total_debt", "total_receivable", "total_payable", "opening_receivable", "opening_payable", "receivable", "payable")
+		nullKeys(o, "old_debt", "total_debt", "total_receivable", "total_payable", "opening_receivable", "opening_payable", "receivable", "payable",
+			"credit_limit", "total_after", "over")
 	}
 	if m.noCash {
 		nullKeys(o, "cash_balance", "bank_balance", "opening_balance")

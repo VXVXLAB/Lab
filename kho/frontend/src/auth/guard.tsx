@@ -2,7 +2,8 @@
 // Bản chuẩn (mọi tính năng tắt): mọi người có đủ quyền như trước ⇒ chỉ còn điều kiện `feature` ẩn màn mới.
 import type { ReactNode } from 'react';
 import { Result } from 'antd';
-import type { FeatureKey, Permission } from '../api/types';
+import type { DocType, FeatureKey, Permission } from '../api/types';
+import { DOC_TYPES, type DocTypeConfig } from '../pages/documents/docTypes';
 import { useAccess, type Access } from './AuthContext';
 
 export interface Need {
@@ -65,4 +66,67 @@ export function GuardedScreen({ need, children }: { need?: Need; children: React
       subTitle={missing.length ? `Cần quyền: ${missing.map((p) => `“${PERMISSION_LABEL[p]}”`).join(need?.any ? ' hoặc ' : ', ')}. Hãy nhờ người quản trị.` : 'Hãy nhờ người quản trị.'}
     />
   );
+}
+
+// ---------- Chứng từ kho theo quyền ----------
+
+/** Quyền lập / sửa / ghi sổ từng loại phiếu. */
+export const DOC_WRITE_PERM: Record<DocType, Permission> = {
+  sale: 'sale.write',
+  sale_return: 'sale.write',
+  purchase: 'purchase.write',
+  purchase_return: 'purchase.write',
+  transfer: 'stock.write',
+  opening: 'stock.write',
+};
+
+/** Loại phiếu mang giá vốn (đơn giá = giá mua): không có quyền "Xem giá mua" ⇒ máy chủ che giá / tiền. */
+export const COST_DOC_TYPES: readonly DocType[] = ['purchase', 'purchase_return', 'opening'];
+
+export interface DocAccess {
+  /** Cấu hình loại phiếu đã tính quyền: ẩn giá khi bị che giá vốn, ẩn Nợ cũ/Tổng nợ khi không xem công nợ */
+  cfg: DocTypeConfig;
+  /** Lập / sửa / ghi sổ / xóa phiếu tạm */
+  canWrite: boolean;
+  /** Sửa / bỏ ghi sổ / xóa phiếu đã ghi sổ */
+  canEditPosted: boolean;
+  /** Giá vốn bị che trên loại phiếu này */
+  costHidden: boolean;
+}
+
+export function docAccess(type: DocType, a: Access, isAdmin: boolean): DocAccess {
+  const base = DOC_TYPES[type];
+  const can = (p: Permission) => isAdmin || a.permissions.has(p);
+  const costHidden = COST_DOC_TYPES.includes(type) && !can('cost.view');
+  const canWrite = can(DOC_WRITE_PERM[type]);
+  return {
+    cfg: {
+      ...base,
+      hasPrice: base.hasPrice && !costHidden,
+      defaultPrice: costHidden ? null : base.defaultPrice,
+      hasDebt: base.hasDebt && !costHidden && can('debt.view'),
+    },
+    canWrite,
+    canEditPosted: canWrite && can('posted.edit'),
+    costHidden,
+  };
+}
+
+/** Quyền với một loại phiếu cho người đang đăng nhập. */
+export function useDocAccess(type: DocType): DocAccess {
+  const a = useAccess();
+  return docAccess(type, a, a.isAdmin);
+}
+
+/** Loại phiếu người dùng được lập (thứ tự như menu). */
+export function useWritableDocTypes(): DocType[] {
+  const a = useAccess();
+  return (Object.keys(DOC_TYPES) as DocType[]).filter((t) => a.isAdmin || a.permissions.has(DOC_WRITE_PERM[t]));
+}
+
+/** Số dư đầu kỳ đối tác được xem / sửa: phải thu cần "Xem công nợ"; phải trả cần thêm "Xem giá mua". */
+export function useOpeningDebtVisibility(): { receivable: boolean; payable: boolean } {
+  const a = useAccess();
+  const can = (p: Permission) => a.isAdmin || a.permissions.has(p);
+  return { receivable: can('debt.view'), payable: can('debt.view') && can('cost.view') };
 }

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useCan } from '../../auth/AuthContext';
 import { AutoComplete, Button, Empty, Form, Input, Segmented, Select, Skeleton, Switch, Table, Tag, Tooltip } from 'antd';
 import { FileSearchOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useDrawers } from '../reports/drawers';
@@ -79,10 +80,12 @@ function StockPanel({ product }: { product: Product }) {
           },
         ]}
       />
-      <div className="cost-line">
-        Giá vốn để cảnh báo bán lỗ: <b>{d.cost_source === 'none' ? '–' : formatMoney(d.cost_price)}</b>
-        <div className="muted">({COST_SOURCE_TEXT[d.cost_source]})</div>
-      </div>
+      {d.cost_price !== null && (
+        <div className="cost-line">
+          Giá vốn để cảnh báo bán lỗ: <b>{d.cost_source === 'none' ? '–' : formatMoney(d.cost_price)}</b>
+          <div className="muted">({COST_SOURCE_TEXT[d.cost_source]})</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -93,6 +96,7 @@ export function ProductsPage() {
   const [form] = Form.useForm<ProductBody>();
   const qc = useQueryClient();
   const rec = ed.record;
+  const costView = useCan('cost.view');
   const [groupId, setGroupId] = useState<number | undefined>(undefined);
   const [kind, setKind] = useState<Kind>('all');
   const groups = useAllGroups();
@@ -121,7 +125,8 @@ export function ProductsPage() {
     { title: 'ĐVT', dataIndex: 'unit', width: 66 },
     { title: 'Nhóm', dataIndex: 'group_name', width: 150, ellipsis: true, render: (g: string | null) => g ?? <span className="muted">–</span> },
     { title: 'Giá bán', dataIndex: 'sale_price', width: 108, align: 'right', render: (n: number) => formatMoney(n) },
-    { title: 'Giá mua', dataIndex: 'purchase_price', width: 108, align: 'right', render: (n: number) => formatMoney(n) },
+    // không có quyền "Xem giá mua" (bản mở rộng) ⇒ bỏ hẳn cột
+    ...(costView ? [{ title: 'Giá mua', dataIndex: 'purchase_price', width: 108, align: 'right' as const, render: (n: number) => formatMoney(n) }] : []),
     {
       title: 'Tồn',
       key: 'stock',
@@ -215,7 +220,8 @@ export function ProductsPage() {
             unit: (v.unit ?? '').trim(),
             group_id: v.group_id ?? null,
             sale_price: v.sale_price ?? 0,
-            purchase_price: v.purchase_price ?? 0,
+            // không thấy giá mua ⇒ gửi null: máy chủ giữ giá cũ (mặt hàng mới: 0)
+            purchase_price: costView ? (v.purchase_price ?? 0) : null,
             is_service: !!v.is_service,
             active: v.active,
           };
@@ -259,9 +265,11 @@ export function ProductsPage() {
         <Form.Item label="Giá bán" name="sale_price" extra="Tự điền vào phiếu bán; vẫn sửa được khi bán.">
           <NumberInput style={{ width: 180 }} suffix="đ" />
         </Form.Item>
-        <Form.Item label="Giá mua" name="purchase_price" extra="Dùng làm giá vốn khi mã chưa có phiếu nhập nào.">
-          <NumberInput style={{ width: 180 }} suffix="đ" />
-        </Form.Item>
+        {costView && (
+          <Form.Item label="Giá mua" name="purchase_price" extra="Dùng làm giá vốn khi mã chưa có phiếu nhập nào.">
+            <NumberInput style={{ width: 180 }} suffix="đ" />
+          </Form.Item>
+        )}
         <Form.Item
           label="Là dịch vụ"
           name="is_service"

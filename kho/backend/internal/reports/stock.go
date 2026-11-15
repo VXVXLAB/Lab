@@ -471,6 +471,9 @@ type DemandRow struct {
 	ProductCode string          `json:"product_code"`
 	ProductName string          `json:"product_name"`
 	ProductUnit string          `json:"unit"`
+	// Bản mở rộng C5 (min_stock bật): tồn tối thiểu và SL cần đặt thêm; tắt ⇒ không có trong JSON.
+	MinStock  *decimal.Decimal `json:"min_stock,omitempty"`
+	OrderMore *decimal.Decimal `json:"order_more,omitempty"`
 }
 
 // DraftDemand tổng hợp SL trên phiếu bán tạm so với tồn tổng hiện tại.

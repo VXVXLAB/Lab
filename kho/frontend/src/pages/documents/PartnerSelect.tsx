@@ -1,3 +1,4 @@
+import { useCan } from '../../auth/AuthContext';
 import { forwardRef, useMemo, useState } from 'react';
 import { Button, Select, Space, Tooltip, type RefSelectProps } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
@@ -40,9 +41,11 @@ const optTitle = (p: PartnerLite) => `${p.code} – ${p.name}`;
 
 /** Ô chọn khách hàng / nhà cung cấp: gõ mã, tên, điện thoại (không dấu được); thêm mới ngay tại chỗ. */
 export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerSelect(
-  { type, value, current, onChange, id, disabled, status, noAdd, allowClear, placeholder, style },
+  { type, value, current, onChange, id, disabled, status, noAdd: noAddProp, allowClear, placeholder, style },
   ref,
 ) {
+  // bản mở rộng: không có quyền "Sửa danh mục" ⇒ không thêm đối tác tại chỗ (F4)
+  const noAdd = noAddProp || !useCan('catalog.write');
   const [search, setSearch] = useState('');
   // Danh sách mở / đóng do ô này quyết định: chọn xong là đóng hẳn (F-17)
   const [open, setOpen] = useState(false);

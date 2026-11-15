@@ -1,3 +1,5 @@
+import { useCan } from '../../auth/AuthContext';
+import { lockedOpeningHint, useLockDate } from '../../lib/periodLock';
 import { Form, Input, Radio, Switch, Tag } from 'antd';
 import { useQueryClient } from '@tanstack/react-query';
 import { cashAccountsApi } from '../../api/catalog';
@@ -16,6 +18,8 @@ export function CashAccountsPage() {
   const [form] = Form.useForm<CashAccountBody>();
   const qc = useQueryClient();
   const rec = ed.record;
+  const cashView = useCan('cash.view');
+  const lockDate = useLockDate();
 
   return (
     <>
@@ -34,13 +38,9 @@ export function CashAccountsPage() {
             width: 120,
             render: (k: CashAccount['kind']) => <Tag color={k === 'cash' ? 'gold' : 'blue'}>{CASH_KIND_LABEL[k]}</Tag>,
           },
-          {
-            title: 'Số dư đầu kỳ',
-            dataIndex: 'opening_balance',
-            width: 160,
-            align: 'right',
-            render: (n: number) => formatMoney(n),
-          },
+          ...(cashView
+            ? [{ title: 'Số dư đầu kỳ', dataIndex: 'opening_balance', width: 160, align: 'right' as const, render: (n: number | null) => formatMoney(n) }]
+            : []),
           activeColumn<CashAccount>(),
         ]}
         onCreate={ed.openCreate}
@@ -66,7 +66,8 @@ export function CashAccountsPage() {
             code: normalizeCode(v.code),
             name: v.name.trim(),
             kind: v.kind,
-            opening_balance: v.opening_balance ?? 0,
+            // không được xem sổ quỹ (bản mở rộng) ⇒ null: máy chủ giữ số cũ
+            opening_balance: cashView ? (v.opening_balance ?? 0) : null,
             active: v.active,
           };
           return rec ? cashAccountsApi.update(rec.id, body) : cashAccountsApi.create(body);
@@ -87,9 +88,11 @@ export function CashAccountsPage() {
             ]}
           />
         </Form.Item>
-        <Form.Item label="Số dư đầu kỳ" name="opening_balance">
-          <NumberInput style={{ width: 200 }} suffix="đ" />
-        </Form.Item>
+        {cashView && (
+          <Form.Item label="Số dư đầu kỳ" name="opening_balance" extra={lockDate ? lockedOpeningHint(lockDate) : undefined}>
+            <NumberInput style={{ width: 200 }} suffix="đ" disabled={!!lockDate} />
+          </Form.Item>
+        )}
         <Form.Item label="Đang sử dụng" name="active" valuePropName="checked">
           <Switch checkedChildren="Có" unCheckedChildren="Không" />
         </Form.Item>

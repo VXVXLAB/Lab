@@ -146,3 +146,16 @@ Các test chạy với tính năng được bật trong chính test; với mọi
 | C3 thử không ghi gì, tất cả hoặc không gì, số kiểu Việt, nhận cột theo tiêu đề, trùng mã | `TestMR_C3_NhapHangHoaTatCaHoacKhongGi` | ĐẠT |
 | C3 đối tác, tồn đầu kỳ (phiếu tạm từng kho), công nợ đầu kỳ (thay thế) | `TestMR_C3_DoiTacTonDauCongNoDau` | ĐẠT |
 | C3 file 20.000 dòng (thử ≈ 2,1 s, nhập ≈ 2,8 s), 20.001 dòng ⇒ 400 | `TestMR_C3_File20000Dong` | ĐẠT |
+
+## Bản mở rộng — đợt M2
+
+| Hạng mục | Test | Kết quả |
+|---|---|---|
+| C5 tồn tối thiểu: tắt ⇒ quy tắc ≤ 5 và JSON như cũ; bật ⇒ dashboard, báo cáo dưới tồn tối thiểu, hàng cần đặt thêm cột, mẫu nhập có cột | `TestMR_C5_TonToiThieu` | ĐẠT |
+| C6 giá theo khách: nguồn giá (giá riêng / bán gần nhất theo ngày rồi thứ tự ghi sổ / mặc định), loại trừ trả hàng, phiếu tạm, khách khác; tự điền trên phiếu bán; bảng giá, xóa dây chuyền, nhập Excel | `TestMR_C6_GiaTheoKhach` | ĐẠT |
+| C8 hạn mức: CREDIT_WARNING khi ghi sổ / sửa tăng tiền; thiếu hàng chặn trước; gộp với LOSS_WARNING; cờ độc lập; audit người xác nhận; che số nợ | `TestMR_C8_HanMucCongNo` | ĐẠT |
+| C8 tuổi nợ: FIFO, nợ đầu kỳ, trả trước, hạn = ngày + số ngày nợ, xlsx | `TestMR_C8_TuoiNoFIFO` | ĐẠT |
+| C8 tuổi nợ khớp sổ công nợ — kiểm tra tính chất ngẫu nhiên (bán, trả hàng, thu, trả lại tiền, nợ đầu kỳ, sửa lùi ngày) | `TestMR_C8_TuoiNoKhopSoCongNo_NgauNhien` | ĐẠT |
+| C7 lãi gộp: bình quân gia quyền, trả NCC, chuyển kho bỏ qua, ước tính, dịch vụ, khách trả hàng, ba cách nhóm cùng tổng, khớp báo cáo bán, nhập lùi ngày tính lại | `TestMR_C7_LaiGop` | ĐẠT |
+| Hiệu năng tuổi nợ / lãi gộp trên 100.000 dòng | `TestMR_C7_C8_HieuNang` | ĐẠT (≤ 1,2 s mỗi báo cáo) |
+| Ma trận quyền và kiểm tra rò giá vốn mở rộng cho các route mới | `TestMR_C1_MaTranQuyenMoiEndpointGhi`, `TestMR_C1_KhongLoGiaVon` | ĐẠT |

@@ -44,4 +44,8 @@ export function lockDateWarning(d: Dayjs | null, lockDate: string | null): strin
   return `Ngày này thuộc kỳ đã khóa sổ (đến ${formatDate(lockDate)}) — phiếu sẽ không lưu / ghi sổ được.`;
 }
 
+/** Gợi ý dưới ô số dư đầu kỳ khi đang khóa sổ (máy chủ không cho đổi). */
+export const lockedOpeningHint = (lockDate: string) =>
+  `Đang khóa sổ đến ${formatDate(lockDate)}: không đổi được số dư đầu kỳ. Nhờ quản trị bỏ khóa sổ trước (Hệ thống › Khóa sổ).`;
+
 export { fromApiDate };

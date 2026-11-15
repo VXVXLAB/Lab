@@ -48,7 +48,7 @@ export function FeaturesPage() {
   const list: FeatureItem[] = (() => {
     const d = q.data;
     if (!d) return [];
-    const src = d.items ?? d.keys ?? (Object.keys(d.features) as FeatureKey[]).map((key) => ({ key, name: key }));
+    const src: FeatureItem[] = d.items ?? d.keys ?? (Object.keys(d.features) as FeatureKey[]).map((key) => ({ key, name: key }));
     return src.map((it) => ({
       ...it,
       enabled: it.enabled ?? !!d.features[it.key],
@@ -96,7 +96,7 @@ export function FeaturesPage() {
       width: 520,
       content: (
         <>
-          <p>{it.description ?? about?.what}</p>
+          <p>{about?.what ?? it.description}</p>
           {(on ? about?.on : about?.off) && <p>{on ? about.on : about.off}</p>}
           <p className="muted">Các máy khác thấy thay đổi ngay, không cần tải lại.</p>
         </>
@@ -127,7 +127,7 @@ export function FeaturesPage() {
                   {it.name} {!it.available && <Tag>Sắp có</Tag>}
                   {it.available && it.enabled && <Tag color="green">Đang bật</Tag>}
                 </div>
-                <div className="feature-desc">{it.description ?? ABOUT[it.key]?.what}</div>
+                <div className="feature-desc">{ABOUT[it.key]?.what ?? it.description}</div>
               </div>
               <Switch
                 checked={!!it.enabled && !!it.available}

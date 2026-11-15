@@ -25,6 +25,7 @@ const (
 	CodeFeatureOff        = "FEATURE_OFF"
 	CodePeriodLocked      = "PERIOD_LOCKED"
 	CodeImportInvalid     = "IMPORT_INVALID"
+	CodeCreditWarning     = "CREDIT_WARNING"
 )
 
 // Error là lỗi trả về cho client.

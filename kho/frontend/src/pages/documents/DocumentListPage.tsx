@@ -20,6 +20,8 @@ import { useDebouncedFlush, useElementHeight } from '../../lib/useDebounced';
 import { useListSearchEnter } from '../../lib/searchGuard';
 import { paths } from '../../paths';
 import { DOC_TYPES, DOC_TYPE_LIST } from './docTypes';
+import { useAccess } from '../../auth/AuthContext';
+import { docAccess, useWritableDocTypes } from '../../auth/guard';
 import { PartnerSelect, type PartnerLite } from './PartnerSelect';
 import { WarehouseSelect } from '../../components/WarehouseSelect';
 
@@ -76,7 +78,13 @@ const PAGE_SIZE = 50;
 
 export function DocumentListPage({ type, draftsOnly = false }: Props) {
   const navigate = useNavigate();
-  const cfg = type ? DOC_TYPES[type] : null;
+  const access = useAccess();
+  // quyền (bản mở rộng): loại phiếu được lập; giá bị che với phiếu mua / tồn đầu khi không có "Xem giá mua"
+  const writable = useWritableDocTypes();
+  const da = type ? docAccess(type, access, access.isAdmin) : null;
+  const cfg = da ? da.cfg : null;
+  const canNew = type ? !!da?.canWrite : writable.length > 0;
+  const firstNew: DocType = type ?? (writable.includes('sale') ? 'sale' : (writable[0] ?? 'sale'));
   const [preset, setPreset] = useState<Preset>('all');
   const [range, setRange] = useState<[Dayjs | null, Dayjs | null]>([null, null]);
   const [status, setStatus] = useState<'all' | DocStatus>(draftsOnly ? 'draft' : 'all');
@@ -151,7 +159,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
     searchRef.current?.focus();
     searchRef.current?.select();
   };
-  useHotkeys({ F2: () => newDoc(type ?? 'sale'), F3: focusSearch, '/': focusSearch });
+  useHotkeys({ F2: () => canNew && newDoc(firstNew), F3: focusSearch, '/': focusSearch });
 
   useEffect(() => {
     if (!current) return;
@@ -236,7 +244,16 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
     { title: 'Ghi chú', dataIndex: 'note', ellipsis: true, width: draftsOnly || !cfg ? undefined : 150, render: (s: string) => s || <span className="muted">–</span> },
     { title: 'Dòng', dataIndex: 'line_count', width: 50, align: 'right' },
     ...(showPrice
-      ? [{ title: 'Tổng tiền', dataIndex: 'total_amount', width: 120, align: 'right' as const, render: (n: number) => formatMoney(n) }]
+      ? [
+          {
+            title: 'Tổng tiền',
+            dataIndex: 'total_amount',
+            width: 120,
+            align: 'right' as const,
+            // bị che (phiếu mua / tồn đầu, không có quyền xem giá mua) ⇒ "—"
+            render: (n: number | null) => (n === null ? <span className="muted">—</span> : formatMoney(n)),
+          },
+        ]
       : []),
     {
       title: draftsOnly ? 'Sửa lần cuối' : 'Người sửa cuối',
@@ -266,17 +283,20 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
             : undefined
         }
         actions={
-          type ? (
+          !canNew ? undefined : type ? (
             <Button type="primary" icon={<PlusOutlined />} onClick={() => newDoc(type)}>
               Lập {cfg?.name.toLowerCase()} <Kbd>F2</Kbd>
             </Button>
           ) : (
             <Dropdown.Button
               type="primary"
-              onClick={() => newDoc('sale')}
-              menu={{ items: DOC_TYPE_LIST.map((t) => ({ key: t, label: DOC_TYPES[t].name })), onClick: ({ key }) => newDoc(key as DocType) }}
+              onClick={() => newDoc(firstNew)}
+              menu={{
+                items: DOC_TYPE_LIST.filter((t) => writable.includes(t)).map((t) => ({ key: t, label: DOC_TYPES[t].name })),
+                onClick: ({ key }) => newDoc(key as DocType),
+              }}
             >
-              <PlusOutlined /> Lập phiếu bán <Kbd>F2</Kbd>
+              <PlusOutlined /> Lập {DOC_TYPES[firstNew].name.toLowerCase()} <Kbd>F2</Kbd>
             </Dropdown.Button>
           )
         }
@@ -383,7 +403,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
             showTotal: (t, [a, b]) => (
               <span>
                 {a}–{b} / {t} phiếu
-                {showPrice && rows.length > 0 && (
+                {showPrice && rows.length > 0 && query.data?.sum_total_amount !== null && (
                   <>
                     {' '}
                     · Cộng tiền {t > rows.length ? `cả ${t} phiếu` : ''}: <b className="sum-all">{formatMoney(sumAll)}</b>
@@ -398,13 +418,18 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
               : draftsOnly
                 ? 'Không có phiếu tạm nào đang treo.'
                 : !dq && !partner && !productId && !warehouseId && status === 'all' && preset === 'all'
-                  ? `Chưa có ${cfg ? cfg.name.toLowerCase() : 'phiếu'} nào. Bấm F2 để lập phiếu đầu tiên.`
+                  ? `Chưa có ${cfg ? cfg.name.toLowerCase() : 'phiếu'} nào.${canNew ? ' Bấm F2 để lập phiếu đầu tiên.' : ''}`
                   : 'Không có phiếu nào khớp điều kiện lọc. Thử chọn "Tất cả" thời gian hoặc bỏ bớt bộ lọc.',
           }}
         />
       </div>
       <div className="hint-bar">
-        <Kbd>F2</Kbd> lập phiếu · <Kbd>F3</Kbd>/<Kbd>/</Kbd> tìm · <Kbd>↑</Kbd>
+        {canNew && (
+          <>
+            <Kbd>F2</Kbd> lập phiếu ·{' '}
+          </>
+        )}
+        <Kbd>F3</Kbd>/<Kbd>/</Kbd> tìm · <Kbd>↑</Kbd>
         <Kbd>↓</Kbd> chọn · <Kbd>Enter</Kbd> hoặc nhấp đúp để mở phiếu
       </div>
     </div>

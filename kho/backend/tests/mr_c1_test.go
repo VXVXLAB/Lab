@@ -146,6 +146,10 @@ func mrMutations(e *Env, f mrFixture, tag string) []mrMut {
 		mrMut{pattern: "POST /api/import/{kind}", method: "POST", path: "/api/import/partners?dry_run=1", upload: true, perms: []string{"catalog.write"}},
 		mrMut{pattern: "POST /api/import/{kind}", method: "POST", path: "/api/import/opening_stock?dry_run=1", upload: true, perms: []string{"stock.write"}},
 		mrMut{pattern: "POST /api/import/{kind}", method: "POST", path: "/api/import/opening_debt?dry_run=1", upload: true, admin: true},
+		mrMut{pattern: "POST /api/import/{kind}", method: "POST", path: "/api/import/partner_prices?dry_run=1", upload: true, perms: []string{"sale.write"}},
+		mrMut{pattern: "PUT /api/partners/{id}/prices", method: "PUT", path: fmt.Sprintf("/api/partners/%d/prices", f.cus),
+			body: map[string]any{"items": []any{map[string]any{"product_id": f.prod, "price": 900}}}, perms: []string{"sale.write"}},
+		mrMut{pattern: "DELETE /api/partners/{id}/prices/{product_id}", method: "DELETE", path: fmt.Sprintf("/api/partners/%d/prices/999999", f.cus), perms: []string{"sale.write"}},
 		mrMut{pattern: "POST /api/auth/change-password", method: "POST", path: "/api/auth/change-password", body: map[string]any{"old_password": "sai", "new_password": "1234567"}},
 		mrMut{pattern: "POST /api/auth/login", skip: true},
 		mrMut{pattern: "POST /api/auth/logout", skip: true},
@@ -195,7 +199,7 @@ func runMatrix(t *testing.T, e *Env, clients map[string]*Client, perms map[strin
 func TestMR_C1_MaTranQuyenMoiEndpointGhi(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	mrEnable(e, "permissions", "import_excel", "period_lock")
+	mrEnable(e, "permissions", "import_excel", "period_lock", "price_list", "min_stock", "credit_limit", "profit_report")
 	f := mrSeed(e, "")
 	clients := map[string]*Client{}
 	for role := range mrRoleDefaults {
@@ -241,6 +245,11 @@ func TestMR_C1_MaTranQuyenMoiEndpointGhi(t *testing.T) {
 		{"/api/vouchers", nil, []string{"cash.view", "cash.write"}},
 		{fmt.Sprintf("/api/vouchers/%d", f.voucher), nil, []string{"cash.view", "cash.write"}},
 		{"/api/reports/stock-summary", nil, nil},
+		{"/api/reports/debt-aging", []string{"debt.view"}, nil},
+		{"/api/reports/profit", []string{"report.view", "cost.view"}, nil},
+		{"/api/reports/low-stock", nil, nil},
+		{fmt.Sprintf("/api/partners/%d/prices", f.cus), nil, nil},
+		{fmt.Sprintf("/api/products/sale-price?partner_id=%d&ids=%d", f.cus, f.prod), nil, nil},
 		{"/api/documents", nil, nil},
 	}
 	for role, c := range clients {

@@ -130,8 +130,9 @@ func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 type versionBody struct {
-	Version     int  `json:"version"`
-	ConfirmLoss bool `json:"confirm_loss"`
+	Version       int  `json:"version"`
+	ConfirmLoss   bool `json:"confirm_loss"`
+	ConfirmCredit bool `json:"confirm_credit"`
 }
 
 func (s *Server) postDocument(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +150,7 @@ func (s *Server) postDocument(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	d, err := s.Docs.Post(r.Context(), userOf(r).ID, id, in.Version, in.ConfirmLoss)
+	d, err := s.Docs.PostWith(r.Context(), userOf(r).ID, id, docs.PostParams{Version: in.Version, ConfirmLoss: in.ConfirmLoss, ConfirmCredit: in.ConfirmCredit})
 	if err != nil {
 		writeErr(w, r, err)
 		return

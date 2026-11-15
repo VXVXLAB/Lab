@@ -26,7 +26,9 @@ import { ApiError, errorMessage } from '../../api/client';
 import { documentsApi } from '../../api/documents';
 import { qk } from '../../api/queryKeys';
 import type { DocType, DocumentFull, LossWarning, PriceInfoWh, Shortage, VersionConflictDetails, Warehouse } from '../../api/types';
-import { useCurrentUser } from '../../auth/AuthContext';
+import { useAccess, useCurrentUser } from '../../auth/AuthContext';
+import { docAccess } from '../../auth/guard';
+import { isLocked, LockBadge, lockDateWarning, lockedText, lockTooltip, useLockDate } from '../../lib/periodLock';
 import { DateInput } from '../../components/DateInput';
 import { Kbd } from '../../components/Kbd';
 import { useServerEvent } from '../../lib/events';
@@ -39,7 +41,7 @@ import { useNarrow } from '../../lib/useNarrow';
 import { MERGE_COLOR, MERGE_LABEL, conflictText, isOrderItem, needsChoice, type MergeChoice, type MergeItem } from '../../lib/merge3';
 import { MergeChoicePicker } from '../../components/MergeChoicePicker';
 import { paths } from '../../paths';
-import { DOC_TYPES, isDocType } from './docTypes';
+import { isDocType } from './docTypes';
 import {
   draftFromDoc,
   applyLineMerge,
@@ -118,7 +120,13 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   });
   const [loaded, setLoaded] = useState<DocumentFull | null>(null);
   const type: DocType | null = loaded?.doc_type ?? docQ.data?.doc_type ?? newType;
-  const cfg = type ? DOC_TYPES[type] : null;
+  // Bản mở rộng: quyền theo loại phiếu (giá bị che ⇒ cfg không có giá / nợ), khóa sổ
+  const access = useAccess();
+  const da = type ? docAccess(type, access, access.isAdmin) : null;
+  const cfg = da ? da.cfg : null;
+  const lockDate = useLockDate();
+  const canPay = access.isAdmin || access.can('cash.write');
+  const debtVisible = access.isAdmin || (access.can('debt.view') && (cfg?.partner !== 'supplier' || access.can('cost.view')));
 
   const [header, setHeader] = useState<HeaderDraft>(() => ({
     doc_date: todayVn(),
@@ -178,7 +186,11 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   );
 
   const isNew = docId === null && !loaded;
-  const readOnlyBase = !editing || !!deletedBy;
+  // phiếu đã lưu nằm trong kỳ khóa sổ (theo ngày đã lưu)
+  const lockedDoc = !!loaded && isLocked(loaded.doc_date, lockDate);
+  /** Người này sửa được phiếu đang mở không (phiếu tạm: quyền lập loại phiếu; đã ghi sổ: thêm quyền sửa phiếu đã ghi sổ, ngoài kỳ khóa) */
+  const mayEdit = !da ? false : !loaded ? da.canWrite : loaded.status === 'draft' ? da.canWrite : da.canEditPosted && !lockedDoc;
+  const readOnlyBase = !editing || !!deletedBy || !mayEdit;
   const fp = type ? fingerprint(type, header, lines) : '';
   // Phiếu mới: giá trị phần mềm tự điền (kho mặc định, điền sẵn từ "Hàng cần đặt") là mốc, chưa phải thay đổi (F-08)
   // Mốc được lấy NGAY trong lần vẽ có giá trị tự điền (F-19): trước đây lấy trong effect nên có một lần vẽ "dirty" giả
@@ -396,7 +408,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       const p = l.product;
       if (p && !p.is_service) {
         const pi = piMap.get(p.id);
-        if (cfg.lossCheck && pi && pi.cost_source !== 'none' && l.unit_price !== null && l.unit_price < pi.cost_price) h.loss = pi.cost_price;
+        if (cfg.lossCheck && pi && pi.cost_source !== 'none' && pi.cost_price !== null && l.unit_price !== null && l.unit_price < pi.cost_price) h.loss = pi.cost_price;
         const sh = check?.stock_shortages.find((s) => s.product_id === p.id);
         if (sh && editing) h.shortage = { short: sh.shortage, available: sh.available, required: sh.required, date: sh.date, message: sh.message, docDate: dateStr };
       }
@@ -587,6 +599,14 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
         message.error(e.message, 4);
         return;
       }
+      // bản mở rộng
+      case 'PERIOD_LOCKED':
+        setHeaderErrors({ doc_date: e.message });
+        modal.error({ title: 'Kỳ này đã khóa sổ', content: <><p>{e.message}</p><div className="dlg-hint">Đổi ngày phiếu ra ngoài kỳ đã khóa, hoặc nhờ quản trị lùi ngày khóa sổ (Hệ thống › Khóa sổ).</div></> });
+        return;
+      case 'FORBIDDEN':
+        modal.warning({ title: 'Bạn không có quyền làm việc này', content: <><p>{e.message}</p><div className="dlg-hint">Hãy nhờ người quản trị cấp quyền (Hệ thống › Phân quyền).</div></> });
+        return;
       default:
         modal.error({ title: 'Không thực hiện được', content: e.message });
     }
@@ -759,21 +779,24 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   };
 
   const readOnly = readOnlyBase;
+  const dateLocked = isLocked(header.doc_date, lockDate);
   const canPost = !readOnly && (!loaded || loaded.status === 'draft');
+  /** Được bấm "Sửa phiếu" (F8) với phiếu đã ghi sổ */
+  const canStartEdit = loaded?.status === 'posted' && !editing && !!da?.canEditPosted;
 
   useHotkeys({
     'Ctrl+s': () => {
       if (!readOnly) void save();
     },
     F9: () => {
-      if (canPost) void post();
+      if (canPost && !dateLocked) void post();
     },
     F8: () => {
-      if (loaded?.status === 'posted' && !editing) setEditing(true);
+      if (canStartEdit && !lockedDoc) setEditing(true);
     },
     'Ctrl+p': () => openPrint(),
     F2: () => {
-      if (type) navigate(paths.newDocument(type));
+      if (type && da?.canWrite) navigate(paths.newDocument(type));
     },
   });
 
@@ -781,7 +804,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const partnerDebt = useQuery({
     queryKey: qk.report('debt-ledger', { partner_id: header.partner?.id, side: partnerSide }),
     queryFn: () => reportApi.debtLedger({ partner_id: header.partner!.id, side: partnerSide }),
-    enabled: !!header.partner && !!cfg?.partner,
+    enabled: !!header.partner && !!cfg?.partner && debtVisible,
     staleTime: 15_000,
   });
 
@@ -803,6 +826,15 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     );
   }
   if (!cfg || !type || (docId !== null && !loaded)) return <Skeleton active paragraph={{ rows: 10 }} />;
+  if (isNew && da && !da.canWrite)
+    return (
+      <Result
+        status="403"
+        title={`Bạn không có quyền lập ${cfg.name.toLowerCase()}`}
+        subTitle="Hãy nhờ người quản trị cấp quyền (Hệ thống › Phân quyền)."
+        extra={<Button onClick={() => navigate(cfg.listPath)}>Về danh sách</Button>}
+      />
+    );
 
   const whOptions = whItems.map((w) => ({
     value: w.id,
@@ -822,15 +854,15 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   // Màn hẹp (máy tính bảng): nút ít dùng gom vào "Thêm ▾"
   const moreItems = [
     ...(loaded?.status === 'posted' && editing && !deletedBy ? [{ key: 'cancel', icon: <RollbackOutlined />, label: 'Hủy sửa' }] : []),
-    ...(loaded?.status === 'posted' && !editing && (type === 'sale' || type === 'purchase')
+    ...(loaded?.status === 'posted' && !editing && (type === 'sale' || type === 'purchase') && canPay
       ? [{ key: 'pay', icon: <DollarOutlined />, label: type === 'sale' ? 'Thu tiền phiếu này' : 'Chi tiền phiếu này' }]
       : []),
-    ...(loaded?.status === 'posted' && !editing ? [{ key: 'unpost', icon: <RollbackOutlined />, label: 'Bỏ ghi sổ' }] : []),
+    ...(canStartEdit ? [{ key: 'unpost', icon: <RollbackOutlined />, label: 'Bỏ ghi sổ', disabled: lockedDoc }] : []),
     { key: 'print', icon: <PrinterOutlined />, label: 'In (Ctrl+P)', disabled: !loaded },
     { key: 'xlsx', icon: <FileExcelOutlined />, label: 'Xuất Excel (.xlsx)', disabled: !loaded },
     { key: 'docx', icon: <FileWordOutlined />, label: 'Xuất Word (.docx)', disabled: !loaded },
     { key: 'history', icon: <HistoryOutlined />, label: 'Lịch sử sửa phiếu', disabled: !loaded },
-    ...(loaded?.status === 'draft' ? [{ key: 'delete', icon: <DeleteOutlined />, label: 'Xóa phiếu tạm', danger: true }] : []),
+    ...(loaded?.status === 'draft' && da?.canWrite ? [{ key: 'delete', icon: <DeleteOutlined />, label: 'Xóa phiếu tạm', danger: true }] : []),
   ];
   const onMore = (key: string) => {
     if (key === 'cancel') cancelEdit();
@@ -880,15 +912,19 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
             </Button>
           )}
           {canPost && (
-            <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => void post()} loading={saving}>
-              Ghi sổ <Kbd>F9</Kbd>
-            </Button>
+            <Tooltip title={dateLocked && lockDate ? `${lockedText(lockDate)} — phiếu trong kỳ khóa không ghi sổ được (đổi ngày ra ngoài kỳ khóa)` : undefined}>
+              <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => void post()} loading={saving} disabled={dateLocked}>
+                Ghi sổ <Kbd>F9</Kbd>
+              </Button>
+            </Tooltip>
           )}
           {loaded?.status === 'posted' && editing && !deletedBy && !narrow && <Button onClick={cancelEdit}>Hủy sửa</Button>}
-          {loaded?.status === 'posted' && !editing && (
-            <Button type="primary" icon={<EditOutlined />} onClick={() => setEditing(true)}>
-              Sửa phiếu <Kbd>F8</Kbd>
-            </Button>
+          {canStartEdit && (
+            <Tooltip title={lockedDoc && lockDate ? lockTooltip(lockDate) : undefined}>
+              <Button type="primary" icon={<EditOutlined />} onClick={() => setEditing(true)} disabled={lockedDoc}>
+                Sửa phiếu <Kbd>F8</Kbd>
+              </Button>
+            </Tooltip>
           )}
           {narrow ? (
             <Dropdown
@@ -904,14 +940,18 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
             <>
               {loaded?.status === 'posted' && !editing && (
                 <>
-                  {(type === 'sale' || type === 'purchase') && (
+                  {(type === 'sale' || type === 'purchase') && canPay && (
                     <Button icon={<DollarOutlined />} onClick={() => onMore('pay')}>
                       {type === 'sale' ? 'Thu tiền phiếu này' : 'Chi tiền phiếu này'}
                     </Button>
                   )}
-                  <Button icon={<RollbackOutlined />} onClick={unpost}>
-                    Bỏ ghi sổ
-                  </Button>
+                  {canStartEdit && (
+                    <Tooltip title={lockedDoc && lockDate ? lockTooltip(lockDate) : undefined}>
+                      <Button icon={<RollbackOutlined />} onClick={unpost} disabled={lockedDoc}>
+                        Bỏ ghi sổ
+                      </Button>
+                    </Tooltip>
+                  )}
                 </>
               )}
               <Dropdown.Button
@@ -944,6 +984,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       </div>
       {loaded && (
         <div className="doc-meta">
+          {lockedDoc && lockDate && <LockBadge lockDate={lockDate} />}
           Lập: {loaded.created_by_name} {formatDateTime(loaded.created_at)} · Sửa lần cuối: <b>{loaded.updated_by_name}</b>{' '}
           {formatDateTime(loaded.updated_at)}
           {loaded.posted_at && (
@@ -1104,7 +1145,8 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
           <>
             {field(
               'Ngày hạch toán',
-              headerErrors.doc_date,
+              // khóa sổ: chọn ngày trong kỳ đã khóa ⇒ cảnh báo ngay
+              headerErrors.doc_date ?? lockDateWarning(header.doc_date, lockDate) ?? undefined,
               <DateInput id="doc_date" value={header.doc_date} onChange={(d) => setHeader((h) => ({ ...h, doc_date: d }))} />,
               'hf-date', 'doc_date',
             )}
@@ -1250,9 +1292,15 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
             ) : null
           )}
           {dirty && <div className="muted">Có thay đổi chưa lưu</div>}
-          {readOnly && loaded?.status === 'posted' && (
+          {readOnly && loaded?.status === 'posted' && canStartEdit && !lockedDoc && (
             <div className="muted">
               Phiếu đã ghi sổ: tồn kho và công nợ đã tính. Bấm <b>Sửa phiếu</b> (F8) nếu cần sửa — máy sẽ kiểm tra lại tồn kho.
+            </div>
+          )}
+          {readOnly && loaded && !mayEdit && !lockedDoc && (
+            <div className="muted">
+              Bạn chỉ được xem phiếu này
+              {loaded.status === 'posted' && da?.canWrite ? ' (không có quyền sửa phiếu đã ghi sổ).' : ` (không có quyền lập ${cfg.name.toLowerCase()}).`}
             </div>
           )}
         </div>

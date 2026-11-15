@@ -175,6 +175,8 @@ type Input struct {
 	Lines         []LineInput `json:"lines"`
 	Version       int         `json:"version"`
 	ConfirmLoss   bool        `json:"confirm_loss"`
+	// ConfirmCredit (bản mở rộng C8): xác nhận vượt hạn mức công nợ.
+	ConfirmCredit bool `json:"confirm_credit"`
 	// lenient (chỉ dùng cho kiểm tra phiếu đang gõ): bỏ qua dòng chưa chọn mặt hàng / chưa có SL hàng hóa.
 	lenient bool
 }

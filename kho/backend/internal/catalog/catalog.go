@@ -272,6 +272,8 @@ type Product struct {
 	PurchasePrice decimal.Decimal `json:"purchase_price"`
 	IsService     bool            `json:"is_service"`
 	Active        bool            `json:"active"`
+	// MinStock (bản mở rộng C5): chỉ có trong JSON khi tính năng min_stock bật (lớp HTTP gán; nil ⇒ không có trường).
+	MinStock *decimal.NullDecimal `json:"min_stock,omitempty"`
 }
 
 // ProductInput là dữ liệu tạo/sửa mặt hàng.
@@ -284,9 +286,11 @@ type ProductInput struct {
 	PurchasePrice *decimal.Decimal `json:"purchase_price"`
 	IsService     bool             `json:"is_service"`
 	Active        *bool            `json:"active"`
+	// MinStock (C5): chỉ áp dụng khi gửi lên (lớp HTTP bỏ qua khi tính năng tắt); null ⇒ bỏ tồn tối thiểu.
+	MinStock util.OptDec `json:"min_stock"`
 }
 
-const productSelect = `SELECT p.id,p.code,p.name,p.unit,p.group_id,g.code,g.name,p.sale_price,p.purchase_price,p.is_service,p.active
+const productSelect = `SELECT p.id,p.code,p.name,p.unit,p.group_id,g.code,g.name,p.sale_price,p.purchase_price,p.is_service,p.active,p.min_stock
 	FROM products p LEFT JOIN product_groups g ON g.id=p.group_id`
 
 // ProductFilter là bộ lọc danh sách mặt hàng.
@@ -390,6 +394,14 @@ func (s *Service) SaveProduct(ctx context.Context, userID, id int64, in ProductI
 	if strings.EqualFold(in.Code, "DICHVU") {
 		return nil, apperr.ValidationField("code", "Mã DICHVU dành cho mã Dịch vụ (DV)")
 	}
+	if in.MinStock.Val != nil && in.MinStock.Val.IsNegative() {
+		return nil, apperr.ValidationField("min_stock", "Tồn tối thiểu không được âm")
+	}
+	var minStock *decimal.Decimal
+	if in.MinStock.Val != nil {
+		v := in.MinStock.Val.Round(3)
+		minStock = &v
+	}
 	var out *Product
 	err := db.InTx(ctx, s.Pool, func(tx pgx.Tx) error {
 		if in.GroupID != nil {
@@ -401,9 +413,9 @@ func (s *Service) SaveProduct(ctx context.Context, userID, id int64, in ProductI
 		var before *Product
 		var newID int64
 		if id == 0 {
-			err := tx.QueryRow(ctx, `INSERT INTO products(code,name,unit,group_id,sale_price,purchase_price,is_service,active,search_key)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-				in.Code, in.Name, in.Unit, in.GroupID, sale, purchase, in.IsService, activeOr(in.Active), key).Scan(&newID)
+			err := tx.QueryRow(ctx, `INSERT INTO products(code,name,unit,group_id,sale_price,purchase_price,is_service,active,search_key,min_stock)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+				in.Code, in.Name, in.Unit, in.GroupID, sale, purchase, in.IsService, activeOr(in.Active), key, minStock).Scan(&newID)
 			if err != nil {
 				return dupErr(err)
 			}
@@ -425,8 +437,9 @@ func (s *Service) SaveProduct(ctx context.Context, userID, id int64, in ProductI
 					return apperr.ValidationField("is_service", "Mặt hàng đã phát sinh chứng từ, không đổi được tính chất hàng hóa/dịch vụ")
 				}
 			}
-			_, err = tx.Exec(ctx, `UPDATE products SET code=$2,name=$3,unit=$4,group_id=$5,sale_price=$6,purchase_price=$7,is_service=$8,active=$9,search_key=$10 WHERE id=$1`,
-				id, in.Code, in.Name, in.Unit, in.GroupID, sale, purchase, in.IsService, activeOr(in.Active), key)
+			_, err = tx.Exec(ctx, `UPDATE products SET code=$2,name=$3,unit=$4,group_id=$5,sale_price=$6,purchase_price=$7,is_service=$8,active=$9,search_key=$10,
+				min_stock = CASE WHEN $11 THEN $12::numeric ELSE min_stock END WHERE id=$1`,
+				id, in.Code, in.Name, in.Unit, in.GroupID, sale, purchase, in.IsService, activeOr(in.Active), key, in.MinStock.Set, minStock)
 			if err != nil {
 				return dupErr(err)
 			}
@@ -474,6 +487,9 @@ type Partner struct {
 	OpeningReceivable decimal.Decimal `json:"opening_receivable"`
 	OpeningPayable    decimal.Decimal `json:"opening_payable"`
 	Active            bool            `json:"active"`
+	// CreditLimit, PaymentDays (bản mở rộng C8): chỉ có trong JSON khi tính năng credit_limit bật.
+	CreditLimit *decimal.NullDecimal `json:"credit_limit,omitempty"`
+	PaymentDays *util.NullInt        `json:"payment_days,omitempty"`
 }
 
 // PartnerInput là dữ liệu tạo/sửa đối tác.
@@ -488,9 +504,12 @@ type PartnerInput struct {
 	OpeningReceivable *decimal.Decimal `json:"opening_receivable"`
 	OpeningPayable    *decimal.Decimal `json:"opening_payable"`
 	Active            *bool            `json:"active"`
+	// C8: chỉ áp dụng khi gửi lên (lớp HTTP bỏ qua khi tính năng tắt); null ⇒ không hạn mức / không hạn thanh toán.
+	CreditLimit util.OptDec `json:"credit_limit"`
+	PaymentDays util.OptInt `json:"payment_days"`
 }
 
-const partnerCols = `id,code,name,address,phone,tax_code,is_customer,is_supplier,opening_receivable,opening_payable,active`
+const partnerCols = `id,code,name,address,phone,tax_code,is_customer,is_supplier,opening_receivable,opening_payable,active,credit_limit,payment_days`
 
 // PartnerFilter là bộ lọc đối tác.
 type PartnerFilter struct {
@@ -555,6 +574,12 @@ func (s *Service) SavePartner(ctx context.Context, userID, id int64, in PartnerI
 	if !in.IsCustomer && !in.IsSupplier {
 		return nil, apperr.ValidationField("is_customer", "Đối tác phải là Khách hàng hoặc Nhà cung cấp (hoặc cả hai)")
 	}
+	if in.CreditLimit.Val != nil && in.CreditLimit.Val.IsNegative() {
+		return nil, apperr.ValidationField("credit_limit", "Hạn mức công nợ không được âm")
+	}
+	if in.PaymentDays.Val != nil && (*in.PaymentDays.Val < 0 || *in.PaymentDays.Val > 3650) {
+		return nil, apperr.ValidationField("payment_days", "Số ngày được nợ phải từ 0 đến 3650")
+	}
 	or, op := decimal.Zero, decimal.Zero
 	if in.OpeningReceivable != nil {
 		or = *in.OpeningReceivable
@@ -579,10 +604,10 @@ func (s *Service) SavePartner(ctx context.Context, userID, id int64, in PartnerI
 			return err
 		}
 		if id == 0 {
-			err := tx.QueryRow(ctx, `INSERT INTO partners(code,name,address,phone,tax_code,is_customer,is_supplier,opening_receivable,opening_payable,active,search_key)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+			err := tx.QueryRow(ctx, `INSERT INTO partners(code,name,address,phone,tax_code,is_customer,is_supplier,opening_receivable,opening_payable,active,search_key,credit_limit,payment_days)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
 				in.Code, in.Name, strings.TrimSpace(in.Address), strings.TrimSpace(in.Phone), strings.TrimSpace(in.TaxCode),
-				in.IsCustomer, in.IsSupplier, or, op, activeOr(in.Active), key).Scan(&newID)
+				in.IsCustomer, in.IsSupplier, or, op, activeOr(in.Active), key, in.CreditLimit.Val, in.PaymentDays.Val).Scan(&newID)
 			if err != nil {
 				return dupErr(err)
 			}
@@ -593,9 +618,12 @@ func (s *Service) SavePartner(ctx context.Context, userID, id int64, in PartnerI
 			}
 			before = b
 			_, err = tx.Exec(ctx, `UPDATE partners SET code=$2,name=$3,address=$4,phone=$5,tax_code=$6,is_customer=$7,is_supplier=$8,
-				opening_receivable=$9,opening_payable=$10,active=$11,search_key=$12 WHERE id=$1`,
+				opening_receivable=$9,opening_payable=$10,active=$11,search_key=$12,
+				credit_limit = CASE WHEN $13 THEN $14::numeric ELSE credit_limit END,
+				payment_days = CASE WHEN $15 THEN $16::int ELSE payment_days END WHERE id=$1`,
 				id, in.Code, in.Name, strings.TrimSpace(in.Address), strings.TrimSpace(in.Phone), strings.TrimSpace(in.TaxCode),
-				in.IsCustomer, in.IsSupplier, or, op, activeOr(in.Active), key)
+				in.IsCustomer, in.IsSupplier, or, op, activeOr(in.Active), key,
+				in.CreditLimit.Set, in.CreditLimit.Val, in.PaymentDays.Set, in.PaymentDays.Val)
 			if err != nil {
 				return dupErr(err)
 			}

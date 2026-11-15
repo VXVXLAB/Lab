@@ -1,3 +1,5 @@
+import { useAccess, useCan } from '../../auth/AuthContext';
+import { allowed, type Need } from '../../auth/guard';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -55,6 +57,7 @@ export function SalesHistoryPage() {
 /** Hàng cần đặt (REQ-046): tổng hợp phiếu bán tạm − tồn hiện tại. Lập phiếu nhập tạm điền sẵn SL thiếu. */
 export function ReorderPage() {
   const navigate = useNavigate();
+  const canPurchase = useCan('purchase.write');
   const drawers = useDrawers();
   const [onlyShort, setOnlyShort] = useState(true);
   const q = useQuery({ queryKey: qk.report('draft-demand', { onlyShort }), queryFn: () => reportApi.draftDemand(onlyShort) });
@@ -99,11 +102,14 @@ export function ReorderPage() {
         title="Hàng cần đặt"
         sub="Tổng hợp từ các phiếu bán tạm đang treo: số lượng khách đặt so với tồn hiện có. Bấm ▸ để xem phiếu nào, khách nào."
         actions={
+          // bản mở rộng: chỉ ai lập được phiếu nhập mua mới thấy nút
+          canPurchase && (
           <Tooltip title="Mở phiếu nhập mua mới, điền sẵn các mã đã chọn với số lượng thiếu; chọn nhà cung cấp rồi lưu">
             <Button type="primary" icon={<ShoppingOutlined />} disabled={!selected.some((id) => shortIds.includes(id))} onClick={createPurchase}>
               Lập phiếu nhập cho {selected.filter((id) => shortIds.includes(id)).length} mã thiếu
             </Button>
           </Tooltip>
+          )
         }
       />
       <div className="toolbar">
@@ -159,11 +165,14 @@ interface Card {
   to?: string;
   icon: React.ReactNode;
   soon?: boolean;
+  /** Bản mở rộng: quyền cần có để thấy thẻ này (giống màn đích) */
+  need?: Need;
 }
 
 /** Trang Báo cáo: thẻ lối vào bằng lời thường. */
 export function ReportsHub() {
   const navigate = useNavigate();
+  const access = useAccess();
   const groups: { title: string; cards: Card[] }[] = [
     {
       title: 'Kho',
@@ -177,25 +186,28 @@ export function ReportsHub() {
     {
       title: 'Bán hàng – Mua hàng',
       cards: [
-        { title: 'Chi tiết bán hàng', desc: 'Từng dòng hàng đã bán: khách, mã, số lượng, giá, thành tiền.', to: paths.salesReport, icon: <ShoppingCartOutlined /> },
-        { title: 'Lịch sử bán theo mặt hàng', desc: 'Một mã đã bán cho ai, lúc nào, giá bao nhiêu.', to: paths.salesHistory, icon: <HistoryOutlined /> },
-        { title: 'Chi tiết mua hàng', desc: 'Từng dòng hàng đã nhập mua: nhà cung cấp, giá mua.', to: paths.purchasesReport, icon: <ShopOutlined /> },
+        { title: 'Chi tiết bán hàng', desc: 'Từng dòng hàng đã bán: khách, mã, số lượng, giá, thành tiền.', to: paths.salesReport, icon: <ShoppingCartOutlined />, need: { all: ['report.view'] } },
+        { title: 'Lịch sử bán theo mặt hàng', desc: 'Một mã đã bán cho ai, lúc nào, giá bao nhiêu.', to: paths.salesHistory, icon: <HistoryOutlined />, need: { all: ['report.view'] } },
+        { title: 'Chi tiết mua hàng', desc: 'Từng dòng hàng đã nhập mua: nhà cung cấp, giá mua.', to: paths.purchasesReport, icon: <ShopOutlined />, need: { all: ['report.view', 'cost.view'] } },
       ],
     },
     {
       title: 'Công nợ – Quỹ',
       cards: [
-        { title: 'Công nợ phải thu', desc: 'Khách hàng còn nợ: đầu kỳ, phát sinh, đã thu, cuối kỳ; bấm để xem sổ chi tiết từng khách.', to: paths.receivable, icon: <SolutionOutlined /> },
-        { title: 'Công nợ phải trả', desc: 'Còn nợ nhà cung cấp: đầu kỳ, phát sinh, đã trả, cuối kỳ.', to: paths.payable, icon: <SolutionOutlined /> },
-        { title: 'Sổ quỹ / sổ ngân hàng', desc: 'Thu, chi, tồn quỹ tiền mặt và tài khoản ngân hàng theo ngày.', to: paths.cashBook, icon: <WalletOutlined /> },
-        { title: 'Phiếu thu / phiếu chi', desc: 'Danh sách phiếu thu, phiếu chi (tiền mặt và ngân hàng), tổng tiền theo bộ lọc.', to: paths.receipts, icon: <WalletOutlined /> },
+        { title: 'Công nợ phải thu', desc: 'Khách hàng còn nợ: đầu kỳ, phát sinh, đã thu, cuối kỳ; bấm để xem sổ chi tiết từng khách.', to: paths.receivable, icon: <SolutionOutlined />, need: { all: ['debt.view'] } },
+        { title: 'Công nợ phải trả', desc: 'Còn nợ nhà cung cấp: đầu kỳ, phát sinh, đã trả, cuối kỳ.', to: paths.payable, icon: <SolutionOutlined />, need: { all: ['debt.view', 'cost.view'] } },
+        { title: 'Sổ quỹ / sổ ngân hàng', desc: 'Thu, chi, tồn quỹ tiền mặt và tài khoản ngân hàng theo ngày.', to: paths.cashBook, icon: <WalletOutlined />, need: { all: ['cash.view'] } },
+        { title: 'Phiếu thu / phiếu chi', desc: 'Danh sách phiếu thu, phiếu chi (tiền mặt và ngân hàng), tổng tiền theo bộ lọc.', to: paths.receipts, icon: <WalletOutlined />, need: { any: ['cash.view', 'cash.write'] } },
       ],
     },
   ];
   return (
     <div className="hub">
       <PageHeader title="Báo cáo" sub="Mọi báo cáo bấm được vào từng dòng để xem chứng từ ngay tại chỗ, và xuất được Excel." />
-      {groups.map((g) => (
+      {groups
+        .map((g) => ({ ...g, cards: g.cards.filter((c) => allowed(c.need, access, access.isAdmin)) }))
+        .filter((g) => g.cards.length > 0)
+        .map((g) => (
         <section key={g.title}>
           <h3>
             <BarChartOutlined /> {g.title}

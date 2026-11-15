@@ -63,6 +63,10 @@ func TestMR_C1_KhongLoGiaVon(t *testing.T) {
 	draftPur := e.Admin.CreateDoc(DocBody("purchase", "2026-01-08", sup.ID, e.WH["KHO1"], Line(p, "1", nil)))
 	tr := e.Admin.Posted(map[string]any{"doc_type": "transfer", "doc_date": "2026-01-09", "warehouse_id": e.WH["KHO1"], "to_warehouse_id": e.WH["KHO2"], "lines": []any{Line(p, "1", nil)}})
 	v := e.Admin.Voucher(map[string]any{"voucher_type": "receipt", "account_id": e.TM, "partner_id": cus, "lines": []any{map[string]any{"amount": 1000, "document_id": sale.ID}}})
+	// Dữ liệu của các tính năng M2: giá riêng, tồn tối thiểu, hạn mức.
+	e.Admin.OK("PUT", fmt.Sprintf("/api/partners/%d/prices", cus), map[string]any{"items": []any{map[string]any{"product_id": p, "price": 995000}}}, nil)
+	e.Admin.OK("PUT", fmt.Sprintf("/api/products/%d", p), map[string]any{"code": "P", "name": "Hàng giá vốn", "unit": "Cái", "sale_price": 990000, "purchase_price": 777123, "group_id": g, "min_stock": 100}, nil)
+	e.Admin.OK("PUT", fmt.Sprintf("/api/partners/%d", cus), map[string]any{"code": "KH", "name": "Khách", "is_customer": true, "credit_limit": 50000000, "payment_days": 30}, nil)
 	bh := mrUser(e, "banhang1", "banhang")
 	kt := mrUser(e, "ketoan1", "ketoan")
 	docsIDs := []int64{op.ID, pur.ID, pr.ID, sale.ID, draftPur.ID, tr.ID}
@@ -105,6 +109,11 @@ func TestMR_C1_KhongLoGiaVon(t *testing.T) {
 		"/api/reports/cash-book":        {"/api/reports/cash-book", "/api/reports/cash-book?format=xlsx"},
 		"/api/reports/draft-demand":     {"/api/reports/draft-demand", "/api/reports/draft-demand?format=xlsx"},
 		"/api/dashboard":                {"/api/dashboard"},
+		"/api/reports/low-stock":        {"/api/reports/low-stock", "/api/reports/low-stock?format=xlsx"},
+		"/api/reports/debt-aging":       {"/api/reports/debt-aging", "/api/reports/debt-aging?format=xlsx", "/api/reports/debt-aging?format=docx"},
+		"/api/reports/profit":           {"/api/reports/profit?from=2026-01-01&to=2026-12-31", "/api/reports/profit?from=2026-01-01&to=2026-12-31&group_by=product&format=xlsx", "/api/reports/profit?from=2026-01-01&to=2026-12-31&group_by=customer"},
+		"/api/partners/{id}/prices":     {fmt.Sprintf("/api/partners/%d/prices", cus)},
+		"/api/products/sale-price":      {fmt.Sprintf("/api/products/sale-price?partner_id=%d&ids=%d", cus, p)},
 		"/api/documents/{id}":           nil,
 		"/api/documents/{id}/check":     nil,
 		"/api/documents/{id}/export":    nil,

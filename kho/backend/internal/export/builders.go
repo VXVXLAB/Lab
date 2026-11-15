@@ -382,8 +382,19 @@ func CashBookTable(r *reports.CashBook) Table {
 // DemandTable: hàng cần đặt từ phiếu bán tạm.
 func DemandTable(rows []reports.DemandRow) Table {
 	t := Table{SheetName: "Hang can dat", Title: "HÀNG CẦN ĐẶT (TỪ PHIẾU BÁN TẠM)", Subtitle: "Tồn tính đến thời điểm xuất báo cáo"}
+	// Bản mở rộng C5: có tồn tối thiểu ⇒ thêm cột Tồn tối thiểu, Cần đặt thêm.
+	withMin := false
+	for _, r := range rows {
+		if r.MinStock != nil {
+			withMin = true
+		}
+	}
 	t.Columns = []Column{{"STT", 6, Text}, {"Mã hàng", 16, Text}, {"Tên hàng", 36, Text}, {"ĐVT", 8, Text}, {"SL trên phiếu tạm", 14, Qty},
-		{"Tồn tổng", 12, Qty}, {"Thiếu", 12, Qty}, {"Phiếu tạm", 40, Text}}
+		{"Tồn tổng", 12, Qty}, {"Thiếu", 12, Qty}}
+	if withMin {
+		t.Columns = append(t.Columns, Column{"Tồn tối thiểu", 12, Qty}, Column{"Cần đặt thêm", 12, Qty})
+	}
+	t.Columns = append(t.Columns, Column{"Phiếu tạm", 40, Text})
 	for i, r := range rows {
 		var ds []string
 		for _, d := range r.Drafts {
@@ -393,7 +404,90 @@ func DemandTable(rows []reports.DemandRow) Table {
 		if r.Shortage.GreaterThan(decimal.Zero) {
 			sh = r.Shortage
 		}
-		t.Rows = append(t.Rows, []any{i + 1, r.ProductCode, r.ProductName, r.ProductUnit, r.QtyInDrafts, r.TotalStock, sh, strings.Join(ds, "; ")})
+		row := []any{i + 1, r.ProductCode, r.ProductName, r.ProductUnit, r.QtyInDrafts, r.TotalStock, sh}
+		if withMin {
+			row = append(row, r.MinStock, r.OrderMore)
+		}
+		t.Rows = append(t.Rows, append(row, strings.Join(ds, "; ")))
 	}
+	return t
+}
+
+// LowStockTable: hàng dưới tồn tối thiểu (bản mở rộng C5).
+func LowStockTable(rows []reports.LowStockRow) Table {
+	t := Table{SheetName: "Duoi ton toi thieu", Title: "HÀNG DƯỚI TỒN TỐI THIỂU", Subtitle: "Tồn tổng 4 kho tính đến thời điểm xuất báo cáo"}
+	t.Columns = []Column{{"STT", 6, Text}, {"Mã hàng", 16, Text}, {"Tên hàng", 36, Text}, {"ĐVT", 8, Text}, {"Nhóm VTHH", 16, Text},
+		{"Tồn tối thiểu", 12, Qty}, {"Tồn tổng", 12, Qty}, {"Cần bổ sung", 12, Qty}}
+	for i, r := range rows {
+		t.Rows = append(t.Rows, []any{i + 1, r.Code, r.Name, r.Unit, str(r.GroupName), r.MinStock, r.TotalStock, r.Need})
+	}
+	return t
+}
+
+// AgingTable: tuổi nợ phải thu (bản mở rộng C8).
+func AgingTable(r *reports.Aging) Table {
+	t := Table{SheetName: "Tuoi no", Title: "TUỔI NỢ PHẢI THU KHÁCH HÀNG", Subtitle: "Đến hết ngày " + r.AsOf.VN()}
+	t.Columns = []Column{{"STT", 6, Text}, {"Mã KH", 12, Text}, {"Khách hàng", 34, Text}, {"Số ngày được nợ", 10, Text},
+		{"Trong hạn", 14, Money}, {"Quá hạn 1–30 ngày", 14, Money}, {"31–60 ngày", 14, Money}, {"61–90 ngày", 14, Money}, {"Trên 90 ngày", 14, Money},
+		{"Nợ đầu kỳ (không ngày)", 14, Money}, {"Trả trước", 14, Money}, {"Tổng nợ", 15, Money}}
+	for i, x := range r.Items {
+		pd := ""
+		if x.PaymentDays != nil {
+			pd = fmt.Sprint(*x.PaymentDays)
+		}
+		t.Rows = append(t.Rows, []any{i + 1, x.PartnerCode, x.PartnerName, pd, x.InTerm, x.D1to30, x.D31to60, x.D61to90, x.Over90, x.Opening, x.Prepaid, x.Total})
+	}
+	tt := r.Totals
+	t.Footer = [][]any{{"Cộng", nil, nil, nil, tt.InTerm, tt.D1to30, tt.D31to60, tt.D61to90, tt.Over90, tt.Opening, tt.Prepaid, tt.Total}}
+	t.SumColumns = []int{4, 5, 6, 7, 8, 9, 10, 11}
+	return t
+}
+
+// ProfitTable: lãi gộp (bản mở rộng C7).
+func ProfitTable(r *reports.Profit) Table {
+	by := map[string]string{"document": "theo phiếu", "product": "theo mặt hàng", "customer": "theo khách hàng"}[r.GroupBy]
+	t := Table{SheetName: "Lai gop", Title: "BÁO CÁO LÃI GỘP " + strings.ToUpper(by), Subtitle: rangeText(&r.From, &r.To)}
+	var lead []Column
+	switch r.GroupBy {
+	case "document":
+		lead = []Column{{"Ngày", 12, Date}, {"Số phiếu", 12, Text}, {"Khách hàng", 30, Text}}
+	case "product":
+		lead = []Column{{"Mã hàng", 14, Text}, {"Tên hàng", 32, Text}, {"ĐVT", 8, Text}, {"SL bán", 11, Qty}}
+	default:
+		lead = []Column{{"Mã KH", 12, Text}, {"Khách hàng", 34, Text}}
+	}
+	t.Columns = append([]Column{{"STT", 6, Text}}, lead...)
+	t.Columns = append(t.Columns, Column{"Doanh thu", 15, Money}, Column{"Giá vốn", 15, Money}, Column{"Lãi gộp", 15, Money},
+		Column{"Tỷ lệ lãi (%)", 10, Money}, Column{"Ước tính", 8, Text})
+	pct := func(m *decimal.Decimal) any {
+		if m == nil {
+			return nil
+		}
+		return *m
+	}
+	est := func(b bool) string {
+		if b {
+			return "x"
+		}
+		return ""
+	}
+	for i, x := range r.Items {
+		row := []any{i + 1}
+		switch r.GroupBy {
+		case "document":
+			row = append(row, x.DocDate, str(x.DocNo), str(x.PartnerName))
+		case "product":
+			row = append(row, str(x.ProductCode), str(x.ProductName), str(x.Unit), x.Qty)
+		default:
+			row = append(row, str(x.PartnerCode), str(x.PartnerName))
+		}
+		t.Rows = append(t.Rows, append(row, x.Revenue, x.Cost, x.Profit, pct(x.Margin), est(x.Estimated)))
+	}
+	n := len(t.Columns)
+	foot := make([]any, n)
+	foot[0] = "Cộng"
+	foot[n-5], foot[n-4], foot[n-3], foot[n-2] = r.Totals.Revenue, r.Totals.Cost, r.Totals.Profit, pct(r.Totals.Margin)
+	t.Footer = [][]any{foot}
+	t.SumColumns = []int{n - 5, n - 4, n - 3}
 	return t
 }

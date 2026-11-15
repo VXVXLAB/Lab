@@ -1,3 +1,4 @@
+import { useCan } from '../../auth/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Skeleton, Space, Table } from 'antd';
@@ -17,6 +18,7 @@ import { DEBT_EFFECT } from './voucherText';
 export function VoucherView({ id }: { id: number }) {
   const navigate = useNavigate();
   const drawers = useDrawers();
+  const canCash = useCan('cash.write');
   const q = useQuery({ queryKey: qk.voucher(id), queryFn: () => vouchersApi.get(id) });
   if (q.isLoading) return <Skeleton active paragraph={{ rows: 6 }} />;
   if (q.isError || !q.data) return <Alert type="error" showIcon message={errorMessage(q.error)} />;
@@ -43,7 +45,7 @@ export function VoucherView({ id }: { id: number }) {
               navigate(paths.voucher(v.id));
             }}
           >
-            Mở phiếu để sửa
+            {canCash ? 'Mở phiếu để sửa' : 'Mở phiếu'}
           </Button>
         </Space>
       </div>

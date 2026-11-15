@@ -1,3 +1,4 @@
+import { useCan } from '../../auth/AuthContext';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useActiveRow } from '../../lib/useActiveRow';
 import { useNavigate } from 'react-router-dom';
@@ -67,7 +68,8 @@ export function VoucherListPage({ type }: { type: VoucherType }) {
     searchRef.current?.focus();
     searchRef.current?.select();
   };
-  useHotkeys({ F2: () => navigate(paths.newVoucher(type)), F3: focusSearch, '/': focusSearch });
+  const canCash = useCan('cash.write');
+  useHotkeys({ F2: () => canCash && navigate(paths.newVoucher(type)), F3: focusSearch, '/': focusSearch });
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (isTypingTarget(e.target) || !rows.length) return;
@@ -104,9 +106,11 @@ export function VoucherListPage({ type }: { type: VoucherType }) {
         count={query.data ? total : undefined}
         sub={isReceipt ? 'Thu tiền mặt (PT) và thu qua ngân hàng — giấy báo có (BC). Một phiếu ghi được nhiều dòng tiền.' : 'Chi tiền mặt (PC) và chi qua ngân hàng — giấy báo nợ (BN). Một phiếu ghi được nhiều dòng tiền.'}
         actions={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate(paths.newVoucher(type))}>
-            Lập {isReceipt ? 'phiếu thu' : 'phiếu chi'} <Kbd>F2</Kbd>
-          </Button>
+          canCash ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate(paths.newVoucher(type))}>
+              Lập {isReceipt ? 'phiếu thu' : 'phiếu chi'} <Kbd>F2</Kbd>
+            </Button>
+          ) : undefined
         }
       />
       <div className="toolbar">
@@ -166,12 +170,17 @@ export function VoucherListPage({ type }: { type: VoucherType }) {
             ),
           }}
           locale={{
-            emptyText: query.isError ? errorMessage(query.error) : `Chưa có ${isReceipt ? 'phiếu thu' : 'phiếu chi'} nào khớp điều kiện lọc. Bấm F2 để lập phiếu mới.`,
+            emptyText: query.isError ? errorMessage(query.error) : `Chưa có ${isReceipt ? 'phiếu thu' : 'phiếu chi'} nào khớp điều kiện lọc.${canCash ? ' Bấm F2 để lập phiếu mới.' : ''}`,
           }}
         />
       </div>
       <div className="hint-bar">
-        <Kbd>F2</Kbd> lập phiếu · <Kbd>F3</Kbd> tìm · <Kbd>↑</Kbd>
+        {canCash && (
+          <>
+            <Kbd>F2</Kbd> lập phiếu ·{' '}
+          </>
+        )}
+        <Kbd>F3</Kbd> tìm · <Kbd>↑</Kbd>
         <Kbd>↓</Kbd> chọn · <Kbd>Enter</Kbd> hoặc nhấp đúp để mở
       </div>
     </div>

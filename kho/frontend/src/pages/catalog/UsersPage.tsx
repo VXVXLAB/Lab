@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { usersApi } from '../../api/catalog';
 import { qk } from '../../api/queryKeys';
 import type { User, UserBody } from '../../api/types';
-import { useCurrentUser } from '../../auth/AuthContext';
+import { useCurrentUser, useFeature } from '../../auth/AuthContext';
 import { CatalogList, StatusText } from '../../components/CatalogList';
 import { matchText } from '../../lib/text';
 import { EntityFormModal } from '../../components/EntityFormModal';
@@ -18,6 +18,7 @@ export function UsersPage() {
   const me = useCurrentUser();
   const { message } = App.useApp();
   const rec = ed.record;
+  const permsOn = useFeature('permissions');
 
   return (
     <>
@@ -45,7 +46,7 @@ export function UsersPage() {
             title: 'Vai trò',
             dataIndex: 'role',
             width: 120,
-            render: (r: User['role']) => <Tag color={r === 'admin' ? 'red' : 'blue'}>{ROLE_LABEL[r]}</Tag>,
+            render: (r: User['role']) => <Tag color={r === 'admin' ? 'red' : r === 'ketoan' ? 'blue' : 'geekblue'}>{ROLE_LABEL[r] ?? r}</Tag>,
           },
           {
             title: 'Trạng thái',
@@ -113,6 +114,16 @@ export function UsersPage() {
           <Radio.Group
             options={[
               { label: 'Kế toán', value: 'ketoan' },
+              // bản mở rộng, tính năng "Phân quyền" bật: thêm ba vai trò (quyền từng vai trò ở Hệ thống › Phân quyền)
+              ...(permsOn
+                ? [
+                    { label: 'Bán hàng', value: 'banhang' },
+                    { label: 'Mua hàng', value: 'muahang' },
+                    { label: 'Thủ kho', value: 'thukho' },
+                  ]
+                : rec && rec.role !== 'admin' && rec.role !== 'ketoan'
+                  ? [{ label: `${ROLE_LABEL[rec.role]} (Phân quyền đang tắt — coi như Kế toán)`, value: rec.role, disabled: true }]
+                  : []),
               { label: 'Quản trị (quản lý người dùng)', value: 'admin' },
             ]}
           />

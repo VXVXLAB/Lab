@@ -70,7 +70,7 @@ Bổ sung cho `SPEC.md`. `SPEC.md` (R1–R10) vẫn là gốc; chỗ nào tài l
 
 ### C5 `min_stock` — tồn tối thiểu từng mã
 `products.min_stock NUMERIC NULL` (tính trên tổng 4 kho). Bật: "hàng sắp hết" = tồn ≤ min_stock của mã (mã không đặt ⇒
-không cảnh báo); báo cáo Hàng cần đặt thêm cột Tồn tối thiểu, Cần đặt thêm = max(0, min − tồn + thiếu của phiếu tạm).
+không cảnh báo); báo cáo Hàng cần đặt thêm cột Tồn tối thiểu, Cần đặt thêm = max(0, min − (tồn − số lượng trên phiếu tạm)), tức đặt đủ để sau khi giao hết phiếu tạm vẫn còn mức tối thiểu.
 Tắt: ngưỡng chung ≤ 5 như cũ.
 
 ### C6 `price_list` — giá theo khách
@@ -85,6 +85,7 @@ Tắt: ngưỡng chung ≤ 5 như cũ.
   nhiêu); gửi lại với `confirm_credit=true` thì ghi sổ; ghi vào audit ai đã xác nhận. Không chặn cứng.
 - Báo cáo Tuổi nợ phải thu đến ngày D: mỗi khách các cột Trong hạn / 1–30 / 31–60 / 61–90 / >90 ngày quá hạn. Cách tính:
   các khoản giảm nợ trừ vào khoản tăng nợ cũ nhất trước (FIFO); hạn = ngày phát sinh + payment_days (không đặt ⇒ 0).
+  Thêm cột Đầu kỳ (nợ đầu kỳ không có ngày, là khoản cũ nhất) và cột Trả trước (khách trả dư, số âm).
   Tổng các cột = số nợ trong sổ công nợ cùng ngày (bắt buộc khớp, có test).
 
 ### C7 `profit_report` — lãi gộp

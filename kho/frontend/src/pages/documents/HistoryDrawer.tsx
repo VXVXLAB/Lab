@@ -57,7 +57,7 @@ export function describeChanges(before: DocumentFull | null, after: DocumentFull
     bs.slice(as.length).forEach((b) => out.push(`Thêm dòng ${lineLabel(b)} (${lineValue(b)})`));
   }
   for (const [k, bs] of gb) if (!ga.has(k)) bs.forEach((b) => out.push(`Thêm dòng ${lineLabel(b)} (${lineValue(b)})`));
-  if (before.total_amount !== after.total_amount)
+  if (before.total_amount !== after.total_amount && before.total_amount !== null && after.total_amount !== null)
     out.push(`Tổng tiền: ${formatMoney(before.total_amount)} → ${formatMoney(after.total_amount)}`);
   return out;
 }
@@ -73,7 +73,7 @@ function Entry({ e }: { e: DocumentHistoryEntry }) {
       </div>
       {e.action === 'created' && e.after && (
         <div className="muted">
-          {e.after.lines.length} dòng · tổng {formatMoney(e.after.total_amount)}
+          {e.after.lines.length} dòng{e.after.total_amount !== null && <> · tổng {formatMoney(e.after.total_amount)}</>}
         </div>
       )}
       {e.action === 'posted' && e.after?.doc_no && <div className="muted">Số chính thức {e.after.doc_no}</div>}

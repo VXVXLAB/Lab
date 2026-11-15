@@ -40,9 +40,13 @@ var FeatureKeys = []string{FPermissions, FPeriodLock, FImportExcel, FMinStock, F
 
 // AvailableFeatures là các tính năng ĐÃ làm xong (bật/tắt được). Đợt sau chỉ cần thêm khóa vào đây.
 var AvailableFeatures = map[string]bool{
-	FPermissions: true,
-	FPeriodLock:  true,
-	FImportExcel: true,
+	FPermissions:  true,
+	FPeriodLock:   true,
+	FImportExcel:  true,
+	FMinStock:     true,
+	FPriceList:    true,
+	FCreditLimit:  true,
+	FProfitReport: true,
 }
 
 // FeatureDescriptions là mô tả ngắn tiếng Việt của tính năng.

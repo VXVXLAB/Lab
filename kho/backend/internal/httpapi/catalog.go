@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"kho/internal/apperr"
 	"kho/internal/catalog"
@@ -154,6 +155,10 @@ func (s *Server) catalogRoutes(r chi.Router) {
 	r.Get("/products/lookup", s.lookupProduct)
 	r.Get("/products/price-info", s.priceInfoBatch)
 	r.Get("/partners/{id}/balance", s.partnerBalance)
+	r.Get("/partners/{id}/prices", s.listPartnerPrices)
+	r.Put("/partners/{id}/prices", s.savePartnerPrices)
+	r.Delete("/partners/{id}/prices/{product_id}", s.deletePartnerPrice)
+	r.Get("/products/sale-price", s.salePrice)
 	r.Get("/products/{id}/price-info", s.priceInfo)
 	mount(s, r, "/products", crud[*catalog.Product, catalog.ProductInput]{
 		entity: "product",
@@ -167,14 +172,34 @@ func (s *Server) catalogRoutes(r chi.Router) {
 			}
 			f := catalog.ProductFilter{ListParams: p, GroupID: g, IsService: sv}
 			if ws != nil && *ws {
-				return cat.ListProductsWithStock(r.Context(), f, wh)
+				pg, err := cat.ListProductsWithStock(r.Context(), f, wh)
+				for i := range pg.Items {
+					productOut(r, &pg.Items[i].Product)
+				}
+				return pg, err
 			}
-			return cat.ListProducts(r.Context(), f)
+			pg, err := cat.ListProducts(r.Context(), f)
+			for i := range pg.Items {
+				productOut(r, &pg.Items[i])
+			}
+			return pg, err
 		},
 		get: func(r *http.Request, id int64) (*catalog.Product, error) {
-			return cat.GetProduct(r.Context(), s.Pool, id)
+			p, err := cat.GetProduct(r.Context(), s.Pool, id)
+			if err == nil {
+				productOut(r, p)
+			}
+			return p, err
 		},
-		save: func(r *http.Request, uid, id int64, in catalog.ProductInput) (*catalog.Product, error) {
+		save: func(r *http.Request, uid, id int64, in catalog.ProductInput) (out *catalog.Product, err error) {
+			if !extOf(r).st.On(ext.FMinStock) {
+				in.MinStock = util.OptDec{} // tính năng tắt ⇒ không đổi tồn tối thiểu
+			}
+			defer func() {
+				if out != nil {
+					productOut(r, out)
+				}
+			}()
 			// Không có quyền xem giá mua ⇒ không được đặt/đổi giá mua (giữ giá cũ khi sửa, 0 khi tạo).
 			if !can(r, ext.PCostView) {
 				in.PurchasePrice = nil
@@ -192,12 +217,28 @@ func (s *Server) catalogRoutes(r chi.Router) {
 	mount(s, r, "/partners", crud[*catalog.Partner, catalog.PartnerInput]{
 		entity: "partner",
 		list: func(r *http.Request, p util.ListParams) (any, error) {
-			return cat.ListPartners(r.Context(), catalog.PartnerFilter{ListParams: p, Type: r.URL.Query().Get("type")})
+			pg, err := cat.ListPartners(r.Context(), catalog.PartnerFilter{ListParams: p, Type: r.URL.Query().Get("type")})
+			for i := range pg.Items {
+				partnerOut(r, &pg.Items[i])
+			}
+			return pg, err
 		},
 		get: func(r *http.Request, id int64) (*catalog.Partner, error) {
-			return cat.GetPartner(r.Context(), s.Pool, id)
+			p, err := cat.GetPartner(r.Context(), s.Pool, id)
+			if err == nil {
+				partnerOut(r, p)
+			}
+			return p, err
 		},
-		save: func(r *http.Request, uid, id int64, in catalog.PartnerInput) (*catalog.Partner, error) {
+		save: func(r *http.Request, uid, id int64, in catalog.PartnerInput) (out *catalog.Partner, err error) {
+			if !extOf(r).st.On(ext.FCreditLimit) {
+				in.CreditLimit, in.PaymentDays = util.OptDec{}, util.OptInt{} // tính năng tắt ⇒ không đổi
+			}
+			defer func() {
+				if out != nil {
+					partnerOut(r, out)
+				}
+			}()
 			// Không có quyền xem công nợ (hoặc giá mua với nợ phải trả) ⇒ giữ nguyên số dư đầu kỳ đang có.
 			hideRec, hidePay := !can(r, ext.PDebtView), !can(r, ext.PDebtView) || !can(r, ext.PCostView)
 			if hideRec || hidePay {
@@ -256,6 +297,9 @@ func (s *Server) lookupProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := s.Catalog.LookupProduct(r.Context(), s.Pool, r.URL.Query().Get("code"))
+	if err == nil {
+		productOut(r, p)
+	}
 	if opt != nil && *opt {
 		if err != nil {
 			if ae := apperr.From(err); ae.Code == apperr.CodeNotFound {
@@ -406,4 +450,27 @@ func (s *Server) partnerBalance(w http.ResponseWriter, r *http.Request) {
 		"date": date, "exclude_document_id": xd, "exclude_voucher_id": xv,
 		"receivable": rec, "payable": pay,
 	})
+}
+
+// productOut: trường min_stock chỉ xuất hiện khi tính năng min_stock bật (tắt ⇒ JSON y như bản chuẩn).
+func productOut(r *http.Request, p *catalog.Product) {
+	if !extOf(r).st.On(ext.FMinStock) {
+		p.MinStock = nil
+	} else if p.MinStock == nil {
+		p.MinStock = &decimal.NullDecimal{}
+	}
+}
+
+// partnerOut: credit_limit, payment_days chỉ xuất hiện khi tính năng credit_limit bật.
+func partnerOut(r *http.Request, p *catalog.Partner) {
+	if !extOf(r).st.On(ext.FCreditLimit) {
+		p.CreditLimit, p.PaymentDays = nil, nil
+		return
+	}
+	if p.CreditLimit == nil {
+		p.CreditLimit = &decimal.NullDecimal{}
+	}
+	if p.PaymentDays == nil {
+		p.PaymentDays = &util.NullInt{}
+	}
 }

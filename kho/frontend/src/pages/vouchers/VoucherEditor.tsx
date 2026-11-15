@@ -1,3 +1,6 @@
+import { useAccess } from '../../auth/AuthContext';
+import { isLocked, LockBadge, lockDateWarning, lockTooltip, useLockDate } from '../../lib/periodLock';
+import { ReadOnlyWrap } from '../../components/ReadOnlyWrap';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { filterByLabel } from '../../lib/text';
 import { createPortal } from 'react-dom';
@@ -145,6 +148,13 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   const skipGuard = useRef(false);
 
   const effSide: DebtSide = sideChoice ?? defaultDebtSide(type, partner);
+  // Bản mở rộng: quyền lập phiếu thu chi, xem công nợ; khóa sổ
+  const access = useAccess();
+  const canCash = access.isAdmin || access.can('cash.write');
+  const lockDate = useLockDate();
+  const lockedV = !!loaded && isLocked(loaded.voucher_date, lockDate);
+  const readOnly = !canCash || lockedV;
+  const debtVisible = (side: DebtSide) => access.isAdmin || (access.can('debt.view') && (side === 'receivable' || access.can('cost.view')));
   const sent = lines.filter((l) => !isBlank(l));
   const total = sent.reduce((s, l) => s + (l.amount ?? 0), 0);
   const body = (): VoucherBody => ({
@@ -332,7 +342,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   const debtQ = useQuery({
     queryKey: qk.report('debt-ledger', { partner_id: partner?.id, side: effSide, to: dateStr }),
     queryFn: () => reportApi.debtLedger({ partner_id: partner!.id, side: effSide, to: dateStr }),
-    enabled: !!partner && !!dateStr,
+    enabled: !!partner && !!dateStr && debtVisible(effSide),
   });
   const debt = useMemo(() => {
     if (!debtQ.data || !partner) return null;
@@ -506,6 +516,9 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
         message.error(e.message, 4);
       } else if (e instanceof ApiError && e.status === 401) {
         // đã về màn đăng nhập; phiếu đang gõ được giữ lại để khôi phục (F-04)
+      } else if (e instanceof ApiError && e.code === 'PERIOD_LOCKED') {
+        setHeadErr({ voucher_date: e.message });
+        modal.error({ title: 'Kỳ này đã khóa sổ', content: `${e.message} Đổi ngày phiếu ra ngoài kỳ đã khóa, hoặc nhờ quản trị lùi ngày khóa sổ.` });
       } else modal.error({ title: 'Không lưu được', content: errorMessage(e) });
       return null;
     } finally {
@@ -549,15 +562,28 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   };
 
   useHotkeys({
-    'Ctrl+s': () => void save(),
+    'Ctrl+s': () => {
+      if (!readOnly) void save();
+    },
     'Ctrl+p': () => !needSaved('in') && setPrintOpen(true),
-    F2: () => navigate(paths.newVoucher(type)),
+    F2: () => {
+      if (canCash) navigate(paths.newVoucher(type));
+    },
   });
   useMenuHighlight(type === 'receipt' ? paths.receipts : paths.payments, loaded ? `${loaded.voucher_type_name} ${loaded.voucher_no}` : type === 'receipt' ? 'Phiếu thu (mới)' : 'Phiếu chi (mới)');
 
   if (voucherId !== null && vq.isError && !loaded)
     return <Result status="404" title="Không tìm thấy phiếu" subTitle={errorMessage(vq.error)} extra={<Button onClick={() => navigate(-1)}>Quay lại</Button>} />;
   if (voucherId !== null && !loaded) return <Skeleton active paragraph={{ rows: 8 }} />;
+  if (voucherId === null && !canCash)
+    return (
+      <Result
+        status="403"
+        title={`Bạn không có quyền lập ${type === 'receipt' ? 'phiếu thu' : 'phiếu chi'}`}
+        subTitle="Hãy nhờ người quản trị cấp quyền (Hệ thống › Phân quyền)."
+        extra={<Button onClick={() => navigate(type === 'receipt' ? paths.receipts : paths.payments)}>Về danh sách</Button>}
+      />
+    );
 
   const acc = accItems.find((a) => a.id === accountId);
   const prefix = acc ? VOUCHER_PREFIX[type][acc.kind] : null;
@@ -578,9 +604,13 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
         </div>
         <span className={`doc-status ${loaded ? (dirty ? 'st-editing' : 'st-posted') : 'st-new'}`}>{loaded ? (dirty ? 'ĐANG SỬA — chưa lưu' : 'ĐÃ LƯU — có hiệu lực') : 'PHIẾU MỚI — chưa lưu'}</span>
         <div className="doc-actions">
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void save()} disabled={!!deletedBy}>
-            Lưu <Kbd>Ctrl+S</Kbd>
-          </Button>
+          {canCash && (
+            <Tooltip title={lockedV && lockDate ? lockTooltip(lockDate) : undefined}>
+              <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void save()} disabled={!!deletedBy || lockedV}>
+                Lưu <Kbd>Ctrl+S</Kbd>
+              </Button>
+            </Tooltip>
+          )}
           <Dropdown.Button
             disabled={!loaded}
             onClick={() => !needSaved('in') && setPrintOpen(true)}
@@ -600,15 +630,16 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
               <Button icon={<HistoryOutlined />} onClick={() => setHistOpen(true)} aria-label="Lịch sử sửa phiếu" />
             </Tooltip>
           )}
-          {loaded && (
-            <Tooltip title="Xóa phiếu">
-              <Button danger icon={<DeleteOutlined />} onClick={remove} aria-label="Xóa phiếu" />
+          {loaded && canCash && (
+            <Tooltip title={lockedV && lockDate ? lockTooltip(lockDate) : 'Xóa phiếu'}>
+              <Button danger icon={<DeleteOutlined />} onClick={remove} aria-label="Xóa phiếu" disabled={lockedV} />
             </Tooltip>
           )}
         </div>
       </div>
       {loaded && (
         <div className="doc-meta">
+          {lockedV && lockDate && <LockBadge lockDate={lockDate} />}
           Lập: {loaded.created_by_name} {formatDateTime(loaded.created_at)} · Sửa lần cuối: <b>{loaded.updated_by_name}</b> {formatDateTime(loaded.updated_at)}
         </div>
       )}
@@ -692,6 +723,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
         />
       )}
 
+      <ReadOnlyWrap readOnly={readOnly}>
       <div
         className="voucher-header"
         data-enter-scope
@@ -741,6 +773,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
           <div className={`hf hf-date${headErr.voucher_date ? ' hf-err' : ''}`}>
             <label htmlFor="voucher_date">Ngày</label>
             <DateInput id="voucher_date" value={date} onChange={setDate} />
+            {!readOnly && lockDateWarning(date, lockDate) && <div className="hf-msg lock-warn">{lockDateWarning(date, lockDate)}</div>}
           </div>
           <div className={`hf hf-partner${headErr.partner_id ? ' hf-err' : ''}`}>
             <label htmlFor="partner">{receipt ? 'Người nộp / khách hàng' : 'Người nhận / nhà cung cấp'} (bỏ trống nếu thu/chi khác)</label>
@@ -893,6 +926,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
           </div>
         </div>
       </div>
+      </ReadOnlyWrap>
 
       <div className="doc-footer">
         <div className="doc-check">

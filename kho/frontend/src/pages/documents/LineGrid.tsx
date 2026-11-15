@@ -15,7 +15,8 @@ export interface LineHint {
   /** Thiếu hàng (phiếu xuất): số thiếu và tồn hiện có */
   shortage?: { short: number; available: number; required?: number; date?: string; docDate?: string; message?: string };
   /** Bán lỗ: giá vốn so sánh */
-  loss?: number;
+  /** Bán lỗ: giá mua (null: có lỗ nhưng giá mua bị che với người không có quyền xem giá mua) */
+  loss?: number | null;
   /** Lỗi máy chủ trả về cho dòng này */
   error?: string;
 }
@@ -352,8 +353,8 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                       />
                     )}
                     {h.loss !== undefined ? (
-                      <div className="line-note neg">Bán lỗ: giá mua {formatMoney(h.loss)}</div>
-                    ) : cfg.lossCheck && pi && pi.cost_source !== 'none' && !readOnly ? (
+                      <div className="line-note neg">{h.loss === null ? 'Bán lỗ (thấp hơn giá mua)' : `Bán lỗ: giá mua ${formatMoney(h.loss)}`}</div>
+                    ) : cfg.lossCheck && pi && pi.cost_source !== 'none' && pi.cost_price !== null && !readOnly ? (
                       <div className="line-note muted">giá mua {formatMoney(pi.cost_price)}</div>
                     ) : null}
                   </td>

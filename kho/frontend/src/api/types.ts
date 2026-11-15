@@ -136,7 +136,7 @@ export interface Product {
   group_code: string | null;
   group_name: string | null;
   sale_price: number;
-  purchase_price: number;
+  purchase_price: number | null; // null: bị che (không có quyền "Xem giá mua")
   is_service: boolean;
   active: boolean;
 }
@@ -153,7 +153,8 @@ export interface ProductBody {
   unit: string;
   group_id: number | null;
   sale_price: number;
-  purchase_price: number;
+  /** null khi người sửa không được xem giá mua: máy chủ giữ giá cũ */
+  purchase_price: number | null;
   is_service: boolean;
   active: boolean;
 }
@@ -180,8 +181,8 @@ export interface PriceInfo {
   is_service: boolean;
   date: string;
   sale_price: number;
-  purchase_price: number;
-  cost_price: number;
+  purchase_price: number | null; // null: bị che (không có quyền "Xem giá mua")
+  cost_price: number | null; // null: bị che (không có quyền "Xem giá mua")
   cost_source: CostSource;
   total_stock: number;
   stock_by_warehouse: StockByWarehouse[];
@@ -196,8 +197,9 @@ export interface Partner {
   tax_code: string;
   is_customer: boolean;
   is_supplier: boolean;
-  opening_receivable: number;
-  opening_payable: number;
+  /** null: bị che (bản mở rộng, không có quyền xem công nợ); gửi null khi lưu ⇒ máy chủ giữ số cũ */
+  opening_receivable: number | null;
+  opening_payable: number | null;
   active: boolean;
 }
 export type PartnerBody = Omit<Partner, 'id'>;
@@ -214,7 +216,8 @@ export interface CashAccount {
   code: string;
   name: string;
   kind: CashAccountKind;
-  opening_balance: number;
+  /** null: bị che (không có quyền xem sổ quỹ); gửi null ⇒ máy chủ giữ số cũ */
+  opening_balance: number | null;
   active: boolean;
 }
 export type CashAccountBody = Omit<CashAccount, 'id'>;
@@ -230,7 +233,7 @@ export interface LossWarning {
   product_code: string;
   product_name: string;
   unit_price: number;
-  cost_price: number;
+  cost_price: number | null; // null: bị che (không có quyền "Xem giá mua")
   cost_source: CostSource;
   message: string;
 }
@@ -298,15 +301,16 @@ export interface Dashboard {
   today: string;
   draft_count: number;
   draft_sale_count: number;
-  revenue_today: number;
-  revenue_month: number;
-  total_receivable: number;
-  total_payable: number;
+  /** null: bị che (bản mở rộng, người dùng thiếu quyền xem) */
+  revenue_today: number | null;
+  revenue_month: number | null;
+  total_receivable: number | null;
+  total_payable: number | null;
   low_stock_count: number;
   out_of_stock_count: number;
   low_stock_threshold: number;
-  cash_balance: number;
-  bank_balance: number;
+  cash_balance: number | null;
+  bank_balance: number | null;
   draft_shortage_count: number;
   recent_drafts: RecentDraft[];
   generated_at: string;

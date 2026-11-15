@@ -1,3 +1,5 @@
+import { useAccess } from '../../auth/AuthContext';
+import { docAccess } from '../../auth/guard';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Skeleton, Space, Table } from 'antd';
@@ -9,18 +11,19 @@ import type { DocumentLine } from '../../api/types';
 import { download } from '../../lib/download';
 import { formatDate, formatDateTime, formatMoney, formatQty } from '../../lib/format';
 import { paths } from '../../paths';
-import { DOC_TYPES } from '../documents/docTypes';
 import { useDrawers } from './drawers';
 
 /** Xem nhanh một chứng từ (chỉ đọc) trong ngăn kéo; có nút mở trình soạn để sửa. */
 export function DocumentView({ id }: { id: number }) {
   const navigate = useNavigate();
   const drawers = useDrawers();
+  const access = useAccess();
   const q = useQuery({ queryKey: qk.document(id), queryFn: () => documentsApi.get(id) });
   if (q.isLoading) return <Skeleton active paragraph={{ rows: 8 }} />;
   if (q.isError || !q.data) return <Alert type="error" showIcon message={errorMessage(q.error)} />;
   const d = q.data;
-  const cfg = DOC_TYPES[d.doc_type];
+  const da = docAccess(d.doc_type, access, access.isAdmin);
+  const cfg = da.cfg;
   const posted = d.status === 'posted';
   return (
     <div className="doc-view">
@@ -44,7 +47,7 @@ export function DocumentView({ id }: { id: number }) {
               navigate(paths.document(d.id));
             }}
           >
-            Mở phiếu để sửa
+            {da.canWrite ? 'Mở phiếu để sửa' : 'Mở phiếu'}
           </Button>
         </Space>
       </div>

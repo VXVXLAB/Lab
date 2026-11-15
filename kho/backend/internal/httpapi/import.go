@@ -22,13 +22,18 @@ func importAccess(r *http.Request) (string, error) {
 	}
 	kind := chi.URLParam(r, "kind")
 	if !importx.ValidKind(kind) {
-		return "", apperr.NotFound("loại nhập " + kind + " (products, partners, opening_stock, opening_debt)")
+		return "", apperr.NotFound("loại nhập " + kind + " (products, partners, opening_stock, opening_debt, partner_prices)")
 	}
 	switch kind {
 	case importx.KindProducts, importx.KindPartners:
 		return kind, need(r, ext.PCatalogWrite)
 	case importx.KindOpeningStock:
 		return kind, need(r, ext.PStockWrite)
+	case importx.KindPartnerPrice:
+		if err := featureOn(r, ext.FPriceList); err != nil {
+			return kind, err
+		}
+		return kind, need(r, ext.PSaleWrite)
 	default:
 		if !userOf(r).IsAdmin() {
 			return kind, apperr.Forbidden("Chỉ quản trị mới có quyền nhập công nợ đầu kỳ")
@@ -43,7 +48,7 @@ func (s *Server) importTemplate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	data, err := importx.Template(r.Context(), s.Pool, kind)
+	data, err := importx.Template(r.Context(), s.Pool, kind, extOf(r).st.AllFlags())
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -93,7 +98,7 @@ func (s *Server) importRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	opt := importx.Options{DryRun: dry != nil && *dry, UserID: userOf(r).ID, CanCost: can(r, ext.PCostView)}
+	opt := importx.Options{DryRun: dry != nil && *dry, UserID: userOf(r).ID, CanCost: can(r, ext.PCostView), Features: extOf(r).st.AllFlags()}
 	if date != nil {
 		opt.Date = *date
 	} else {
@@ -110,6 +115,8 @@ func (s *Server) importRun(w http.ResponseWriter, r *http.Request) {
 			s.publishCatalog(r, "product", 0, "imported")
 		case importx.KindPartners, importx.KindOpeningDebt:
 			s.publishCatalog(r, "partner", 0, "imported")
+		case importx.KindPartnerPrice:
+			s.publishCatalog(r, "partner_prices", 0, "imported")
 		case importx.KindOpeningStock:
 			for _, d := range res.Documents {
 				s.publish(r, events.Event{Type: "document.changed", ID: d.ID, DocType: "opening", Status: "draft", Action: "created"})

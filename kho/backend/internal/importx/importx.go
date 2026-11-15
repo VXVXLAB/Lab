@@ -27,6 +27,7 @@ const (
 	KindPartners     = "partners"
 	KindOpeningStock = "opening_stock"
 	KindOpeningDebt  = "opening_debt"
+	KindPartnerPrice = "partner_prices" // bản mở rộng C6 (cần tính năng price_list)
 )
 
 // Giới hạn.
@@ -42,6 +43,7 @@ var KindNames = map[string]string{
 	KindPartners:     "Danh mục đối tác",
 	KindOpeningStock: "Tồn đầu kỳ",
 	KindOpeningDebt:  "Công nợ đầu kỳ",
+	KindPartnerPrice: "Bảng giá riêng theo khách",
 }
 
 // column mô tả một cột: khóa, tiêu đề trong file mẫu, các tiêu đề được nhận diện (đã bỏ dấu), bắt buộc phải có cột.
@@ -57,7 +59,7 @@ type column struct {
 var columns = map[string][]column{
 	KindProducts: {
 		{"code", "Mã hàng", []string{"ma hang", "ma", "ma vthh", "ma san pham"}, true, false, "Bắt buộc. Trùng mã đã có ⇒ cập nhật mặt hàng đó."},
-		{"name", "Tên hàng", []string{"ten hang", "ten", "ten vthh", "ten san pham"}, true, false, "Bắt buộc với mã mới; để trống khi cập nhật ⇒ giữ tên cũ."},
+		{"name", "Tên hàng", []string{"ten hang", "ten", "ten vthh", "ten san pham"}, false, false, "Bắt buộc với mã mới; để trống (hoặc bỏ cột) khi cập nhật ⇒ giữ tên cũ."},
 		{"unit", "ĐVT", []string{"dvt", "don vi tinh", "don vi"}, false, false, "Bắt buộc với mã mới."},
 		{"group", "Nhóm VTHH", []string{"nhom vthh", "nhom", "nhom hang"}, false, false, "Mã hoặc tên nhóm; chưa có ⇒ tự tạo nhóm mới."},
 		{"sale_price", "Giá bán", []string{"gia ban"}, false, true, "Số, ví dụ 1.500.000 hoặc 1500000."},
@@ -65,7 +67,7 @@ var columns = map[string][]column{
 	},
 	KindPartners: {
 		{"code", "Mã đối tác", []string{"ma doi tac", "ma", "ma kh", "ma ncc", "ma khach hang"}, true, false, "Bắt buộc. Trùng mã đã có ⇒ cập nhật."},
-		{"name", "Tên đối tác", []string{"ten doi tac", "ten", "ten khach hang", "ten kh"}, true, false, "Bắt buộc với mã mới."},
+		{"name", "Tên đối tác", []string{"ten doi tac", "ten", "ten khach hang", "ten kh"}, false, false, "Bắt buộc với mã mới; để trống (hoặc bỏ cột) khi cập nhật ⇒ giữ tên cũ."},
 		{"is_customer", "Là KH", []string{"la kh", "la khach hang", "khach hang", "kh"}, false, false, "x / có / 1 = là khách hàng."},
 		{"is_supplier", "Là NCC", []string{"la ncc", "la nha cung cap", "nha cung cap", "ncc"}, false, false, "x / có / 1 = là nhà cung cấp. Đối tác mới phải là KH hoặc NCC."},
 		{"address", "Địa chỉ", []string{"dia chi"}, false, false, ""},
@@ -78,11 +80,37 @@ var columns = map[string][]column{
 		{"qty", "Số lượng", []string{"so luong", "sl"}, true, true, "Bắt buộc, > 0. Ví dụ 2,5 hoặc 1.500."},
 		{"price", "Đơn giá", []string{"don gia", "gia", "gia von"}, false, true, "Để trống ⇒ giá mua mặc định của mặt hàng."},
 	},
+	KindPartnerPrice: {
+		{"partner", "Mã khách hàng", []string{"ma khach hang", "ma kh", "ma doi tac"}, true, false, "Bắt buộc, phải là khách hàng có trong danh mục."},
+		{"product", "Mã hàng", []string{"ma hang", "ma vthh"}, true, false, "Bắt buộc, phải có trong danh mục."},
+		{"price", "Giá", []string{"gia", "gia ban", "gia rieng", "don gia"}, true, true, "Bắt buộc, ≥ 0. Giá bán riêng cho khách này."},
+		{"note", "Ghi chú", []string{"ghi chu"}, false, false, ""},
+	},
 	KindOpeningDebt: {
 		{"partner", "Mã đối tác", []string{"ma doi tac", "ma", "ma kh", "ma ncc"}, true, false, "Bắt buộc, phải có trong danh mục."},
 		{"receivable", "Phải thu", []string{"phai thu", "no phai thu", "cong no phai thu"}, false, true, "Nợ phải thu đầu kỳ (thay số cũ). Ô trống ⇒ 0. Không có cột ⇒ giữ số cũ."},
 		{"payable", "Phải trả", []string{"phai tra", "no phai tra", "cong no phai tra"}, false, true, "Nợ phải trả đầu kỳ (thay số cũ). Ô trống ⇒ 0. Không có cột ⇒ giữ số cũ."},
 	},
+}
+
+// extraColumns: cột chỉ có khi tính năng mở rộng tương ứng bật.
+var extraColumns = map[string][]struct {
+	feature string
+	col     column
+}{
+	KindProducts: {{"min_stock", column{"min_stock", "Tồn tối thiểu", []string{"ton toi thieu", "ton kho toi thieu", "min stock"}, false, true,
+		"Tồn tối thiểu trên tổng các kho (bản mở rộng). Để trống khi cập nhật ⇒ giữ nguyên."}}},
+}
+
+// colsFor trả các cột của loại nhập theo tính năng đang bật.
+func colsFor(kind string, feats map[string]bool) []column {
+	cols := append([]column{}, columns[kind]...)
+	for _, x := range extraColumns[kind] {
+		if feats[x.feature] {
+			cols = append(cols, x.col)
+		}
+	}
+	return cols
 }
 
 // ValidKind kiểm tra loại nhập.
@@ -122,6 +150,8 @@ type Options struct {
 	Date    util.Date // ngày phiếu tồn đầu kỳ
 	UserID  int64
 	CanCost bool // có quyền xem giá mua (không ⇒ bỏ qua cột Giá mua)
+	// Features: tính năng mở rộng đang bật (cột Tồn tối thiểu chỉ có khi min_stock bật).
+	Features map[string]bool
 }
 
 // ---------- Đọc file ----------
@@ -151,7 +181,7 @@ func normHeader(s string) string {
 	return strings.Join(strings.Fields(f), " ")
 }
 
-func readSheet(data []byte, kind string) (*sheetData, error) {
+func readSheet(data []byte, kind string, feats map[string]bool) (*sheetData, error) {
 	f, err := excelize.OpenReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, apperr.ValidationField("file", "Không đọc được file Excel (.xlsx). Vui lòng lưu lại dưới dạng Excel Workbook rồi thử lại.")
@@ -172,7 +202,7 @@ func readSheet(data []byte, kind string) (*sheetData, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	cols := columns[kind]
+	cols := colsFor(kind, feats)
 	sd := &sheetData{}
 	rowNum := 0
 	for rows.Next() {
@@ -263,6 +293,11 @@ func colByKey(kind, key string) column {
 			return c
 		}
 	}
+	for _, x := range extraColumns[kind] {
+		if x.col.key == key {
+			return x.col
+		}
+	}
 	return column{}
 }
 
@@ -307,7 +342,7 @@ func parseBool(s string) (bool, error) {
 
 // Run thử hoặc nhập file.
 func Run(ctx context.Context, pool *pgxpool.Pool, kind string, data []byte, opt Options) (*Result, error) {
-	sd, err := readSheet(data, kind)
+	sd, err := readSheet(data, kind, opt.Features)
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +359,8 @@ func Run(ctx context.Context, pool *pgxpool.Pool, kind string, data []byte, opt 
 			apply, err = planOpeningStock(ctx, tx, sd, res, opt)
 		case KindOpeningDebt:
 			apply, err = planOpeningDebt(ctx, tx, sd, res, opt)
+		case KindPartnerPrice:
+			apply, err = planPartnerPrices(ctx, tx, sd, res, opt)
 		}
 		if err != nil {
 			return err
@@ -430,16 +467,17 @@ func planProducts(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result, op
 		name, unit string
 		groupID    *int64
 		sale, buy  decimal.Decimal
+		minStock   *decimal.Decimal
 	}
 	existing := map[string]*prod{}
-	rows, err := tx.Query(ctx, `SELECT id, upper(code), is_service, name, unit, group_id, sale_price, purchase_price FROM products`)
+	rows, err := tx.Query(ctx, `SELECT id, upper(code), is_service, name, unit, group_id, sale_price, purchase_price, min_stock FROM products`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var p prod
 		var code string
-		if err := rows.Scan(&p.id, &code, &p.isService, &p.name, &p.unit, &p.groupID, &p.sale, &p.buy); err != nil {
+		if err := rows.Scan(&p.id, &code, &p.isService, &p.name, &p.unit, &p.groupID, &p.sale, &p.buy, &p.minStock); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -468,7 +506,7 @@ func planProducts(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result, op
 	type plan struct {
 		code, name, unit, group string
 		existing                *prod
-		sale, buy               *decimal.Decimal
+		sale, buy, minStock     *decimal.Decimal
 	}
 	var plans []plan
 	newGroups := map[string]string{} // khóa → tên
@@ -517,6 +555,15 @@ func planProducts(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result, op
 		if opt.CanCost {
 			if p.buy, good = num(res, k, r, "purchase_price", false); !good {
 				ok = false
+			}
+		}
+		if sd.present["min_stock"] {
+			if p.minStock, good = num(res, k, r, "min_stock", false); !good {
+				ok = false
+			}
+			if p.minStock != nil {
+				v := p.minStock.Round(3)
+				p.minStock = &v
 			}
 		}
 		// Giá lưu 2 chữ số thập phân (như nhập trên phiếu).
@@ -577,8 +624,8 @@ func planProducts(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result, op
 				if p.buy != nil {
 					buy = *p.buy
 				}
-				if err := b.add(`INSERT INTO products(code,name,unit,group_id,sale_price,purchase_price,search_key) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-					p.code, p.name, p.unit, gid, sale, buy, util.Fold(p.code+" "+p.name)); err != nil {
+				if err := b.add(`INSERT INTO products(code,name,unit,group_id,sale_price,purchase_price,search_key,min_stock) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+					p.code, p.name, p.unit, gid, sale, buy, util.Fold(p.code+" "+p.name), p.minStock); err != nil {
 					return err
 				}
 				continue
@@ -600,8 +647,12 @@ func planProducts(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result, op
 			if gid != nil {
 				g = gid
 			}
-			if err := b.add(`UPDATE products SET name=$2, unit=$3, group_id=$4, sale_price=$5, purchase_price=$6, search_key=$7 WHERE id=$1`,
-				e.id, name, unit, g, sale, buy, util.Fold(p.code+" "+name)); err != nil {
+			ms := e.minStock
+			if p.minStock != nil {
+				ms = p.minStock
+			}
+			if err := b.add(`UPDATE products SET name=$2, unit=$3, group_id=$4, sale_price=$5, purchase_price=$6, search_key=$7, min_stock=$8 WHERE id=$1`,
+				e.id, name, unit, g, sale, buy, util.Fold(p.code+" "+name), ms); err != nil {
 				return err
 			}
 		}
@@ -980,8 +1031,8 @@ func planOpeningDebt(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result,
 
 // Template tạo file mẫu: trang dữ liệu (tiêu đề + 2 dòng ví dụ) và trang "Hướng dẫn".
 // Ví dụ tồn đầu / công nợ đầu dùng mã có thật trong danh mục để tải về rồi nhập thử ngay được.
-func Template(ctx context.Context, q db.Q, kind string) ([]byte, error) {
-	cols := columns[kind]
+func Template(ctx context.Context, q db.Q, kind string, feats map[string]bool) ([]byte, error) {
+	cols := colsFor(kind, feats)
 	examples, err := exampleRows(ctx, q, kind)
 	if err != nil {
 		return nil, err
@@ -1041,6 +1092,8 @@ func Template(ctx context.Context, q db.Q, kind string) ([]byte, error) {
 		lines = append(lines, "", "Kết quả: mỗi kho một phiếu Tồn đầu kỳ TẠM (tối đa 1000 dòng mỗi phiếu), ngày do bạn chọn khi nhập. Xem lại rồi bấm Ghi sổ.")
 	case KindOpeningDebt:
 		lines = append(lines, "", "Nhập lại file thì số đầu kỳ của các đối tác có trong file được THAY bằng số mới (không cộng dồn).")
+	case KindPartnerPrice:
+		lines = append(lines, "", "Mã khách + mã hàng đã có giá riêng ⇒ cập nhật giá; chưa có ⇒ thêm. Không xóa giá riêng nào.")
 	default:
 		lines = append(lines, "", "Mã đã có ⇒ cập nhật theo các ô có dữ liệu (ô trống giữ nguyên). Không xóa mã nào.")
 	}
@@ -1061,7 +1114,7 @@ func exampleRows(ctx context.Context, q db.Q, kind string) ([]map[string]string,
 	switch kind {
 	case KindProducts:
 		return []map[string]string{
-			{"code": "VD-QH32", "name": "Que hàn mẫu 3.2mm (ví dụ)", "unit": "Hộp", "group": "Que hàn", "sale_price": "185000", "purchase_price": "150000"},
+			{"code": "VD-QH32", "name": "Que hàn mẫu 3.2mm (ví dụ)", "unit": "Hộp", "group": "Que hàn", "sale_price": "185000", "purchase_price": "150000", "min_stock": "20"},
 			{"code": "VD-BEC08", "name": "Béc hàn mẫu 0.8mm (ví dụ)", "unit": "Cái", "group": "Béc hàn", "sale_price": "13000", "purchase_price": "8500"},
 		}, nil
 	case KindPartners:
@@ -1090,6 +1143,27 @@ func exampleRows(ctx context.Context, q db.Q, kind string) ([]map[string]string,
 			{"product": codes[0], "warehouse": whCode, "qty": "10", "price": "150000"},
 			{"product": codes[1], "warehouse": whCode, "qty": "2.5"},
 		}, nil
+	case KindPartnerPrice:
+		var cus string
+		_ = q.QueryRow(ctx, `SELECT code FROM partners WHERE active AND is_customer ORDER BY code LIMIT 1`).Scan(&cus)
+		if cus == "" {
+			cus = "MA-KHACH-HANG"
+		}
+		rows, err := q.Query(ctx, `SELECT code FROM products WHERE active AND NOT is_service ORDER BY code LIMIT 2`)
+		if err != nil {
+			return nil, err
+		}
+		codes, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return nil, err
+		}
+		for len(codes) < 2 {
+			codes = append(codes, fmt.Sprintf("MA-HANG-%d", len(codes)+1))
+		}
+		return []map[string]string{
+			{"partner": cus, "product": codes[0], "price": "175000", "note": "Giá hợp đồng năm"},
+			{"partner": cus, "product": codes[1], "price": "12500"},
+		}, nil
 	case KindOpeningDebt:
 		rows, err := q.Query(ctx, `SELECT code FROM partners WHERE active ORDER BY code LIMIT 2`)
 		if err != nil {
@@ -1108,4 +1182,124 @@ func exampleRows(ctx context.Context, q db.Q, kind string) ([]map[string]string,
 		}, nil
 	}
 	return nil, nil
+}
+
+// ---------- Bảng giá riêng theo khách (bản mở rộng C6) ----------
+
+func planPartnerPrices(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result, opt Options) (func() error, error) {
+	type partner struct {
+		id       int64
+		customer bool
+	}
+	partners := map[string]partner{}
+	prow, err := tx.Query(ctx, `SELECT id, upper(code), is_customer FROM partners`)
+	if err != nil {
+		return nil, err
+	}
+	for prow.Next() {
+		var x partner
+		var c string
+		if err := prow.Scan(&x.id, &c, &x.customer); err != nil {
+			prow.Close()
+			return nil, err
+		}
+		partners[c] = x
+	}
+	prow.Close()
+	products := map[string]int64{}
+	rows, err := tx.Query(ctx, `SELECT id, upper(code) FROM products`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id int64
+		var c string
+		if err := rows.Scan(&id, &c); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		products[c] = id
+	}
+	rows.Close()
+	existing := map[[2]int64]bool{}
+	erows, err := tx.Query(ctx, `SELECT partner_id, product_id FROM partner_prices`)
+	if err != nil {
+		return nil, err
+	}
+	for erows.Next() {
+		var a, b int64
+		if err := erows.Scan(&a, &b); err != nil {
+			erows.Close()
+			return nil, err
+		}
+		existing[[2]int64{a, b}] = true
+	}
+	erows.Close()
+	type plan struct {
+		partner, product int64
+		price            decimal.Decimal
+		note             string
+	}
+	var plans []plan
+	seen := map[[2]int64]int{}
+	k := KindPartnerPrice
+	for _, r := range sd.rows {
+		ok := true
+		pa, hasP := partners[strings.ToUpper(text(r, "partner"))]
+		switch {
+		case text(r, "partner") == "":
+			addErr(res, r.num, k, "partner", "Thiếu mã khách hàng")
+			ok = false
+		case !hasP:
+			addErr(res, r.num, k, "partner", "Mã đối tác "+text(r, "partner")+" chưa có trong danh mục")
+			ok = false
+		case !pa.customer:
+			addErr(res, r.num, k, "partner", "Đối tác "+text(r, "partner")+" không phải là khách hàng")
+			ok = false
+		}
+		pid, hasPr := products[strings.ToUpper(text(r, "product"))]
+		if text(r, "product") == "" {
+			addErr(res, r.num, k, "product", "Thiếu mã hàng")
+			ok = false
+		} else if !hasPr {
+			addErr(res, r.num, k, "product", "Mã hàng "+text(r, "product")+" chưa có trong danh mục")
+			ok = false
+		}
+		price, good := num(res, k, r, "price", false)
+		if !good {
+			ok = false
+		} else if price == nil {
+			addErr(res, r.num, k, "price", "Thiếu giá")
+			ok = false
+		}
+		if ok {
+			key := [2]int64{pa.id, pid}
+			if first, dup := seen[key]; dup {
+				addErr(res, r.num, k, "product", fmt.Sprintf("Khách %s – mã %s trùng với dòng %d trong file", text(r, "partner"), text(r, "product"), first))
+				ok = false
+			} else {
+				seen[key] = r.num
+			}
+		}
+		if !ok {
+			continue
+		}
+		if existing[[2]int64{pa.id, pid}] {
+			res.Updates++
+		} else {
+			res.Creates++
+		}
+		plans = append(plans, plan{partner: pa.id, product: pid, price: price.Round(2), note: text(r, "note")})
+	}
+	return func() error {
+		b := newBatcher(ctx, tx)
+		for _, p := range plans {
+			if err := b.add(`INSERT INTO partner_prices(partner_id, product_id, price, note, updated_by, updated_at) VALUES ($1,$2,$3,$4,$5,now())
+				ON CONFLICT (partner_id, product_id) DO UPDATE SET price=EXCLUDED.price, note=EXCLUDED.note, updated_by=EXCLUDED.updated_by, updated_at=now()`,
+				p.partner, p.product, p.price, p.note, opt.UserID); err != nil {
+				return err
+			}
+		}
+		return b.flush()
+	}, nil
 }

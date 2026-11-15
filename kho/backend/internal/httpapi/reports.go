@@ -228,7 +228,12 @@ func (s *Server) reportDraftDemand(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	out, err := s.Reports.DraftDemand(r.Context(), only != nil && *only)
+	var out []reports.DemandRow
+	if extOf(r).st.On(ext.FMinStock) {
+		out, err = s.Reports.DraftDemandMin(r.Context(), only != nil && *only)
+	} else {
+		out, err = s.Reports.DraftDemand(r.Context(), only != nil && *only)
+	}
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -250,6 +255,16 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, r, err)
 		return
+	}
+	if extOf(r).st.On(ext.FMinStock) {
+		// Bản mở rộng C5: "sắp hết" = tồn tổng ≤ tồn tối thiểu của từng mã (mã chưa đặt ⇒ không tính).
+		n, err := s.Reports.LowStockCountMin(r.Context())
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		rule := "min_stock"
+		out.LowStockCount, out.LowStockRule = n, &rule
 	}
 	writeJSON(w, http.StatusOK, out)
 }

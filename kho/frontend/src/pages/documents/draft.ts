@@ -12,7 +12,7 @@ export interface ProductLite {
   unit: string;
   is_service: boolean;
   sale_price?: number;
-  purchase_price?: number;
+  purchase_price?: number | null;
 }
 
 export interface LineDraft {
