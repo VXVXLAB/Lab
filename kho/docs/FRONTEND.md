@@ -227,6 +227,21 @@ thông báo thành công ngắn (1,5 giây), lỗi nói cách khắc phục.
   ngay khi mở phiếu thu đôi khi bị chuyển sang ô đối tác.
 - Bản in: bỏ phần địa chỉ / ĐT trống (F-09).
 
+### Sửa vòng 3 (F-17…F-19)
+
+- **F-19 — bộ nhớ phiếu gõ dở chỉ chứa thứ người dùng đã gõ.** Nguyên nhân: mốc "chưa đổi" (`pristine`) của phiếu mới được
+  cập nhật trong effect, nên khi phần mềm tự điền (kho / tài khoản mặc định) có một lần vẽ "dirty" giả; effect ghi bộ nhớ chạy
+  đúng lần đó ⇒ phiếu TRỐNG được ghi rồi ~10 ms sau mới xóa. Rời trang / tải lại / người khác đăng nhập trong khe đó ⇒ lần mở
+  sau "khôi phục" phiếu trống. Sửa: mốc lấy ngay trong lần vẽ có giá trị tự điền (`markAuto()` + `pristineRef`); chỉ ghi khi
+  dirty VÀ có nội dung thật (khách / ghi chú / dòng); mọi lần ghi, đọc gắn với `ownerId` chốt lúc mở màn phiếu (bản lưu có
+  `userId`); khôi phục chỉ khi đúng người, có nội dung và khác bản đang có — ngược lại xóa bản lưu. Phiên hết ⇒ cả ứng dụng
+  thay bằng màn đăng nhập nên màn phiếu cũ bị gỡ (không có lần ghi nào chờ — việc ghi không trì hoãn). Phiếu gõ dở của người
+  trước giữ nguyên trong tab, người đó đăng nhập lại thì được khôi phục.
+- **F-17**: `PartnerSelect` / `ProductSelect` điều khiển `open`: chọn xong là đóng hẳn, không mở lại khi danh mục đầy đủ tải
+  về; ô ngoài biểu mẫu giữ con trỏ (bỏ cách blur/focus).
+- **F-18**: đang sửa phiếu đã ghi sổ (F8) mà "Tải bản mới" còn thay đổi chưa đưa vào ⇒ vẫn ở chế độ sửa, có nút gộp.
+- Gộp: dòng máy kia đã xóa mà chọn "Dùng của tôi" được đặt lại chỗ cũ (sau dòng đứng trước nó lúc nạp).
+
 ### Từ ngữ thống nhất
 
 | Dùng | Không dùng |

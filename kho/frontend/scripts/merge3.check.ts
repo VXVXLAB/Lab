@@ -59,6 +59,16 @@ const T = (l: L): L => ({ ...l, key: `t${l.id ?? l.key}` });
   eq('máy kia xóa, tôi sửa — mặc định giữ bản đã lưu', run(base, mine, theirs).out, ['1|A:1@10']);
   eq('… chọn của tôi ⇒ thêm lại thành dòng mới (không mang id cũ)', run(base, mine, theirs, { b2: 'mine' }).out, ['1|A:1@10', 'mới|B:5@20']);
 }
+// 3b. dòng giữa bị máy kia xóa, tôi giữ lại ⇒ về đúng chỗ cũ (giữa A và C)
+{
+  const base = [s(1, 'A', 1, 10), s(2, 'B', 2, 20), s(3, 'C', 3, 30)];
+  const mine = [base[0]!, { ...base[1]!, qty: 5 }, base[2]!];
+  const theirs = [T(s(1, 'A', 1, 10)), T(s(3, 'C', 3, 30))];
+  eq('giữ dòng giữa máy kia đã xóa ⇒ đứng chỗ cũ', run(base, mine, theirs, { b2: 'mine' }).out, ['1|A:1@10', 'mới|B:5@20', '3|C:3@30']);
+  const theirs2 = [T(s(3, 'C', 3, 30))];
+  const mine2 = [{ ...base[0]!, qty: 7 }, base[1]!, base[2]!];
+  eq('… dòng đầu: đứng trước dòng sau nó', run(base, mine2, theirs2, { b1: 'mine' }).out, ['mới|A:7@10', '3|C:3@30']);
+}
 // 4. tôi xóa / máy kia sửa
 {
   const base = [s(1, 'A', 1, 10), s(2, 'B', 2, 20)];

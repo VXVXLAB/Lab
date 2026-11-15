@@ -160,14 +160,20 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   const fp = JSON.stringify(body());
   const isNew = voucherId === null && !loaded;
   // Phiếu mới: giá trị tự điền (tài khoản mặc định, đối tác / dòng tiền điền sẵn từ "Thu tiền", "Thu tiền phiếu này") là mốc (F-08)
+  // Mốc lấy ngay trong lần vẽ có giá trị tự điền (F-19) — không có lần vẽ "dirty" giả.
   const autoFill = useRef(true);
-  const [pristine, setPristine] = useState<string | null>(null);
-  useEffect(() => {
-    if (autoFill.current) {
-      autoFill.current = false;
-      setPristine(fp);
-    }
-  }, [fp]);
+  const pristineRef = useRef<string | null>(null);
+  const [, setAutoTick] = useState(0);
+  /** Gọi ngay trước khi phần mềm tự điền giá trị: lần vẽ kế tiếp là mốc (chắc chắn có lần vẽ đó). */
+  const markAuto = () => {
+    autoFill.current = true;
+    setAutoTick((t) => t + 1);
+  };
+  if (autoFill.current) {
+    autoFill.current = false;
+    pristineRef.current = fp;
+  }
+  const pristine = pristineRef.current;
   const dirty = isNew ? pristine !== null && fp !== pristine : baseline !== null && fp !== baseline;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
@@ -181,19 +187,36 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
     partner: PartnerLite | null;
     sideChoice: DebtSide | null;
     note: string;
+    userId: number;
     lines: VLine[];
   }
+  // Người sở hữu màn phiếu: chốt lúc mở; mọi lần ghi / đọc bộ nhớ gõ dở theo người này (F-19)
+  const ownerId = useRef(me.id).current;
   const restoreChecked = useRef(false);
+  /** Nội dung so sánh khi khôi phục: giống bản đang có ⇒ không khôi phục */
+  const contentSig = (ls: VLine[], n: string, partnerId: number | null, acc: number | null, d: string | null) =>
+    JSON.stringify([ls.filter((l) => !isBlank(l)).map((l) => [l.id ?? null, l.description.trim(), l.amount, l.document_id]), n.trim(), partnerId, acc, d]);
+  const loadedSigRef = useRef<string | null>(null);
   useEffect(() => {
-    if (removed || !restoreChecked.current) return;
-    if (dirty) unsavedStore.save(me.id, draftScope, { type, accountId, date: toApiDate(date) ?? null, partner, sideChoice, note, lines } satisfies Stored);
-    else unsavedStore.clear(me.id, draftScope);
+    if (removed || !restoreChecked.current || me.id !== ownerId) return;
+    // chỉ lưu khi người dùng đã gõ thật (có dòng tiền / ghi chú / đối tác khác giá trị tự điền)
+    if (dirty && (!isNew || lines.some((l) => !isBlank(l)) || !!note.trim() || !!partner))
+      unsavedStore.save(ownerId, draftScope, { userId: ownerId, type, accountId, date: toApiDate(date) ?? null, partner, sideChoice, note, lines } satisfies Stored);
+    else unsavedStore.clear(ownerId, draftScope);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fp, dirty]);
   const restoreUnsaved = (): boolean => {
     restoreChecked.current = true;
-    const st = unsavedStore.load<Stored>(me.id, draftScope);
-    if (!st || !st.lines?.some((l) => !isBlank(l))) return false;
+    if (me.id !== ownerId) return false;
+    const st = unsavedStore.load<Stored>(ownerId, draftScope);
+    if (!st) return false;
+    const same =
+      !st.lines?.some((l) => !isBlank(l)) ||
+      (loadedSigRef.current !== null && contentSig(st.lines, st.note, st.partner?.id ?? null, st.accountId, st.date) === loadedSigRef.current);
+    if (st.userId !== ownerId || same) {
+      unsavedStore.clear(ownerId, draftScope);
+      return false;
+    }
     setType(st.type);
     setAccountId(st.accountId);
     setDate(fromApiDate(st.date));
@@ -203,7 +226,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
     const baseById = new Map(baseLinesRef.current.filter((b) => b.id !== undefined).map((b) => [b.id, b.key]));
     setLines(withBlank(st.lines.map((l) => (l.id !== undefined && baseById.has(l.id) ? { ...l, key: baseById.get(l.id)! } : l))));
     autoFill.current = false; // khôi phục là thay đổi thật của người dùng, không phải giá trị tự điền
-    message.info(unsavedStore.restoredMessage(unsavedStore.reason(me.id, draftScope)), 5);
+    message.info(unsavedStore.restoredMessage(unsavedStore.reason(ownerId, draftScope)), 5);
     return true;
   };
 
@@ -218,6 +241,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
       setSideChoice(v.debt_side);
       setNote(v.note);
       const ls = prepared ?? linesOf(v);
+      loadedSigRef.current = contentSig(ls, v.note, v.partner_id, v.account_id, v.voucher_date);
       setLines(ls);
       baseLinesRef.current = ls;
       setBaseline(
@@ -267,7 +291,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
     const last = Number(storage.get(`${LAST_ACC}.${type}`));
     const def = accItems.find((a) => a.active && a.id === last) ?? accItems.find((a) => a.active && a.kind === 'cash') ?? accItems.find((a) => a.active);
     if (def) {
-      autoFill.current = true;
+      markAuto();
       setAccountId(def.id);
     }
   }, [isNew, accountId, accItems, type]);
@@ -280,18 +304,18 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
       void documentsApi.get(preDocumentId).then((d) => {
         if (d.partner_id) {
           void partnersApi.get(d.partner_id).then((p) => {
-            autoFill.current = true;
+            markAuto();
             setPartner({ id: p.id, code: p.code, name: p.name, phone: p.phone, address: p.address, is_customer: p.is_customer, is_supplier: p.is_supplier });
           });
         }
         const verb = newType === 'receipt' ? 'Thu tiền' : 'Chi tiền';
-        autoFill.current = true;
+        markAuto();
         setLines(withBlank([{ key: nk(), description: `${verb} phiếu ${d.display_no} ngày ${formatDate(d.doc_date)}`, amount: d.total_amount, document_id: d.id, document_no: d.display_no }]));
         message.info('Đã điền sẵn đối tác và số tiền của phiếu — kiểm tra rồi bấm Lưu (Ctrl+S)', 3);
       });
     } else if (prePartnerId) {
       void partnersApi.get(prePartnerId).then((p) => {
-            autoFill.current = true;
+            markAuto();
             setPartner({ id: p.id, code: p.code, name: p.name, phone: p.phone, address: p.address, is_customer: p.is_customer, is_supplier: p.is_supplier });
           });
     }
@@ -396,7 +420,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
       autoFocusButton: 'cancel',
       onOk: () => {
         shown.current = false;
-        unsavedStore.clear(me.id, draftScope);
+        unsavedStore.clear(ownerId, draftScope);
         blocker.proceed?.();
       },
       onCancel: () => {
@@ -504,7 +528,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
           await vouchersApi.remove(loaded.id, loaded.version);
           message.success(`Đã xóa phiếu ${loaded.voucher_no}`, 2);
           skipGuard.current = true;
-          unsavedStore.clear(me.id, draftScope);
+          unsavedStore.clear(ownerId, draftScope);
           await qc.cancelQueries({ queryKey: ['voucher', loaded.id] });
           qc.removeQueries({ queryKey: ['voucher', loaded.id] });
           void qc.invalidateQueries({ queryKey: qk.vouchers });

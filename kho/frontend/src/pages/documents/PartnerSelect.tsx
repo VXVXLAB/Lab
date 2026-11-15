@@ -44,6 +44,8 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
   ref,
 ) {
   const [search, setSearch] = useState('');
+  // Danh sách mở / đóng do ô này quyết định: chọn xong là đóng hẳn (F-17)
+  const [open, setOpen] = useState(false);
   const dq = useDebounced(search.trim(), 150);
   const [adding, setAdding] = useState(false);
   const params = useMemo(() => ({ q: dq || undefined, type, active: true, page_size: 30 }), [dq, type]);
@@ -61,6 +63,7 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
     if (!p) return false; // không có kết quả: giữ chữ đã gõ
     onChange?.(p);
     setSearch('');
+    setOpen(false);
     return true;
   });
   // Đang gõ tìm ⇒ chỉ hiện kết quả của chữ đang gõ (không ghim mục đang chọn lên đầu — F-11)
@@ -87,7 +90,12 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
         onClear={() => onChange?.(null)}
         filterOption={false}
         searchValue={search}
-        onSearch={setSearch}
+        onSearch={(v) => {
+          setSearch(v);
+          if (v) setOpen(true);
+        }}
+        open={open}
+        onDropdownVisibleChange={setOpen}
         onKeyDown={(e) => {
           if (e.key === 'F4' && !noAdd && type) {
             e.preventDefault();
@@ -100,6 +108,7 @@ export const PartnerSelect = forwardRef<RefSelectProps, Props>(function PartnerS
           const p = merged.find((x) => x.id === v) ?? null;
           onChange?.(p);
           setSearch('');
+          setOpen(false);
         }}
         optionLabelProp="label"
         popupMatchSelectWidth={520}

@@ -138,6 +138,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const [stash, setStash] = useState<MergeItem<LineDraft>[] | null>(null);
   const [choices, setChoices] = useState<Record<string, MergeChoice>>({});
   const baseLinesRef = useRef<LineDraft[]>([]);
+  const baselineFpRef = useRef<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [printSize, setPrintSize] = useState<'A4' | 'A5'>('A4');
@@ -164,7 +165,8 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       setLines(dr.lines);
       baseLinesRef.current = dr.lines;
       setLoaded(d);
-      setBaseline(fingerprint(d.doc_type, dr.header, dr.lines));
+      baselineFpRef.current = fingerprint(d.doc_type, dr.header, dr.lines);
+      setBaseline(baselineFpRef.current);
       setEditing(d.status === 'draft');
       setLineErrors({});
       setHeaderErrors({});
@@ -179,14 +181,21 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const readOnlyBase = !editing || !!deletedBy;
   const fp = type ? fingerprint(type, header, lines) : '';
   // Phiếu mới: giá trị phần mềm tự điền (kho mặc định, điền sẵn từ "Hàng cần đặt") là mốc, chưa phải thay đổi (F-08)
+  // Mốc được lấy NGAY trong lần vẽ có giá trị tự điền (F-19): trước đây lấy trong effect nên có một lần vẽ "dirty" giả
+  // (giá trị tự điền đã vào nhưng mốc chưa cập nhật) ⇒ phiếu trống bị ghi vào bộ nhớ gõ dở.
   const autoFill = useRef(true);
-  const [pristine, setPristine] = useState<string | null>(null);
-  useEffect(() => {
-    if (autoFill.current) {
-      autoFill.current = false;
-      setPristine(fp);
-    }
-  }, [fp]);
+  const pristineRef = useRef<string | null>(null);
+  const [, setAutoTick] = useState(0);
+  /** Gọi ngay trước khi phần mềm tự điền giá trị: lần vẽ kế tiếp là mốc (chắc chắn có lần vẽ đó). */
+  const markAuto = () => {
+    autoFill.current = true;
+    setAutoTick((t) => t + 1);
+  };
+  if (autoFill.current && fp) {
+    autoFill.current = false;
+    pristineRef.current = fp;
+  }
+  const pristine = pristineRef.current;
   const dirty = isNew ? pristine !== null && fp !== pristine : editing && baseline !== null && fp !== baseline;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
@@ -195,20 +204,34 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const draftScope = docId !== null ? `doc:${docId}` : `new:${newType ?? ''}`;
   interface Stored {
     header: Omit<HeaderDraft, 'doc_date'> & { doc_date: string | null };
+    userId: number;
     lines: LineDraft[];
     editing: boolean;
   }
+  // Người sở hữu màn phiếu này: chốt lúc mở; mọi lần ghi / đọc bộ nhớ gõ dở đều theo người này (F-19).
+  // (Phiên hết ⇒ cả ứng dụng thay bằng màn đăng nhập, màn phiếu bị gỡ; người sau mở lại màn phiếu mới hoàn toàn.)
+  const ownerId = useRef(me.id).current;
   const restoreChecked = useRef(false);
+  /** Có nội dung người dùng gõ thật không (phiếu chỉ có giá trị tự điền thì không lưu, không khôi phục). */
+  const hasContent = (h: { partner: unknown; note: string }, ls: LineDraft[]) => !!h.partner || !!h.note.trim() || ls.some((l) => !isBlank(l));
   useEffect(() => {
-    if (removed || !restoreChecked.current) return;
-    if (dirty) unsavedStore.save(me.id, draftScope, { header: { ...header, doc_date: toApiDate(header.doc_date) ?? null }, lines, editing } satisfies Stored);
-    else unsavedStore.clear(me.id, draftScope);
+    if (removed || !restoreChecked.current || me.id !== ownerId) return;
+    if (dirty && (!isNew || hasContent(header, lines)))
+      unsavedStore.save(ownerId, draftScope, { userId: ownerId, header: { ...header, doc_date: toApiDate(header.doc_date) ?? null }, lines, editing } satisfies Stored);
+    else unsavedStore.clear(ownerId, draftScope);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fp, dirty, editing]);
   const restoreUnsaved = () => {
     restoreChecked.current = true;
-    const st = unsavedStore.load<Stored>(me.id, draftScope);
+    if (me.id !== ownerId) return;
+    const st = unsavedStore.load<Stored>(ownerId, draftScope);
     if (!st || !st.lines?.length) return;
+    // chỉ khôi phục bản của đúng người này, có nội dung, và khác bản đang có (F-19)
+    const same = docId === null ? !hasContent(st.header, st.lines) : fingerprint(type ?? 'sale', { ...st.header, doc_date: fromApiDate(st.header.doc_date) }, st.lines) === baselineFpRef.current;
+    if (st.userId !== ownerId || same) {
+      unsavedStore.clear(ownerId, draftScope);
+      return;
+    }
     // dòng khôi phục nhận lại dòng gốc theo id dòng máy chủ (để lần gộp hai máy sau đó không coi là dòng mới)
     const baseById = new Map(baseLinesRef.current.filter((b) => b.id !== undefined).map((b) => [b.id, b.key]));
     const ls = withTrailingBlank(st.lines.map((l) => (l.id !== undefined && baseById.has(l.id) ? { ...l, key: baseById.get(l.id)! } : l)));
@@ -216,7 +239,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     setLines(ls);
     setEditing(st.editing);
     autoFill.current = false; // khôi phục là thay đổi thật của người dùng, không phải giá trị tự điền
-    message.info(unsavedStore.restoredMessage(unsavedStore.reason(me.id, draftScope)), 5);
+    message.info(unsavedStore.restoredMessage(unsavedStore.reason(ownerId, draftScope)), 5);
     // phiếu mới khôi phục: con trỏ ở dòng trống cuối như khi mở một phiếu tạm (khách đã chọn sẵn)
     if (docId === null && (st.header.partner || !cfg?.partner)) {
       restoredFocus.current = true;
@@ -243,7 +266,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     const last = Number(storage.get(`${LAST_WH}.${type}`));
     const def = whItems.find((w) => w.active && w.id === last) ?? whItems.find((w) => w.active);
     if (def) {
-      autoFill.current = true;
+      markAuto();
       setHeader((h) => ({ ...h, warehouse_id: def.id }));
     }
   }, [isNew, header.warehouse_id, whItems]);
@@ -273,7 +296,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
             },
           ];
         });
-        autoFill.current = true;
+        markAuto();
         setLines(withTrailingBlank(ls));
         if (pre.note) setHeader((h) => ({ ...h, note: pre.note ?? '' }));
         message.info(`Đã điền sẵn ${ls.length} mã thiếu — chọn nhà cung cấp rồi lưu`, 3);
@@ -410,7 +433,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       autoFocusButton: 'cancel',
       onOk: () => {
         blockerShown.current = false;
-        unsavedStore.clear(me.id, draftScope);
+        unsavedStore.clear(ownerId, draftScope);
         blocker.proceed?.();
       },
       onCancel: () => {
@@ -484,6 +507,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     if (!loaded) return;
     const base = baseLinesRef.current;
     const mine = lines;
+    const wasEditing = editing;
     try {
       const fresh = await documentsApi.get(loaded.id);
       const dr = draftFromDoc(fresh);
@@ -491,6 +515,8 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       setStash(items.length ? items : null);
       setChoices({});
       load(fresh, dr);
+      // đang sửa phiếu đã ghi sổ (F8) và còn thay đổi chưa đưa vào ⇒ vẫn ở chế độ sửa, nút gộp có ngay (F-18)
+      if (wasEditing && fresh.status === 'posted' && items.length) setEditing(true);
     } catch (e) {
       modal.error({ title: 'Không tải được phiếu', content: errorMessage(e) });
     }
@@ -685,7 +711,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
           await documentsApi.remove(loaded.id, loaded.version);
           message.success(`Đã xóa phiếu tạm ${loaded.draft_no}`, 2);
           skipGuard.current = true;
-          unsavedStore.clear(me.id, draftScope);
+          unsavedStore.clear(ownerId, draftScope);
           // bỏ khỏi bộ nhớ đệm để không ai (kể cả sự kiện SSE) gọi lại phiếu đã xóa
           await qc.cancelQueries({ queryKey: ['document', loaded.id] });
           qc.removeQueries({ queryKey: ['document', loaded.id] });

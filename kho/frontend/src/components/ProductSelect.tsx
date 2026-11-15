@@ -36,6 +36,8 @@ export function ProductSelect({
   id?: string;
 }) {
   const [s, setS] = useState('');
+  // Danh sách mở / đóng do ô này quyết định: chọn xong là đóng hẳn, không tự mở lại khi danh mục đầy đủ tải về (F-17)
+  const [open, setOpen] = useState(false);
   const dq = useDebounced(s.trim(), 150);
   const params = useMemo(() => ({ q: dq || undefined, page_size: 30, is_service: goodsOnly ? false : undefined }), [dq, goodsOnly]);
   const q = useQuery({ queryKey: qk.catalogList('product', params), queryFn: () => productsApi.list(params), staleTime: 30_000 });
@@ -47,6 +49,7 @@ export function ProductSelect({
     if (!p) return false; // không có kết quả: giữ chữ đã gõ
     onChange(p);
     setS('');
+    setOpen(false);
     return true;
   });
   // Đang gõ tìm ⇒ chỉ hiện kết quả của chữ đang gõ (không ghim mục đang chọn — F-11)
@@ -60,11 +63,17 @@ export function ProductSelect({
       autoFocus={autoFocus}
       filterOption={false}
       searchValue={s}
-      onSearch={setS}
+      onSearch={(v) => {
+        setS(v);
+        if (v) setOpen(true);
+      }}
+      open={open}
+      onDropdownVisibleChange={setOpen}
       value={value?.id}
       onChange={(v) => {
         onChange(merged.find((p) => p.id === v) ?? null);
         setS('');
+        setOpen(false);
       }}
       placeholder={placeholder}
       style={{ width: '100%' }}

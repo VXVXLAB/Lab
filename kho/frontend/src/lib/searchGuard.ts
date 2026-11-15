@@ -29,12 +29,8 @@ export function useSearchEnterGuard(typing: boolean, stale: boolean, pick: (acti
     const input = wrapRef.current?.querySelector<HTMLInputElement>('input');
     window.setTimeout(() => {
       if (!input) return;
+      // không có ô kế tiếp (bộ lọc, thẻ kho): con trỏ ở lại; danh sách đã được ô chọn đóng hẳn (F-17)
       if (input.closest('[data-enter-scope]')) focusNextField(input);
-      else {
-        // không có ô kế tiếp (bộ lọc, thẻ kho): đóng danh sách, con trỏ ở lại
-        input.blur();
-        input.focus();
-      }
     }, 0);
   };
   const runRef = useRef(run);

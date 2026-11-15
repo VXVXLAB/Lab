@@ -40,6 +40,8 @@ export interface MergeItem<L> {
   conflicts: FieldConflict[];
   /** Đổi thứ tự: id các dòng chung theo thứ tự của máy này */
   order?: number[];
+  /** Dòng máy kia đã xóa mà tôi giữ lại: đặt lại ở chỗ cũ — sau dòng `after` / trước dòng `before` (id, theo bản lúc nạp) */
+  anchor?: { after?: number; before?: number };
 }
 
 export interface Identified {
@@ -74,7 +76,10 @@ export function threeWay<L extends Identified>(opts: { base: L[]; mine: L[]; the
     if (same(b, l)) continue; // tôi không đổi dòng này ⇒ bản mới thế nào giữ thế ấy
     const t = theirsById.get(l.id);
     if (!t) {
-      items.push({ id: l.key, kind: 'theyRemoved', line: l, base: b, theirsKey: null, mineFields: [], conflicts: [] });
+      const bi = base.indexOf(b);
+      const after = base.slice(0, bi).reverse().find((x) => x.id !== undefined && theirsById.has(x.id))?.id;
+      const before = base.slice(bi + 1).find((x) => x.id !== undefined && theirsById.has(x.id))?.id;
+      items.push({ id: l.key, kind: 'theyRemoved', line: l, base: b, theirsKey: null, mineFields: [], conflicts: [], anchor: { after, before } });
       continue;
     }
     const mineFields: string[] = [];
@@ -137,7 +142,15 @@ export function applyMerge<L extends Identified>(
       out[j] = row;
     } else if (it.kind === 'removed' || (it.kind === 'theyEdited' && choice === 'mine')) {
       if (j >= 0) out = out.filter((_, i) => i !== j);
-    } else if (it.kind === 'theyRemoved' && choice === 'mine') out.push({ ...it.line, key: newKey(), id: undefined });
+    } else if (it.kind === 'theyRemoved' && choice === 'mine') {
+      // giữ dòng ở chỗ cũ: sau dòng đứng trước nó lúc nạp (hoặc trước dòng đứng sau nó), không thì cuối phiếu
+      const row = { ...it.line, key: newKey(), id: undefined };
+      const ai = it.anchor?.after !== undefined ? out.findIndex((x) => x.id === it.anchor!.after) : -1;
+      const bi = ai < 0 && it.anchor?.before !== undefined ? out.findIndex((x) => x.id === it.anchor!.before) : -1;
+      if (ai >= 0) out.splice(ai + 1, 0, row);
+      else if (bi >= 0) out.splice(bi, 0, row);
+      else out.push(row);
+    }
   }
   const ord = items.find((it) => it.kind === 'reordered' || (it.kind === 'bothReordered' && (choices[it.id] ?? 'theirs') === 'mine'));
   if (ord?.order) {
