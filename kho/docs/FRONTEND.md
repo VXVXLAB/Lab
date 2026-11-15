@@ -348,3 +348,29 @@ chủ ý: quản trị thấy thêm **Danh mục › Tính năng mở rộng** �
   ngày, dòng Cộng, dấu "ước tính" có chú thích, giải thích cách tính giá vốn; theo mặt hàng / theo khách ⇒ ngăn kéo `profit`
   (lãi từng phiếu) ⇒ chứng từ. Xuất Excel bằng `format=xlsx` của máy chủ.
 - Thẻ mới ở trang Báo cáo dùng `need.feature` ⇒ bản chuẩn không thấy.
+
+## Bản mở rộng — đợt M3 (C9, C10, C11, C12) và việc tiếp M2
+
+- **Việc tiếp M2**: Tuổi nợ vừa 1366 (cột hẹp, Khách hàng / Tổng nợ cố định hai bên); đầu phiếu bán một dòng gọn
+  "Nợ / hạn mức" thay cho "Khách đang nợ" khi có hạn mức; mục "Nhập từ Excel" ẩn khi không có loại nào nhập được
+  (`importKinds`, `Need.check`). Kiểm tra cuộn ngang toàn trang mọi màn ở 1366 và 820 (bảng rộng cuộn bên trong bảng).
+- **Lưới phiếu** (`LineGrid` prop `ext: GridExt`, không truyền ⇒ y như bản chuẩn):
+  - C9 `stocktake`: cột Tồn sổ sách / Tồn thực tế / Chênh lệch; Enter ở ô thực tế xuống dòng dưới; lọc "chỉ dòng lệch"
+    (dòng ẩn bị bỏ qua khi di chuyển); mỗi mã một dòng (chọn lại mã ⇒ nhảy tới dòng cũ). Tồn sổ sách: phiếu tạm lấy từ
+    `GET /documents/stocktake-load` (kho + ngày), phiếu đã ghi sổ dùng `book_qty` đã lưu; báo `book_changed_lines`.
+  - C10 `unit_conversion`: `GET /products/{id}/units` cho các mã trên phiếu (useQueries, nhớ 5 phút); ô ĐVT là `<select>`
+    chỉ khi mã có đơn vị khác (Enter: mã → ĐVT → SL); đổi đơn vị đổi giá tự điền (giá mặc định × hệ số; giá đã gõ giữ);
+    nhớ đơn vị dùng lần trước theo mã + loại phiếu (localStorage `kho.lastUnit.*`); "= N <gốc>" dưới SL; bán lỗ so theo đơn
+    vị gốc; giá theo khách (C6, theo đơn vị gốc) × hệ số.
+  - C11 `vat`: cột Thuế (`<select>`, ngoài chuỗi Enter trừ khi "Dừng ở ô thuế"), mặc định = thuế suất mặt hàng → mặc định
+    chung (`/settings/vat`); "Áp thuế suất cho tất cả dòng"; `lineTax` = round(thành tiền × thuế suất) từng dòng; chân phiếu
+    Cộng tiền hàng / Tiền thuế / Tổng thanh toán; Tổng nợ, hạn mức dùng tổng thanh toán. `vat_rate` chỉ gửi khi dòng có.
+- `LineDraft` thêm `factor`, `vat_rate`, `book_qty`; gộp hai máy (`DOC_FIELDS`): ĐVT đi cùng hệ số, thêm "Thuế suất";
+  `npm run test:merge` có ca thuế, đơn vị, SL thực tế kiểm kê.
+- **In** (`PrintSheet`, `VoucherPrint`, `PrintTitle`): mẫu in C12 (`usePrintTemplate`) — logo, chân trang, ẩn cột, tên ô ký,
+  khổ giấy mặc định; phiếu có thuế in cột Thuế suất / Tiền thuế, Tổng thanh toán, "Bằng chữ"; biên bản kiểm kê riêng.
+  Không có mẫu ⇒ bản in như cũ.
+- **Màn mới** (`pages/extended/M3Pages.tsx`): Bảng kê thuế GTGT (bấm dòng ⇒ chi tiết bán / mua trong ngăn kéo
+  `tradeRange`), Mẫu in (xem trước trực tiếp bằng phiếu mẫu), Nhật ký thay đổi (`GET /audit`, diễn giải từng dòng; chỉ
+  hiện khi có tính năng mở rộng nào bật). Danh mục: "Đơn vị quy đổi", "Thuế suất mặc định" (hàng hóa), thuế mặc định chung
+  (Thông tin công ty). Báo cáo bán / mua: cột Trước thuế / Thuế / Sau thuế khi có thuế.

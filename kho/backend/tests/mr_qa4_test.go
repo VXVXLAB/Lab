@@ -160,7 +160,14 @@ func TestMR_QA_M15_M16_LuuLaiKhongIDDong(t *testing.T) {
 	ls := body["lines"].([]any)
 	body["lines"] = []any{ls[1], ls[0]}
 	e.Admin.Expect(400, "LINE_IDS_REQUIRED", "PUT", fmt.Sprintf("/api/documents/%d", s.ID), body)
-	body["lines"] = ls[:1]
+	// Bỏ dòng V (có thuế) và gửi lại dòng A không id nhưng KHÔNG có khóa unit (dòng A cũ hệ số 24) ⇒ 400.
+	noUnit := map[string]any{}
+	for k, v := range ls[0].(map[string]any) {
+		if k != "unit" {
+			noUnit[k] = v
+		}
+	}
+	body["lines"] = []any{noUnit}
 	e.Admin.Expect(400, "LINE_IDS_REQUIRED", "PUT", fmt.Sprintf("/api/documents/%d", s.ID), body)
 	check("khác dãy bị từ chối")
 	mrEnable(e, "unit_conversion", "vat")
@@ -186,9 +193,21 @@ func TestMR_QA_M15_M16_LuuLaiKhongIDDong(t *testing.T) {
 	if x := e.Admin.GetDoc(pd.ID); !x.Lines[0].UnitPrice.Equal(d("6100")) || x.Lines[0].ID != pd.Lines[0].ID {
 		t.Fatalf("giá bị che phải giữ: %+v", x.Lines[0])
 	}
+	// Khác dãy (thêm dòng), dòng A gửi lại "unit_price": null (giá bị che họ thấy) ⇒ 400, phiếu không đổi.
 	tb = noIDBody(tk.GetDoc(pd.ID), false, "thêm dòng")
+	tb["lines"].([]any)[0].(map[string]any)["unit_price"] = nil
 	tb["lines"] = append(tb["lines"].([]any), Line(v, "1", nil))
 	tk.Expect(400, "LINE_IDS_REQUIRED", "PUT", fmt.Sprintf("/api/documents/%d", pd.ID), tb)
+	if x := e.Admin.GetDoc(pd.ID); len(x.Lines) != 1 || !x.Lines[0].UnitPrice.Equal(d("6100")) {
+		t.Fatalf("400 không đổi phiếu: %+v", x.Lines)
+	}
+	// Không có khóa unit_price ⇒ dòng mới bình thường: giá mua mặc định (hành vi Q-02 / Q-14, không lộ giá cũ).
+	tb = noIDBody(tk.GetDoc(pd.ID), false, "thêm dòng, không khóa giá")
+	tb["lines"] = append(tb["lines"].([]any), Line(v, "1", nil))
+	tk.OK("PUT", fmt.Sprintf("/api/documents/%d", pd.ID), tb, nil)
+	if x := e.Admin.GetDoc(pd.ID); len(x.Lines) != 2 || !x.Lines[0].UnitPrice.Equal(d("6000")) {
+		t.Fatalf("dòng mới ⇒ giá mặc định: %+v", x.Lines)
+	}
 
 	// Kiểm kê theo Lốc: lưu lại không id ⇒ SL thực tế (quy về đơn vị gốc) không đổi.
 	st := e.Admin.CreateDoc(DocBody("stocktake", "2026-01-08", 0, e.WH["KHO1"], UL(a, "Lốc", "3", nil)))

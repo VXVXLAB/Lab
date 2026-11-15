@@ -327,10 +327,11 @@ func exactBase(qty, factor decimal.Decimal, ol *Line, i int) error {
 	return nil
 }
 
-// lineAtRisk: dòng đang lưu có dữ liệu mà máy khách không gửi id dòng sẽ làm mất (hệ số quy đổi, thuế suất, đơn giá bị
-// che với người không xem được giá mua).
+// special: dòng đang lưu mang dữ liệu đặc biệt (hệ số quy đổi ≠ 1, thuế suất); maskedPrices ⇒ đơn giá bị che cũng tính.
+func special(l Line) bool { return (!l.factor.IsZero() && l.factor.Cmp(one) != 0) || l.vatRate != nil }
+
 func lineAtRisk(l Line, maskedPrices bool) bool {
-	return (!l.factor.IsZero() && l.factor.Cmp(one) != 0) || l.vatRate != nil || (maskedPrices && l.UnitPrice != nil)
+	return special(l) || (maskedPrices && l.UnitPrice != nil)
 }
 
 func sameProduct(li LineInput, l Line) bool {
@@ -344,18 +345,42 @@ func sameProduct(li LineInput, l Line) bool {
 	return strings.EqualFold(l.ProductCode, "DV") && (strings.EqualFold(c, "DICHVU") || strings.EqualFold(util.Fold(c), "dich vu"))
 }
 
-// MatchLineIDs (QA M-15/M-16): máy khách gửi lại các dòng KHÔNG có id cho một phiếu đang có dòng mang dữ liệu sẽ mất
-// (hệ số ≠ 1, thuế suất, giá bị che) ⇒ cùng số dòng và cùng mặt hàng ở từng vị trí ⇒ gán id dòng đang lưu theo vị trí
-// (rồi xử lý như dòng có id: trường không gửi được giữ); khác dãy ⇒ 400 LINE_IDS_REQUIRED. Phiếu không có dòng nào như
-// vậy ⇒ giữ đúng hành vi bản chuẩn (dòng không id = dòng mới). Dòng có id ở bất kỳ đâu ⇒ không đổi gì.
+// unitMatches: đơn vị gửi lên (nếu có) trùng đơn vị đang lưu của dòng (không gửi ⇒ trùng; null / rỗng = đơn vị gốc).
+func unitMatches(li LineInput, l Line) bool {
+	if !li.UnitSet {
+		return true
+	}
+	u := ""
+	if li.Unit != nil {
+		u = strings.TrimSpace(*li.Unit)
+	}
+	if u == "" {
+		return l.factor.IsZero() || l.factor.Cmp(one) == 0
+	}
+	return strings.EqualFold(u, l.Unit)
+}
+
+func lineIDsRequired() error {
+	return apperr.New(400, apperr.CodeLineIDsRequired,
+		"Phiếu có dòng dùng đơn vị quy đổi, thuế suất hoặc đơn giá bạn không xem được, và các dòng gửi lên không cho biết dòng nào là dòng cũ. Hãy tải lại phiếu và gửi kèm id của từng dòng (lines[].id).",
+		map[string]any{"field": "lines"})
+}
+
+// MatchLineIDs áp quy tắc id dòng khi sửa một phiếu đang có (QA M-15 … M-18; API §11, bảng quyết định):
+//  1. dòng có id hợp lệ: không đổi gì ở đây (trường không gửi được giữ khi kiểm tra dòng);
+//  2. mọi dòng không id, phiếu có dòng "đặc biệt" (hệ số ≠ 1, thuế suất; hoặc giá bị che với người sửa bị che giá), cùng
+//     dãy mặt hàng và đơn vị gửi (nếu có) trùng đơn vị đang lưu ở từng vị trí ⇒ gán id theo vị trí; cùng dãy nhưng
+//     đơn vị khác ⇒ 400 LINE_IDS_REQUIRED;
+//  3. hình dạng khác (trộn id / không id, hoặc khác dãy): dòng không id là dòng MỚI; nếu body bỏ một dòng đặc biệt đang
+//     lưu (id không được nhắc tới) mà có dòng không id cùng mặt hàng THIẾU khóa tương ứng (vat_rate khi dòng bỏ có thuế
+//     suất; unit khi dòng bỏ có hệ số ≠ 1) ⇒ 400 LINE_IDS_REQUIRED. Khóa có mặt (kể cả null) là ý của người dùng ⇒ nhận.
+//     Người bị che giá: dòng không id cùng mặt hàng với dòng bỏ có đơn giá mà gửi "unit_price": null (giá trị bị che
+//     họ nhìn thấy) ⇒ 400; không gửi khóa ⇒ dòng mới giá mua mặc định; gửi số ⇒ giá đó (Q-14).
+//
+// Lỗi luôn trả trước khi ghi gì (phiếu và version không đổi). Phiếu không có dòng đặc biệt ⇒ hành vi bản chuẩn.
 func MatchLineIDs(old *Document, lines []LineInput, maskedPrices bool) error {
 	if old == nil || len(old.Lines) == 0 {
 		return nil
-	}
-	for _, li := range lines {
-		if li.ID != 0 {
-			return nil
-		}
 	}
 	risky := false
 	for _, l := range old.Lines {
@@ -367,17 +392,64 @@ func MatchLineIDs(old *Document, lines []LineInput, maskedPrices bool) error {
 	if !risky {
 		return nil
 	}
-	same := len(lines) == len(old.Lines)
-	for i := 0; same && i < len(lines); i++ {
-		same = sameProduct(lines[i], old.Lines[i])
+	valid := map[int64]bool{}
+	for _, l := range old.Lines {
+		valid[l.ID] = true
 	}
-	if !same {
-		return apperr.New(400, apperr.CodeLineIDsRequired,
-			"Phiếu có dòng dùng đơn vị quy đổi, thuế suất hoặc đơn giá bạn không xem được; các dòng gửi lên không có id và không khớp từng dòng đang lưu. Hãy tải lại phiếu và gửi kèm id của từng dòng (lines[].id).",
-			map[string]any{"field": "lines"})
+	anyID := false
+	for _, li := range lines {
+		if li.ID != 0 {
+			anyID = true
+		}
 	}
-	for i := range lines {
-		lines[i].ID = old.Lines[i].ID
+	// Quy tắc 2.
+	if !anyID && len(lines) == len(old.Lines) {
+		same := true
+		for i := range lines {
+			if !sameProduct(lines[i], old.Lines[i]) {
+				same = false
+				break
+			}
+		}
+		if same {
+			for i := range lines {
+				if !unitMatches(lines[i], old.Lines[i]) {
+					return lineIDsRequired()
+				}
+			}
+			for i := range lines {
+				lines[i].ID = old.Lines[i].ID
+			}
+			return nil
+		}
+	}
+	// Quy tắc 3.
+	referenced := map[int64]bool{}
+	for _, li := range lines {
+		if valid[li.ID] {
+			referenced[li.ID] = true
+		}
+	}
+	for _, d := range old.Lines {
+		if referenced[d.ID] || !lineAtRisk(d, maskedPrices) {
+			continue
+		}
+		for _, li := range lines {
+			if valid[li.ID] && li.ID != 0 || !sameProduct(li, d) {
+				continue
+			}
+			if d.vatRate != nil && !li.VatRate.Set {
+				return lineIDsRequired()
+			}
+			if !d.factor.IsZero() && d.factor.Cmp(one) != 0 && !li.UnitSet {
+				return lineIDsRequired()
+			}
+			// Người bị che giá gửi lại đúng giá trị null mình nhìn thấy ⇒ không phân biệt được với "dòng cũ" ⇒ từ chối.
+			// Không có khóa unit_price ⇒ dòng mới bình thường (giá mua mặc định, như Q-02 / Q-14).
+			if maskedPrices && d.UnitPrice != nil && li.UnitPrice == nil && li.PriceSet {
+				return lineIDsRequired()
+			}
+		}
 	}
 	return nil
 }

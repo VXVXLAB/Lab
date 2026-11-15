@@ -178,3 +178,23 @@ Trong **Danh mục › Hàng hóa**, mở mặt hàng, điền **Tồn tối thi
 ### Lãi gộp
 
 **Báo cáo › Lãi gộp** (cần quyền xem giá mua và xem báo cáo): doanh thu, giá vốn, lãi gộp, tỷ lệ theo **phiếu**, theo **mặt hàng** hoặc theo **khách** (ba cách cùng tổng). Giá vốn tính **bình quân gia quyền sau mỗi lần nhập**, chung các kho; khách trả hàng nhập lại theo giá bình quân lúc đó. Bán khi mã chưa từng được nhập thì giá vốn tạm lấy giá mua khai báo, có chữ "ước tính". Sửa hoặc nhập lùi ngày phiếu mua sẽ làm thay đổi lãi các kỳ sau đó.
+
+### Kiểm kê kho
+
+**Kho › Kiểm kê**, bấm **F2**: chọn kho và ngày kiểm kê, bấm **Nạp toàn bộ mã đang có tồn** (hoặc gõ từng mã như phiếu thường). Cột **Tồn sổ sách** là số trên sổ đến hết ngày kiểm; bạn chỉ gõ **Tồn thực tế** — gõ số rồi **Enter** là xuống dòng dưới. Cột **Chênh lệch** ghi "thừa" (xanh) hoặc "thiếu" (đỏ); đánh dấu **Chỉ dòng lệch** để chỉ xem các dòng lệch. Nút "Điền thực tế = sổ sách cho dòng chưa đếm" điền nhanh các mã khớp sổ. **Ctrl+S** lưu tạm, **F9** ghi sổ: tồn kho được điều chỉnh đúng bằng chênh lệch, thẻ kho ghi "Kiểm kê thừa / thiếu". In ra là **Biên bản kiểm kê**. Nếu sau đó có phiếu lùi ngày làm đổi sổ sách, phiếu kiểm kê báo "Sổ sách đã thay đổi sau khi kiểm kê".
+
+### Đơn vị quy đổi
+
+Trong hồ sơ mặt hàng, mục **Đơn vị quy đổi**: thêm đơn vị và hệ số (ví dụ 1 Thùng = 24 Lon), bấm **Lưu đơn vị quy đổi**. Đơn vị đã có trên chứng từ không bỏ / đổi hệ số được. Trên phiếu, mã có đơn vị quy đổi thì ô **ĐVT** thành ô chọn (Enter từ ô mã sang ô ĐVT, dùng ↑↓ để đổi, Enter sang số lượng); phần mềm nhớ đơn vị dùng lần trước của từng mã. Đổi đơn vị thì giá tự điền đổi theo (giá đã gõ tay giữ nguyên); dưới số lượng ghi "= N <đơn vị gốc>". Tồn kho, thẻ kho, báo thiếu hàng luôn theo đơn vị gốc.
+
+### Thuế GTGT
+
+Phiếu mua, bán, trả hàng có thêm cột **Thuế** (KCT, 0%, 5%, 8%, 10%), tự điền theo **Thuế suất mặc định** của mặt hàng hoặc mặc định chung (Hệ thống › Thông tin công ty). Ô thuế không chen vào chuỗi Enter; muốn dừng ở ô thuế thì đánh dấu **Dừng ở ô thuế** dưới lưới. **Áp thuế suất cho tất cả dòng** đặt một lần cho cả phiếu. Chân phiếu có **Cộng tiền hàng / Tiền thuế / Tổng thanh toán**; công nợ tính theo tổng thanh toán. Báo cáo bán / mua thêm cột trước thuế, thuế, sau thuế; **Báo cáo › Bảng kê thuế GTGT** tổng hợp bán ra, mua vào theo thuế suất. Phiếu không có thuế giữ nguyên như trước.
+
+### Mẫu in
+
+**Hệ thống › Mẫu in** (quản trị): chọn logo (PNG/JPG ≤ 500 KB), khổ giấy mặc định cho phiếu hàng và phiếu thu chi, dòng chân trang, bỏ cột Mã hàng / ĐVT, tên các ô ký cho từng loại phiếu. Bên phải là bản xem trước, thay đổi tới đâu thấy tới đó; bấm **Lưu** (Ctrl+S). Báo cáo in ra có thêm logo và chân trang.
+
+### Nhật ký thay đổi
+
+**Hệ thống › Nhật ký thay đổi** (quản trị): ai đã thêm, sửa, xóa, ghi sổ gì, lúc nào — lọc theo loại, người, khoảng ngày.

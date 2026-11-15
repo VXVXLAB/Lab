@@ -3,6 +3,7 @@
 package docs
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -216,6 +217,26 @@ type LineInput struct {
 	Note        string           `json:"note"`
 	// VatRate (C11): không gửi ⇒ dòng có id giữ thuế suất đang lưu, dòng mới lấy mặc định; null ⇒ không thuế.
 	VatRate util.OptDec `json:"vat_rate"`
+	// UnitSet: body có khóa "unit" (kể cả null) — phân biệt "không gửi" với "gửi" cho quy tắc id dòng (QA M-17).
+	UnitSet bool `json:"-"`
+	// PriceSet: body có khóa "unit_price" (kể cả null).
+	PriceSet bool `json:"-"`
+}
+
+// UnmarshalJSON đọc dòng và ghi nhận khóa "unit" có mặt hay không.
+func (l *LineInput) UnmarshalJSON(b []byte) error {
+	type alias LineInput
+	var a alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(b, &keys) == nil {
+		_, a.UnitSet = keys["unit"]
+		_, a.PriceSet = keys["unit_price"]
+	}
+	*l = LineInput(a)
+	return nil
 }
 
 // Input là dữ liệu tạo/sửa chứng từ.

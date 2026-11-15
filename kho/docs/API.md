@@ -807,10 +807,23 @@ làm xong). Tắt ⇒ API riêng trả `404 FEATURE_OFF`, JSON chứng từ / m�
 mới) — trừ khi dữ liệu đã có giá trị khác mặc định từ lúc tính năng bật (vd. dòng có hệ số ≠ 1, phiếu có thuế): khi đó
 các trường đó vẫn hiện để số liệu đọc được.
 
-**Dòng không có id (QA M-15/M-16):** khi PUT một phiếu mà **mọi** dòng gửi lên đều không có `id` và phiếu đang có dòng
-mang dữ liệu có thể mất (hệ số quy đổi ≠ 1, thuế suất, hoặc đơn giá mà người sửa không được xem): cùng số dòng và cùng
-mặt hàng ở từng vị trí ⇒ ghép theo vị trí (xử lý như có id); khác ⇒ `400 LINE_IDS_REQUIRED` ("…hãy gửi kèm id của từng
-dòng"). Phiếu không có dòng nào như vậy giữ hành vi cũ (dòng không id = dòng mới).
+**Quy tắc id dòng khi sửa phiếu (QA M-15 … M-18).** "Dòng đặc biệt" = dòng đang lưu có hệ số quy đổi ≠ 1 hoặc có thuế
+suất (với người không được xem giá mua của phiếu mua / trả NCC / tồn đầu: cả dòng có đơn giá). Phiếu không có dòng đặc
+biệt ⇒ hành vi bản chuẩn (dòng không id = dòng mới). "Khóa có mặt" = có trong body, kể cả giá trị `null`.
+
+| Body gửi lên | Kết quả |
+|---|---|
+| Dòng có `id` hợp lệ của phiếu | Sửa dòng đó; khóa không gửi (`unit`, `vat_rate`, giá bị che) được **giữ**. |
+| **Mọi** dòng không id, cùng số dòng, cùng mặt hàng ở từng vị trí, `unit` (nếu gửi) trùng đơn vị đang lưu ở vị trí đó | Ghép theo vị trí, xử lý như có id. |
+| Như trên nhưng `unit` gửi khác đơn vị đang lưu ở một vị trí (vd. đảo hai dòng cùng mặt hàng) | `400 LINE_IDS_REQUIRED`. |
+| Hình dạng khác (trộn có id / không id, khác dãy): body bỏ một dòng đặc biệt (id không được nhắc) và có dòng không id **cùng mặt hàng** mà **thiếu khóa** `vat_rate` (dòng bỏ có thuế suất) hoặc `unit` (dòng bỏ có hệ số ≠ 1) | `400 LINE_IDS_REQUIRED`. |
+| Như trên nhưng các khóa đó **có mặt** (giá trị tường minh hoặc `null`) | Nhận — dòng mới đúng như gửi (ý người dùng). |
+| Người bị che giá: dòng không id cùng mặt hàng với dòng bỏ có đơn giá, gửi `"unit_price": null` | `400 LINE_IDS_REQUIRED`. |
+| Người bị che giá: như trên nhưng **không có** khóa `unit_price` / gửi một số | Dòng mới: giá mua mặc định / giá đã gõ (Q-02, Q-14). |
+
+`LINE_IDS_REQUIRED` trả trước khi ghi gì: phiếu và `version` không đổi. Giao diện gộp xung đột hiện tại (dòng cũ mang id,
+dòng mới mang khóa `unit` / `vat_rate` tường minh) luôn được nhận.
+
 **Trường không thuộc loại phiếu (M-13):** `to_warehouse_id` khác null/0 trên phiếu không phải chuyển kho ⇒ 400 (như
 `partner_id` trên chuyển kho / tồn đầu / kiểm kê, đơn giá / thuế trên kiểm kê, thuế trên chuyển kho / tồn đầu).
 
