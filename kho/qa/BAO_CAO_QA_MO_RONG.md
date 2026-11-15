@@ -494,3 +494,54 @@ trí, đơn vị (nếu gửi) phải trùng đơn vị đang lưu, khác ⇒ `4
 ## D. Còn chưa kiểm được
 Dòng hệ số < 1 tạo trước bản sửa (không còn tạo được qua API) — "không kiểm lại dòng cũ không đổi" chỉ kiểm được với dòng
 hợp lệ.
+
+---
+
+# VÒNG 5 — tấn công quy tắc id dòng hợp nhất (API §11 bảng quyết định, QUYET_DINH Q20; commit `0df2f98`, binary 09:52)
+
+Tệp mới `mr_r5.py`. Phiếu mẫu (đã ghi sổ và phiếu tạm): [P 2 Thùng × 24.000 thuế 10% · Q 3 × 500 · P 5 Lon × 1.000 · DV "Phí"
+100 thuế 10%] = hàng 54.600, thuế 4.810, tổng 59.410. Mỗi lần lưu "không chủ ý" phải hoặc `400 LINE_IDS_REQUIRED` và phiếu
+y nguyên, hoặc 200 với tổng / thuế / tồn / công nợ không đổi.
+
+## A. Số liệu (`./run_mr.sh` 2 lần, giống nhau)
+Bản mở rộng **148 test, 147 PASS, 1 FAIL** (≈5.073 check, 12 check lỗi — đều là M-19, M-20 ở cả phiếu ghi sổ và phiếu
+tạm), 0 × 5xx; bản chuẩn 6/6. Bộ QA bản chuẩn 45 test: bản chuẩn 45/45; `extended` 44/45 (vẫn chỉ khác biệt hợp lệ C6).
+
+## B. Đạt
+- Dòng không id cùng mặt hàng gọi bằng `product_code` (chữ thường) thay `product_id`, dòng DV có thuế gửi lại qua bí danh
+  `DICHVU`, `id` của dòng **phiếu khác** trên dòng đặc biệt, thiếu khóa ⇒ `400 LINE_IDS_REQUIRED`, phiếu y nguyên.
+- Kiểu sai: `id` dạng chuỗi / 1,5, `unit: 123` / `[]`, `vat_rate: true` ⇒ 400 VALIDATION, không ghi; `vat_rate: "10"` (chuỗi
+  số) nhận như số; `id: -1` coi như id lạ (dòng mới, khóa đầy đủ) — không đổi số.
+- Phiên bản cũ + body sai hình dạng ⇒ **409 VERSION_CONFLICT** (thắng LINE_IDS_REQUIRED); 3 vòng ba lần lưu đồng thời
+  cùng version (hai body hợp lệ + một body sai) ⇒ đúng một 200, version +1, tổng y nguyên, không 5xx.
+- Máy khách hiện đại (id trên dòng cũ, khóa tường minh trên dòng mới): đảo / bỏ / thêm dòng, đổi đơn vị hay bỏ thuế tường
+  minh trên dòng có id, hoán đổi hai dòng cùng mặt hàng khác đơn vị theo id ⇒ luôn 200, trường đúng như gửi, tổng tính lại
+  đúng (53.600 / 4.835 / 58.435).
+- Người bị che giá: dòng không id cùng mặt hàng với dòng bỏ có giá, `"unit_price": null` ⇒ 400, giá giữ 5.555; không có
+  khóa ⇒ giá mua mặc định 111; gõ 7 ⇒ 7 (đúng bảng, Q-02/Q-14); dòng mang id lạ không bao giờ thừa hưởng giá ẩn; PUT phiếu
+  mua đã ghi sổ ⇒ 403.
+- Kiểm kê và chuyển kho có dòng Thùng: lưu lại không id bỏ `unit` ⇒ giữ; không id với đơn vị khác ⇒ 400; tồn từng kho y
+  nguyên. Nạp phiếu khi tính năng bật, tắt `vat` + `unit_conversion` rồi lưu (cùng giá trị, có id) ⇒ 200, tổng giữ; thêm
+  dòng mới có thuế suất khi `vat` tắt ⇒ 400, phiếu y nguyên.
+
+## C. Lỗi mới
+
+### M-19 — Trung bình — BUG: cùng một `id` gửi hai lần ⇒ dòng thứ hai "thừa hưởng" đơn vị + thuế của dòng đặc biệt
+Body (phiếu ghi sổ hoặc tạm): dòng 1 = P Thùng với `id` của nó (khóa đầy đủ); dòng 3 (P 5 × 1.000, vốn là **Lon**) gửi kèm
+**cùng `id` của dòng Thùng**, không có `unit` / `vat_rate`; `id` dòng Lon không được nhắc. API §3.4: lần xuất hiện thứ hai
+của một id ⇒ dòng mới (mặc định: đơn vị gốc, thuế mặc định). Thực tế `200`, dòng đó thành **5 Thùng** thuế 10% ⇒ xuất thêm
+115 Lon (tồn 947 → 832), thuế 4.810 → 5.310, tổng và phải thu 59.410 → 59.910 — không ai yêu cầu đổi đơn vị hay thuế.
+Đề nghị: lần xuất hiện thứ hai của id xử lý như dòng không id (áp cùng kiểm tra "bỏ dòng đặc biệt / thiếu khóa" ⇒ 400), không
+sao chép trường từ dòng mang id đó.
+
+### M-20 — Trung bình — BUG: hoán đổi id giữa hai mặt hàng khác nhau lọt qua quy tắc
+Body: dòng P Thùng mang **id của dòng Q**, dòng Q mang **id của dòng P Thùng**, cả hai không gửi `unit` / `vat_rate`. Vì
+id dòng đặc biệt "có được nhắc" nên không kiểm tra; nhưng id đó đi kèm **mặt hàng khác** (đổi mặt hàng ⇒ dòng mới, Q-02).
+Kết quả `200`: 2 Thùng thành **2 Lon** không thuế ⇒ tồn P 947 → 993 (+46), thuế 4.810 → 10, tổng / phải thu 59.410 →
+54.610. Đề nghị: id đi kèm mặt hàng khác với dòng đang lưu được coi là "không nhắc tới" dòng đó (dòng đặc biệt bị bỏ ⇒ áp
+kiểm tra thiếu khóa ⇒ 400).
+
+## D. Đáng xem lại (đúng bảng quyết định)
+- Q-21: `"unit": null` / `"vat_rate": null` là "khóa có mặt" ⇒ ý người dùng: dòng thay thế không id nhận đơn vị gốc và bỏ
+  thuế (tổng 59.410 → 54.610); ghép theo vị trí với `vat_rate: null` ở mọi dòng bỏ hết thuế (→ 54.600). Đúng chữ bảng; rủi
+  ro với máy khách tự điền `null` cho mọi khóa không biết. Có thể chấp nhận nếu chỉ giao diện mới gửi các khóa này.

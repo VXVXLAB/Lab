@@ -15,7 +15,7 @@ MODE = os.environ.get("MR_MODE", "extended")
 if MODE == "base":
     import mr_base  # noqa: E402,F401
 else:
-    import mr_f, mr_c1, mr_c1_mask, mr_c4, mr_c3, mr_c5, mr_c6, mr_c8, mr_c7, mr_extra, mr_retest, mr_m3_c9, mr_m3_c10, mr_m3_c11, mr_m3_c12, mr_m3_cross, mr_r4, mr_general  # noqa: E402,F401
+    import mr_f, mr_c1, mr_c1_mask, mr_c4, mr_c3, mr_c5, mr_c6, mr_c8, mr_c7, mr_extra, mr_retest, mr_m3_c9, mr_m3_c10, mr_m3_c11, mr_m3_c12, mr_m3_cross, mr_r4, mr_r5, mr_general  # noqa: E402,F401
 
 results, secs = lib.run_all(sys.argv[1:] or None)
 n = len(results)
