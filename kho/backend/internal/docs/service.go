@@ -1124,6 +1124,9 @@ type CreditInfo struct {
 	Over           decimal.Decimal `json:"over"` // vượt bao nhiêu
 }
 
+// creditLockClass là lớp khóa advisory của kiểm tra hạn mức (âm: không trùng mã số mặt hàng của khóa tồn kho).
+const creditLockClass int32 = -8001
+
 type prevSale struct {
 	partnerID *int64
 	total     decimal.Decimal
@@ -1150,6 +1153,12 @@ func creditCheck(ctx context.Context, tx pgx.Tx, h header, newTotal decimal.Deci
 	}
 	if !limit.Valid {
 		return nil, nil
+	}
+	// Khóa advisory theo khách (đến hết transaction) TRƯỚC khi tính nợ: hai phiếu ghi sổ cùng lúc cho cùng khách được xếp
+	// hàng, phiếu sau thấy phiếu trước ⇒ không cùng lọt hạn mức (QA Q-05). Lớp khóa âm nên không trùng khóa mặt hàng+kho
+	// (luôn lấy trước khóa này ⇒ thứ tự khóa cố định, không deadlock).
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1::int4, $2::int4)`, creditLockClass, int32(*h.PartnerID)); err != nil {
+		return nil, err
 	}
 	rec, err := debt.Balance(ctx, tx, debt.Receivable, *h.PartnerID, nil)
 	if err != nil {

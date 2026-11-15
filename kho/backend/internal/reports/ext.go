@@ -404,6 +404,7 @@ type Profit struct {
 }
 
 type profitLine struct {
+	lineID               int64
 	docID                int64
 	docNo                string
 	docDate              util.Date
@@ -419,9 +420,95 @@ type profitLine struct {
 	estimated            bool
 }
 
-type costPoint struct {
-	date     time.Time
-	qty, val decimal.Decimal // lũy kế đến hết ngày
+// costEvent là một dòng sổ kho (đã ghi sổ) của một mã, theo thứ tự xử lý của bình quân gia quyền liên hoàn.
+type costEvent struct {
+	lineID  int64
+	docType string
+	qty     decimal.Decimal
+	amount  decimal.Decimal // thành tiền dòng (nhập mua, tồn đầu, trả NCC)
+}
+
+// costResult là giá vốn đơn vị của một dòng bán / khách trả hàng.
+type costResult struct {
+	unit      decimal.Decimal
+	estimated bool
+}
+
+// movingAverage chạy bình quân gia quyền liên hoàn (sau mỗi lần nhập) trên các dòng sổ kho của MỘT mã, đã sắp theo
+// ngày, nhập trước xuất sau trong ngày, rồi thứ tự ghi sổ. Trả giá vốn đơn vị của mỗi dòng bán / khách trả hàng.
+//   - nhập mua / tồn đầu kỳ: cộng SL và giá trị (thành tiền); tồn trước đó ≤ 0 ⇒ giá bình quân = đơn giá nhập;
+//   - bán: giá vốn = giá bình quân hiện tại; trừ SL và giá trị tương ứng;
+//   - khách trả hàng: nhập lại theo giá bình quân hiện tại;
+//   - trả hàng NCC: trừ SL và trừ giá trị theo thành tiền của phiếu trả (giá trị không xuống dưới 0);
+//   - chưa từng có lượng nhập (mua / tồn đầu) ⇒ giá mua mặc định, đánh dấu ước tính.
+func movingAverage(events []costEvent, defaultCost decimal.Decimal) map[int64]costResult {
+	out := make(map[int64]costResult)
+	var qty, val, avg decimal.Decimal
+	seen := false
+	for _, e := range events {
+		switch e.docType {
+		case "purchase", "opening":
+			if !e.qty.IsPositive() {
+				continue
+			}
+			unit := e.amount.DivRound(e.qty, 10)
+			if !qty.IsPositive() {
+				qty = qty.Add(e.qty)
+				avg = unit
+				val = decimal.Zero
+				if qty.IsPositive() {
+					val = qty.Mul(avg)
+				}
+			} else {
+				qty = qty.Add(e.qty)
+				val = val.Add(e.amount)
+				avg = val.DivRound(qty, 10)
+			}
+			seen = true
+		case "sale":
+			r := costResult{unit: avg}
+			if !seen {
+				r = costResult{unit: defaultCost, estimated: true}
+			}
+			out[e.lineID] = r
+			qty = qty.Sub(e.qty)
+			val = val.Sub(e.qty.Mul(r.unit))
+			if !qty.IsPositive() || val.IsNegative() {
+				val = decimal.Zero
+			}
+		case "sale_return":
+			r := costResult{unit: avg}
+			if !seen {
+				r = costResult{unit: defaultCost, estimated: true}
+			}
+			out[e.lineID] = r
+			wasEmpty := !qty.IsPositive()
+			qty = qty.Add(e.qty)
+			switch {
+			case !qty.IsPositive():
+				val = decimal.Zero
+			case wasEmpty:
+				val = qty.Mul(r.unit)
+			default:
+				val = val.Add(e.qty.Mul(r.unit))
+			}
+			if seen && qty.IsPositive() {
+				avg = val.DivRound(qty, 10)
+			}
+		case "purchase_return":
+			qty = qty.Sub(e.qty)
+			val = val.Sub(e.amount)
+			if val.IsNegative() {
+				val = decimal.Zero
+			}
+			if qty.IsPositive() {
+				avg = val.DivRound(qty, 10)
+			} else {
+				val = decimal.Zero
+			}
+		}
+	}
+	return out
 }
 
 func margin(rev, profit decimal.Decimal) *decimal.Decimal {
@@ -432,10 +519,9 @@ func margin(rev, profit decimal.Decimal) *decimal.Decimal {
 	return &m
 }
 
-// ProfitReport tính lãi gộp. Giá vốn một dòng bán = SL × giá nhập bình quân gia quyền của mã đó trên toàn bộ lượng nhập mua
-// và tồn đầu kỳ đã ghi sổ đến hết ngày bán (mọi kho; trả hàng NCC trừ cả SL và giá trị theo giá của chính nó; chuyển kho
-// không tính); chưa có lượng nhập ⇒ giá mua mặc định, đánh dấu "ước tính". Khách trả hàng: doanh thu và giá vốn âm, tính
-// cùng cách tại ngày trả. Dịch vụ: giá vốn 0. Giá vốn từng dòng làm tròn đồng; mọi cách nhóm cộng từ cùng các dòng.
+// ProfitReport tính lãi gộp. Giá vốn = bình quân gia quyền liên hoàn (sau mỗi lần nhập), tính chung mọi kho, tính lại
+// mỗi lần xem: xem movingAverage. Dịch vụ: giá vốn 0. Khách trả hàng: doanh thu và giá vốn âm. Giá vốn từng dòng làm tròn
+// đồng; mọi cách nhóm cộng từ cùng các dòng.
 func (s *Service) ProfitReport(ctx context.Context, p ProfitParams) (*Profit, error) {
 	if p.To.Before(p.From.Time) {
 		return nil, apperr.ValidationField("to", "Ngày kết thúc phải sau ngày bắt đầu")
@@ -457,7 +543,7 @@ func (s *Service) ProfitReport(ctx context.Context, p ProfitParams) (*Profit, er
 	if p.ProductID != nil {
 		w.Add(`l.product_id = ?`, *p.ProductID)
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT d.id, COALESCE(d.doc_no, d.draft_no), d.doc_date, d.doc_type, d.partner_id, pa.code, pa.name,
+	rows, err := s.Pool.Query(ctx, `SELECT l.id, d.id, COALESCE(d.doc_no, d.draft_no), d.doc_date, d.doc_type, d.partner_id, pa.code, pa.name,
 			l.product_id, pr.code, pr.name, pr.unit, pr.is_service, pr.purchase_price, l.qty, l.amount
 		FROM document_lines l JOIN documents d ON d.id = l.document_id JOIN products pr ON pr.id = l.product_id
 		LEFT JOIN partners pa ON pa.id = d.partner_id`+w.SQL()+` ORDER BY d.doc_date, d.id, l.line_no`, w.Args...)
@@ -468,7 +554,7 @@ func (s *Service) ProfitReport(ctx context.Context, p ProfitParams) (*Profit, er
 	prodSet := map[int64]bool{}
 	for rows.Next() {
 		var l profitLine
-		if err := rows.Scan(&l.docID, &l.docNo, &l.docDate, &l.docType, &l.partnerID, &l.partnerCode, &l.partner,
+		if err := rows.Scan(&l.lineID, &l.docID, &l.docNo, &l.docDate, &l.docType, &l.partnerID, &l.partnerCode, &l.partner,
 			&l.productID, &l.code, &l.name, &l.unit, &l.isService, &l.defaultCost, &l.qty, &l.amount); err != nil {
 			rows.Close()
 			return nil, err
@@ -482,38 +568,53 @@ func (s *Service) ProfitReport(ctx context.Context, p ProfitParams) (*Profit, er
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// Lũy kế nhập theo ngày cho từng mã.
+	// Bình quân gia quyền liên hoàn cho từng mã: mọi dòng sổ kho liên quan đến hết ngày "to".
 	ids := make([]int64, 0, len(prodSet))
+	defCost := map[int64]decimal.Decimal{}
+	for _, l := range lines {
+		if prodSet[l.productID] {
+			defCost[l.productID] = l.defaultCost
+		}
+	}
 	for id := range prodSet {
 		ids = append(ids, id)
 	}
-	curve := map[int64][]costPoint{}
+	costs := map[int64]costResult{}
 	if len(ids) > 0 {
-		crow, err := s.Pool.Query(ctx, `SELECT l.product_id, d.doc_date,
-				sum(CASE WHEN d.doc_type = 'purchase_return' THEN -l.qty ELSE l.qty END),
-				sum(CASE WHEN d.doc_type = 'purchase_return' THEN -l.amount ELSE l.amount END)
+		crow, err := s.Pool.Query(ctx, `SELECT l.product_id, l.id, d.doc_type, l.qty, l.amount
 			FROM document_lines l JOIN documents d ON d.id = l.document_id
-			WHERE d.status = 'posted' AND d.doc_type IN ('purchase', 'opening', 'purchase_return')
+			WHERE d.status = 'posted' AND d.doc_type IN ('purchase', 'opening', 'sale_return', 'sale', 'purchase_return')
 			  AND l.product_id = ANY($1) AND d.doc_date <= $2
-			GROUP BY l.product_id, d.doc_date ORDER BY l.product_id, d.doc_date`, ids, p.To)
+			ORDER BY l.product_id, d.doc_date,
+			  CASE WHEN d.doc_type IN ('purchase', 'opening', 'sale_return') THEN 0 ELSE 1 END,
+			  d.posted_at NULLS LAST, d.id, l.line_no`, ids, p.To)
 		if err != nil {
 			return nil, err
 		}
+		var cur int64
+		var evs []costEvent
+		flush := func() {
+			if len(evs) > 0 {
+				for k, v := range movingAverage(evs, defCost[cur]) {
+					costs[k] = v
+				}
+			}
+			evs = evs[:0]
+		}
 		for crow.Next() {
 			var pid int64
-			var dt time.Time
-			var q, v decimal.Decimal
-			if err := crow.Scan(&pid, &dt, &q, &v); err != nil {
+			var e costEvent
+			if err := crow.Scan(&pid, &e.lineID, &e.docType, &e.qty, &e.amount); err != nil {
 				crow.Close()
 				return nil, err
 			}
-			c := curve[pid]
-			cp := costPoint{date: dt, qty: q, val: v}
-			if n := len(c); n > 0 {
-				cp.qty, cp.val = c[n-1].qty.Add(q), c[n-1].val.Add(v)
+			if pid != cur {
+				flush()
+				cur = pid
 			}
-			curve[pid] = append(c, cp)
+			evs = append(evs, e)
 		}
+		flush()
 		crow.Close()
 		if err := crow.Err(); err != nil {
 			return nil, err
@@ -531,17 +632,15 @@ func (s *Service) ProfitReport(ctx context.Context, p ProfitParams) (*Profit, er
 		if l.isService {
 			continue
 		}
-		c := curve[l.productID]
-		k := sort.Search(len(c), func(j int) bool { return c[j].date.After(l.docDate.Time) }) - 1
-		var unit decimal.Decimal
-		if k >= 0 && c[k].qty.IsPositive() {
-			unit = c[k].val.DivRound(c[k].qty, 8)
-		} else {
-			unit = l.defaultCost
+		c, ok := costs[l.lineID]
+		if !ok { // không xảy ra (dòng trong kỳ luôn nằm trong chuỗi); phòng xa
+			c = costResult{unit: l.defaultCost, estimated: true}
+		}
+		if c.estimated {
 			l.estimated = true
 			out.EstimatedLines++
 		}
-		l.cost = util.RoundVND(l.qty.Mul(unit)).Mul(sign)
+		l.cost = util.RoundVND(l.qty.Mul(c.unit)).Mul(sign)
 	}
 	type acc struct {
 		row   ProfitRow

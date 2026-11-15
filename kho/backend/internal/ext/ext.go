@@ -426,7 +426,7 @@ func SaveFeatures(ctx context.Context, pool *pgxpool.Pool, userID int64, changes
 		}
 		after := effective(stored, st.Edition)
 		if before[FPermissions] && !after[FPermissions] && !confirm {
-			rows, err := tx.Query(ctx, `SELECT username || ' (' || full_name || ', ' || role || ')' FROM users WHERE role IN ('banhang','muahang','thukho') ORDER BY username`)
+			rows, err := tx.Query(ctx, `SELECT username || ' (' || full_name || ', ' || role || ')' FROM users WHERE role IN ('banhang','muahang','thukho') AND active ORDER BY username`)
 			if err != nil {
 				return err
 			}

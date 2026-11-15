@@ -3,8 +3,9 @@ package httpapi
 import (
 	"net/http"
 
-	"github.com/shopspring/decimal"
 	"strings"
+
+	"github.com/shopspring/decimal"
 
 	"kho/internal/apperr"
 	"kho/internal/cash"
@@ -65,12 +66,13 @@ func (s *Server) docAccess(r *http.Request, id int64, postedNeedsEdit bool) (str
 }
 
 func (s *Server) createDocument(w http.ResponseWriter, r *http.Request) {
-	var in docs.Input
-	if err := decode(r, &in); err != nil {
+	typ, _ := peekDoc(r)
+	if err := need(r, docWritePerm(typ)); err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	if err := need(r, docWritePerm(in.DocType)); err != nil {
+	var in docs.Input
+	if err := decode(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -103,13 +105,17 @@ func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	var in docs.Input
-	if err := decode(r, &in); err != nil {
+	typ, status, err := s.docAccess(r, id, true)
+	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	typ, _, err := s.docAccess(r, id, true)
-	if err != nil {
+	if err := maskedCostDocGuard(r, typ, status, "sửa"); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	var in docs.Input
+	if err := decode(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -141,12 +147,12 @@ func (s *Server) postDocument(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	var in versionBody
-	if err := decode(r, &in); err != nil {
+	if _, _, err := s.docAccess(r, id, false); err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	if _, _, err := s.docAccess(r, id, false); err != nil {
+	var in versionBody
+	if err := decode(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -165,12 +171,17 @@ func (s *Server) unpostDocument(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	var in versionBody
-	if err := decode(r, &in); err != nil {
+	typ, status, err := s.docAccess(r, id, true)
+	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	if _, _, err := s.docAccess(r, id, true); err != nil {
+	if err := maskedCostDocGuard(r, typ, status, "bỏ ghi sổ"); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	var in versionBody
+	if err := decode(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -223,6 +234,16 @@ func (s *Server) checkDocument(w http.ResponseWriter, r *http.Request) {
 
 // checkDocumentInput: POST /documents/check — kiểm tra phiếu chưa lưu (body như POST/PUT, thêm "id" nếu đang sửa).
 func (s *Server) checkDocumentInput(w http.ResponseWriter, r *http.Request) {
+	pTyp, pID := peekDoc(r)
+	if pID > 0 {
+		if _, _, err := s.docAccess(r, pID, false); err != nil {
+			writeErr(w, r, err)
+			return
+		}
+	} else if err := need(r, docWritePerm(pTyp)); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	var in struct {
 		docs.Input
 		ID int64 `json:"id"`
@@ -235,16 +256,14 @@ func (s *Server) checkDocumentInput(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, apperr.ValidationField("id", "id không hợp lệ"))
 		return
 	}
-	typ := in.DocType
-	if in.ID > 0 {
-		var err error
-		if typ, _, err = s.docAccess(r, in.ID, false); err != nil {
+	if in.ID > 0 && in.ID != pID {
+		writeErr(w, r, apperr.ValidationField("id", "id không hợp lệ"))
+		return
+	} else if in.ID == 0 {
+		if err := need(r, docWritePerm(in.DocType)); err != nil {
 			writeErr(w, r, err)
 			return
 		}
-	} else if err := need(r, docWritePerm(typ)); err != nil {
-		writeErr(w, r, err)
-		return
 	}
 	res, err := s.Docs.CheckInput(r.Context(), in.Input, in.ID)
 	if err != nil {
@@ -476,21 +495,43 @@ func (s *Server) voucherHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": h})
 }
 
-// keepHiddenPrices: dòng gửi lại id của chính phiếu mà đơn giá null (người sửa không thấy giá) ⇒ dùng lại đơn giá cũ.
+// maskedCostDocGuard: người không có cost.view không sửa / bỏ ghi sổ được phiếu mua, trả hàng NCC, tồn đầu kỳ ĐÃ GHI SỔ
+// (họ không thấy giá trên phiếu nên không thể biết mình đang đổi gì; QA Q-02). Phiếu tạm vẫn sửa được.
+func maskedCostDocGuard(r *http.Request, typ, status, action string) error {
+	if costDocTypes[typ] && status == docs.StatusPosted && !can(r, ext.PCostView) {
+		return apperr.Forbidden("Bạn không có quyền xem giá mua nên không được " + action + " chứng từ \"" + docs.TypeNames[typ] +
+			"\" đã ghi sổ (bạn không thấy đơn giá, thành tiền trên phiếu). Hãy nhờ người có quyền xem giá vốn thực hiện.")
+	}
+	return nil
+}
+
+// keepHiddenPrices: người không thấy giá mua sửa phiếu tạm mua / trả NCC / tồn đầu kỳ ⇒ dòng gửi lại id của chính phiếu
+// (cùng mặt hàng) luôn giữ đơn giá đang lưu, dù gửi null hay gửi một số "mù" (không đổi được giá đang có).
 func (s *Server) keepHiddenPrices(r *http.Request, id int64, in *docs.Input) error {
 	old, err := s.Docs.Get(r.Context(), s.Pool, id)
 	if err != nil {
 		return err
 	}
-	prices := map[int64]*decimal.Decimal{}
+	type kept struct {
+		product int64
+		code    string
+		price   *decimal.Decimal
+	}
+	prices := map[int64]kept{}
 	for _, l := range old.Lines {
-		prices[l.ID] = l.UnitPrice
+		prices[l.ID] = kept{l.ProductID, l.ProductCode, l.UnitPrice}
 	}
 	for i := range in.Lines {
-		if in.Lines[i].UnitPrice == nil && in.Lines[i].ID != 0 {
-			if p, ok := prices[in.Lines[i].ID]; ok && p != nil {
-				v := *p
-				in.Lines[i].UnitPrice = &v
+		li := &in.Lines[i]
+		k, ok := prices[li.ID]
+		if li.ID == 0 || !ok {
+			continue
+		}
+		if li.ProductID == k.product || (li.ProductID == 0 && strings.EqualFold(strings.TrimSpace(li.ProductCode), k.code)) {
+			li.UnitPrice = nil
+			if k.price != nil {
+				v := *k.price
+				li.UnitPrice = &v
 			}
 		}
 	}

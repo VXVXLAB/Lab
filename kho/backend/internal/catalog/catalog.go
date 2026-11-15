@@ -587,6 +587,8 @@ func (s *Service) SavePartner(ctx context.Context, userID, id int64, in PartnerI
 	if in.OpeningPayable != nil {
 		op = *in.OpeningPayable
 	}
+	// Làm tròn như khi lưu (NUMERIC(18,2)) rồi mới so với số cũ (QUYET_DINH B12).
+	or, op = or.Round(2), op.Round(2)
 	var out *Partner
 	err := db.InTx(ctx, s.Pool, func(tx pgx.Tx) error {
 		key := util.Fold(in.Code + " " + in.Name + " " + in.Phone + " " + in.TaxCode)
@@ -644,6 +646,10 @@ func (s *Service) DeletePartner(ctx context.Context, userID, id int64) error {
 	return db.InTx(ctx, s.Pool, func(tx pgx.Tx) error {
 		b, err := s.GetPartner(ctx, tx, id)
 		if err != nil {
+			return err
+		}
+		// Số dư đầu kỳ không có ngày nên thuộc cả kỳ đã khóa: xóa đối tác đang có số dư đầu ⇒ bị chặn khi khóa sổ.
+		if err := openingLock(ctx, tx, !b.OpeningReceivable.IsZero() || !b.OpeningPayable.IsZero()); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM partners WHERE id=$1`, id); err != nil {
@@ -718,7 +724,7 @@ func (s *Service) SaveCashAccount(ctx context.Context, userID, id int64, in Cash
 	}
 	ob := decimal.Zero
 	if in.OpeningBalance != nil {
-		ob = *in.OpeningBalance
+		ob = in.OpeningBalance.Round(2)
 	}
 	var out *CashAccount
 	err := db.InTx(ctx, s.Pool, func(tx pgx.Tx) error {
@@ -729,7 +735,8 @@ func (s *Service) SaveCashAccount(ctx context.Context, userID, id int64, in Cash
 			if err != nil {
 				return err
 			}
-			if err := openingLock(ctx, tx, !b.OpeningBalance.Equal(ob)); err != nil {
+			// Đổi loại tiền mặt ↔ ngân hàng khi có số dư đầu cũng là đổi số dư đầu của quỹ / ngân hàng.
+			if err := openingLock(ctx, tx, !b.OpeningBalance.Equal(ob) || (b.Kind != in.Kind && !ob.IsZero())); err != nil {
 				return err
 			}
 		} else if err := openingLock(ctx, tx, !ob.IsZero()); err != nil {
@@ -776,6 +783,9 @@ func (s *Service) DeleteCashAccount(ctx context.Context, userID, id int64) error
 	return db.InTx(ctx, s.Pool, func(tx pgx.Tx) error {
 		b, err := s.GetCashAccount(ctx, tx, id)
 		if err != nil {
+			return err
+		}
+		if err := openingLock(ctx, tx, !b.OpeningBalance.IsZero()); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM cash_accounts WHERE id=$1`, id); err != nil {

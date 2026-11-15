@@ -83,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(rejectNUL)
+		r.Use(nfcQuery)
 		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			if err := s.Pool.Ping(r.Context()); err != nil {
 				writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
@@ -103,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 			r.With(requireAdmin).Put("/role-permissions", s.putRolePermissions)
 			r.Get("/period-lock", s.getPeriodLock)
 			r.With(requireAdmin).Put("/period-lock", s.putPeriodLock)
+			r.With(requireAdmin).Get("/audit", s.listAudit)
 			r.Get("/import/{kind}/template", s.importTemplate)
 			r.Post("/import/{kind}", s.importRun)
 			r.Post("/auth/change-password", s.changePassword)
@@ -217,7 +219,13 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: CookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		Secure: s.SecureCookie, MaxAge: int(auth.SessionTTL.Seconds())})
-	writeJSON(w, http.StatusOK, map[string]any{"user": u})
+	// Như /auth/me: kèm quyền và công tắc tính năng (giao diện khỏi gọi thêm /auth/me).
+	x, err := s.loadExt(r.Context(), u.Role)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": u, "permissions": x.perms.List(), "features": x.st.AllFlags()})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

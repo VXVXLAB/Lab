@@ -89,3 +89,15 @@ func (n NullInt) MarshalJSON() ([]byte, error) {
 	}
 	return []byte(strconv.FormatInt(n.Int, 10)), nil
 }
+
+// OptDate là trường ngày tùy chọn: Set=false ⇒ không gửi; Set=true và Val rỗng ⇒ gửi null / "".
+type OptDate struct {
+	Set bool
+	Val Date
+}
+
+// UnmarshalJSON đọc chuỗi YYYY-MM-DD / null.
+func (o *OptDate) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	return o.Val.UnmarshalJSON(b)
+}

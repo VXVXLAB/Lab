@@ -3,6 +3,7 @@ package httpapi
 // Endpoint bản mở rộng đợt M2: giá theo khách (C6), hàng dưới tồn tối thiểu (C5), tuổi nợ (C8), lãi gộp (C7).
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -139,6 +140,22 @@ func (s *Server) salePrice(w http.ResponseWriter, r *http.Request) {
 	qs, err := pricing.Resolve(r.Context(), s.Pool, *pid, ids, d)
 	if err != nil {
 		writeErr(w, r, err)
+		return
+	}
+	// Như /products/price-info: id không tồn tại ⇒ 404 kèm missing_ids.
+	found := make(map[int64]bool, len(qs))
+	for _, q := range qs {
+		found[q.ProductID] = true
+	}
+	missing := []int64{}
+	for _, id := range ids {
+		if !found[id] {
+			missing = append(missing, id)
+			found[id] = true
+		}
+	}
+	if len(missing) > 0 {
+		writeErr(w, r, apperr.New(http.StatusNotFound, apperr.CodeNotFound, fmt.Sprintf("Không tìm thấy mặt hàng có mã số %v", missing), map[string]any{"missing_ids": missing}))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"partner_id": *pid, "date": d, "items": qs})

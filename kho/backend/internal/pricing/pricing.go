@@ -174,7 +174,7 @@ func Save(ctx context.Context, pool *pgxpool.Pool, userID, partnerID int64, item
 			return err
 		}
 		seen := map[int64]bool{}
-		var keep []int64
+		keep := []int64{}
 		for i, it := range items {
 			pid := it.ProductID
 			if pid == 0 && strings.TrimSpace(it.ProductCode) != "" {

@@ -5,6 +5,7 @@ package importx
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -161,6 +162,14 @@ type sheetData struct {
 	colIdx    map[string]int // key → chỉ số cột (0-based)
 	present   map[string]bool
 	rows      []dataRow
+	// formulaNoValue: ô công thức không có giá trị lưu sẵn (file do thư viện tạo, chưa mở bằng Excel) — báo lỗi
+	// dòng thay vì coi là ô trống (QA M-08).
+	formulaNoValue []cellRef
+}
+
+type cellRef struct {
+	row int
+	key string
 }
 
 type dataRow struct {
@@ -216,18 +225,20 @@ func readSheet(data []byte, kind string, feats map[string]bool) (*sheetData, err
 				break
 			}
 			idx := map[string]int{}
+			var dups []string
 			for i, v := range vals {
-				h := normHeader(v)
+				h := normHeader(util.NFC(v))
 				if h == "" {
 					continue
 				}
 				for _, c := range cols {
-					if _, done := idx[c.key]; done {
-						continue
-					}
 					for _, a := range c.aliases {
 						if h == a {
-							idx[c.key] = i
+							if _, done := idx[c.key]; done {
+								dups = append(dups, "\""+c.title+"\"")
+							} else {
+								idx[c.key] = i
+							}
 							break
 						}
 					}
@@ -240,6 +251,9 @@ func readSheet(data []byte, kind string, feats map[string]bool) (*sheetData, err
 				}
 			}
 			if ok && len(idx) > 0 {
+				if len(dups) > 0 {
+					return nil, apperr.ValidationField("file", fmt.Sprintf("Dòng tiêu đề (dòng %d) có cột xuất hiện hơn một lần: %s. Mỗi cột chỉ được có một lần.", rowNum, strings.Join(dups, ", ")))
+				}
 				sd.colIdx, sd.headerRow = idx, rowNum
 				sd.present = map[string]bool{}
 				for k := range idx {
@@ -251,19 +265,31 @@ func readSheet(data []byte, kind string, feats map[string]bool) (*sheetData, err
 		dr := dataRow{num: rowNum, cells: map[string]cell{}}
 		blank := true
 		for key, i := range sd.colIdx {
-			if i >= len(vals) {
-				continue
+			t := ""
+			if i < len(vals) {
+				t = strings.TrimSpace(util.NFC(vals[i]))
 			}
-			t := strings.TrimSpace(vals[i])
+			axis, _ := excelize.CoordinatesToCellName(i+1, rowNum)
 			if t == "" {
+				if fm, _ := f.GetCellFormula(sheet, axis); fm != "" {
+					sd.formulaNoValue = append(sd.formulaNoValue, cellRef{rowNum, key})
+					blank = false
+				}
 				continue
 			}
 			blank = false
 			c := cell{text: t}
 			if colByKey(kind, key).numeric {
-				axis, _ := excelize.CoordinatesToCellName(i+1, rowNum)
 				ct, _ := f.GetCellType(sheet, axis)
-				c.numeric = ct != excelize.CellTypeSharedString && ct != excelize.CellTypeInlineString && ct != excelize.CellTypeFormula
+				switch ct {
+				case excelize.CellTypeSharedString, excelize.CellTypeInlineString:
+				case excelize.CellTypeFormula:
+					// Công thức có giá trị lưu sẵn: giá trị số gốc (RawCellValue) ⇒ đọc như ô số.
+					_, err := decimal.NewFromString(t)
+					c.numeric = err == nil
+				default:
+					c.numeric = true
+				}
 			}
 			dr.cells[key] = c
 		}
@@ -302,6 +328,13 @@ func colByKey(kind, key string) column {
 }
 
 var thousandsDot = regexp.MustCompile(`^-?\d{1,3}(\.\d{3})+$`)
+
+// ambiguousDot: ô chữ có đúng một dấu chấm và 1–2 chữ số sau ("1.25", "2.5") — kiểu Anh (thập phân) hay gõ nhầm?
+// Không đoán: báo lỗi dòng (QA Q-06). "1.250" vẫn là 1250 (dấu chấm ngăn nghìn).
+var ambiguousDot = regexp.MustCompile(`^-?\d+\.\d{1,2}$`)
+
+// ErrAmbiguousDot: số viết bằng dấu chấm thập phân trong ô chữ.
+var ErrAmbiguousDot = errors.New("dấu chấm thập phân")
 var thousandsDotComma = regexp.MustCompile(`^-?\d{1,3}(\.\d{3})*,\d+$`)
 
 // ParseNumber đọc số kiểu Việt Nam: "1.500.000" = 1500000; "2,5" = 2,5; "1.500,75" = 1500,75; "2.5" = 2,5.
@@ -311,6 +344,9 @@ func ParseNumber(s string, numericCell bool) (decimal.Decimal, error) {
 	s = strings.NewReplacer(" ", "", " ", "", "đ", "", "₫", "", "VND", "", "vnd", "").Replace(s)
 	if numericCell {
 		return decimal.NewFromString(s)
+	}
+	if ambiguousDot.MatchString(s) {
+		return decimal.Zero, ErrAmbiguousDot
 	}
 	switch {
 	case thousandsDotComma.MatchString(s):
@@ -347,6 +383,9 @@ func Run(ctx context.Context, pool *pgxpool.Pool, kind string, data []byte, opt 
 		return nil, err
 	}
 	res := &Result{Kind: kind, DryRun: opt.DryRun, Rows: len(sd.rows), Errors: []RowError{}}
+	for _, fc := range sd.formulaNoValue {
+		addErr(res, fc.row, kind, fc.key, "Ô công thức chưa có giá trị, hãy mở file bằng Excel và lưu lại rồi nhập lại")
+	}
 	err = db.InTx(ctx, pool, func(tx pgx.Tx) error {
 		var apply func() error
 		var err error
@@ -407,6 +446,10 @@ func num(res *Result, kind string, r dataRow, key string, allowNeg bool) (*decim
 		return nil, true
 	}
 	d, err := ParseNumber(c.text, c.numeric)
+	if errors.Is(err, ErrAmbiguousDot) {
+		addErr(res, r.num, kind, key, fmt.Sprintf("\"%s\": dấu chấm là dấu ngăn nghìn theo kiểu Việt Nam nên số này không rõ nghĩa. Hãy viết số thập phân bằng dấu phẩy (vd. 2,5) hoặc dùng ô kiểu số của Excel", c.text))
+		return nil, false
+	}
 	if err != nil {
 		addErr(res, r.num, kind, key, fmt.Sprintf("\"%s\" không phải là số", c.text))
 		return nil, false
@@ -895,6 +938,18 @@ func planOpeningStock(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result
 		byWh[w.id] = append(byWh[w.id], line{p: p, qty: qty.Round(3), price: pr})
 		res.Creates++
 	}
+	// Cảnh báo (không chặn) khi kho đó đã có phiếu tồn đầu kỳ cùng ngày — dễ nhập trùng cùng một file (QA Q-08).
+	for _, w := range whOrder {
+		var drafts, posted int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='draft'), count(*) FILTER (WHERE status='posted')
+			FROM documents WHERE doc_type='opening' AND warehouse_id=$1 AND doc_date=$2`, w.id, opt.Date).Scan(&drafts, &posted); err != nil {
+			return nil, err
+		}
+		if drafts+posted > 0 {
+			res.Notes = append(res.Notes, fmt.Sprintf("Kho %s đã có %d phiếu tồn đầu kỳ tạm và %d phiếu đã ghi sổ ngày %s. Nhập tiếp sẽ tạo thêm phiếu mới (không gộp, không thay) — kiểm tra để khỏi nhập trùng.",
+				w.code, drafts, posted, opt.Date.VN()))
+		}
+	}
 	return func() error {
 		for _, w := range whOrder {
 			lines := byWh[w.id]
@@ -1076,6 +1131,8 @@ func Template(ctx context.Context, q db.Q, kind string, feats map[string]bool) (
 		"• Giữ nguyên dòng tiêu đề (tên cột); thứ tự cột không quan trọng, có thể bỏ các cột không bắt buộc.",
 		"• Xóa 2 dòng ví dụ rồi điền dữ liệu từ dòng 2. Dòng trống bị bỏ qua. Tối đa 20.000 dòng, file ≤ 10 MB.",
 		"• Số viết kiểu Việt Nam: 1.500.000 (dấu chấm ngăn nghìn), 2,5 (dấu phẩy thập phân); hoặc ô kiểu số của Excel.",
+		"• Trong ô chữ, số có một dấu chấm và 1–2 chữ số sau (vd. 1.25, 2.5) bị báo lỗi vì không rõ là thập phân hay ngăn nghìn: hãy viết 1,25 / 2,5 hoặc dùng ô kiểu số. 1.250 được hiểu là một nghìn hai trăm năm mươi.",
+		"• Ô công thức phải có giá trị đã tính (mở file bằng Excel và lưu lại); tiêu đề cột không được lặp.",
 		"• Bấm \"Kiểm tra\" để xem trước (không ghi gì). Khi không còn lỗi, bấm \"Nhập\": tất cả được ghi cùng lúc, có lỗi thì không ghi gì.",
 		"",
 		"CÁC CỘT:",

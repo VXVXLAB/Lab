@@ -585,6 +585,14 @@ Gợi ý frontend: nhận sự kiện ⇒ invalidate query liên quan (TanStack 
 | 52–60 | GET | `/api/reports/stock-summary`, `stock-nxt`, `stock-ledger`, `sales`, `purchases`, `debt-summary`, `debt-ledger`, `cash-book`, `draft-demand` |
 | 61 | GET | `/api/dashboard` |
 | 62 | GET | `/api/events` (SSE) |
+| 69–70 | GET, PUT | `/api/features` (bản mở rộng, mục 8.1) |
+| 71–72 | GET, PUT | `/api/role-permissions` (quản trị, mục 8.2) |
+| 73–74 | GET, PUT | `/api/period-lock` (mục 8.3) |
+| 75–76 | GET, POST | `/api/import/{loai}/template`, `/api/import/{loai}` (mục 8.4) |
+| 77–79 | GET, PUT, DELETE | `/api/partners/{id}/prices`, `/api/partners/{id}/prices/{product_id}` (mục 9.2) |
+| 80 | GET | `/api/products/sale-price` (mục 9.2) |
+| 81–83 | GET | `/api/reports/low-stock`, `/api/reports/debt-aging`, `/api/reports/profit` (mục 9) |
+| 84 | GET | `/api/audit` (quản trị, mục 10) |
 
 ---
 
@@ -640,12 +648,16 @@ Quyền: `sale.write`, `purchase.write`, `stock.write`, `cash.write`, `catalog.w
 - Không có `debt.view`: `old_debt`, `total_debt`, `total_receivable`, `total_payable`, `opening_receivable`, `opening_payable`, `receivable`, `payable`; file xuất chứng từ bỏ Nợ cũ/Tổng nợ.
 - Không có `cash.view`: `cash_balance`, `bank_balance`, `opening_balance` (tài khoản tiền).
 - Không có `report.view`: `revenue_today`, `revenue_month`.
-- Khi lưu, trường bị che không bị ghi đè: sửa mặt hàng giữ `purchase_price` cũ (tạo mới ⇒ 0); sửa đối tác giữ số dư đầu kỳ; sửa tài khoản tiền giữ `opening_balance`; sửa chứng từ mua/tồn đầu: dòng gửi lại `id` với `unit_price: null` giữ đơn giá cũ (dòng mới ⇒ giá mua mặc định).
+- Khi lưu, trường bị che không bị ghi đè: sửa mặt hàng giữ `purchase_price` cũ (tạo mới ⇒ 0); sửa đối tác giữ số dư đầu kỳ; sửa tài khoản tiền giữ `opening_balance`; sửa phiếu **tạm** mua / trả NCC / tồn đầu: dòng gửi lại `id` (cùng mặt hàng) **luôn giữ đơn giá đang lưu**, dù gửi `null`, bỏ trống hay gửi một số khác (dòng mới không có giá ⇒ giá mua mặc định; đổi mặt hàng của dòng ⇒ coi như dòng mới).
+- Không có `cost.view`: **không** sửa (`PUT`) và **không** bỏ ghi sổ được phiếu mua / trả NCC / tồn đầu **đã ghi sổ** ⇒ `403 FORBIDDEN` ("Bạn không có quyền xem giá mua nên không được sửa chứng từ … đã ghi sổ…"). Ghi sổ phiếu tạm vẫn được.
+- Kiểm tra quyền chạy trước khi đọc body: thiếu quyền ⇒ 403 kể cả khi JSON sai kiểu (`POST /documents` đọc trước `doc_type`; `PUT`/`post`/`unpost`/`check` theo phiếu đang có).
 - Sự kiện SSE không mang số liệu tiền.
 
 ### 8.3 Khóa sổ (`period_lock`)
 - `GET /api/period-lock` (mọi người dùng) → `{"lock_date": "2026-01-31"}` (hoặc `null`).
-- `PUT /api/period-lock` (quản trị) body `{"lock_date": "2026-01-31", "reason": "Chốt sổ tháng 1"}`; `lock_date: null` = bỏ khóa. Ngày tương lai ⇒ 400. Có audit (lưu cả lý do).
+- `PUT /api/period-lock` (quản trị) body `{"lock_date": "2026-01-31", "reason": "Chốt sổ tháng 1"}`; **bắt buộc có trường `lock_date`** (thiếu ⇒ 400), `lock_date: null` = bỏ khóa. Ngày tương lai ⇒ 400. Có audit (lưu cả lý do).
+- `GET /api/period-lock` trả thêm `"history"`: `[{"at", "user_id", "user_name", "old_lock_date", "new_lock_date", "reason"}]` (mới nhất trước, tối đa 200, từ nhật ký).
+- Khi đang khóa: xóa đối tác có công nợ đầu kỳ ≠ 0, xóa tài khoản tiền có số dư đầu ≠ 0, đổi loại tiền mặt ↔ ngân hàng của tài khoản có số dư đầu ≠ 0 ⇒ `422 PERIOD_LOCKED`. Số dư đầu so sánh **sau khi làm tròn 2 chữ số** (`"1000.004"` = 1000 ⇒ không phải thay đổi).
 - Khi bật, với ngày khóa L (`422 PERIOD_LOCKED`, message "Kỳ đến dd/mm/yyyy đã khóa sổ…", `details.lock_date`):
   - tạo chứng từ (kể cả phiếu tạm) hoặc phiếu thu chi có ngày ≤ L;
   - ghi sổ, bỏ ghi sổ chứng từ có ngày ≤ L; sửa chứng từ **đã ghi sổ** có ngày cũ hoặc ngày mới ≤ L (không sửa trong kỳ, không dời vào/ra kỳ);
@@ -679,6 +691,7 @@ Quyền: `sale.write`, `purchase.write`, `stock.write`, `cash.write`, `catalog.w
 | 69–70 | GET, PUT | `/api/features` |
 | 71–72 | GET, PUT | `/api/role-permissions` |
 | 73–74 | GET, PUT | `/api/period-lock` |
+| 84 | GET | `/api/audit` (quản trị, mục 10) |
 | 75–76 | GET, POST | `/api/import/{loai}/template`, `/api/import/{loai}` |
 
 
@@ -697,9 +710,9 @@ nhập mới chỉ được áp dụng khi **có gửi** và tính năng bật (
 
 ### 9.2 Giá theo khách (`price_list`)
 - `GET /api/partners/{id}/prices` (mọi vai trò) → `{"partner_id", "items": [{"product_id", "product_code", "product_name", "unit", "price", "default_price", "note", "updated_by_name", "updated_at"}]}`. Đối tác không phải khách hàng ⇒ 400.
-- `PUT /api/partners/{id}/prices` (`sale.write`) body `{"items": [{"product_id": 12 | "product_code": "A", "price": 900, "note": "Hợp đồng"}], "replace": false}` — thêm/sửa từng mã; `replace: true` xóa các giá riêng không có trong danh sách. Giá < 0, mã lặp, mã không có ⇒ 400 (`details.line_no`). Dùng cho nút "Lưu giá này cho khách" (gửi một dòng). Có audit.
+- `PUT /api/partners/{id}/prices` (`sale.write`) body `{"items": [{"product_id": 12 | "product_code": "A", "price": 900, "note": "Hợp đồng"}], "replace": false}` — thêm/sửa từng mã; `replace: true` xóa các giá riêng không có trong danh sách (danh sách rỗng ⇒ xóa hết). Giá < 0, mã lặp, mã không có ⇒ 400 (`details.line_no`). Dùng cho nút "Lưu giá này cho khách" (gửi một dòng). Có audit.
 - `DELETE /api/partners/{id}/prices/{product_id}` (`sale.write`) → `{"ok": true}`; chưa có ⇒ 404.
-- `GET /api/products/sale-price?partner_id=&ids=1,2,3&date=YYYY-MM-DD` (mọi vai trò; `date` mặc định hôm nay = ngày phiếu) → giá tự điền và nguồn:
+- `GET /api/products/sale-price?partner_id=&ids=1,2,3&date=YYYY-MM-DD` (mọi vai trò; `date` mặc định hôm nay = ngày phiếu; id không tồn tại ⇒ `404` với `details.missing_ids` như `price-info`) → giá tự điền và nguồn:
   ```json
   {"partner_id": 5, "date": "2026-12-31", "items": [
     {"product_id": 1, "price": 900, "source": "customer", "source_name": "Giá riêng của khách", "default_price": 1000, "document_id": null, "doc_no": null, "doc_date": null, "note": "Hợp đồng"},
@@ -720,6 +733,7 @@ nhập mới chỉ được áp dụng khi **có gửi** và tính năng bật (
                "loss_lines": [ …Warning, chỉ khi còn bán lỗ chưa xác nhận… ],
                "confirm": ["confirm_credit", "confirm_loss"]}}}
   ```
+  Khóa theo khách: hai phiếu ghi sổ cùng lúc cho cùng khách được xếp hàng, phiếu sau tính cả phiếu trước. Người không có `debt.view`: `message` không có con số ("Khách … sẽ vượt hạn mức công nợ nếu ghi sổ phiếu này (bạn không có quyền xem số nợ)…").
   Gửi lại `POST /documents/{id}/post` (hoặc PUT) với `"confirm_credit": true` (và `"confirm_loss": true` nếu `confirm` có). Thứ tự: thiếu hàng (422) trước; sau đó nếu còn vượt hạn mức chưa xác nhận ⇒ `CREDIT_WARNING` (gộp cả các dòng lỗ chưa xác nhận để xác nhận một lần); nếu chỉ còn bán lỗ ⇒ `LOSS_WARNING` như cũ. Hai cờ độc lập. Ghi sổ sau khi xác nhận ⇒ audit `credit_confirmed` (người xác nhận, số liệu). Người không có `debt.view` nhận các con số `receivable`, `total_after`, `credit_limit`, `over` là `null`.
 - `GET /api/reports/debt-aging?as_of=YYYY-MM-DD&partner_id=&q=[&format=xlsx|docx]` (`debt.view`) — tuổi nợ phải thu đến hết ngày `as_of` (mặc định hôm nay):
   ```json
@@ -742,7 +756,13 @@ nhập mới chỉ được áp dụng khi **có gửi** và tính năng bật (
  "estimated_lines": 0}
 ```
 - `group_by=product`: khóa `product_id, product_code, product_name, unit, qty` (SL bán ròng); `group_by=customer`: `partner_id, partner_code, partner_name`. `margin` = lãi / doanh thu × 100 (null khi doanh thu 0).
-- Giá vốn một dòng = round(SL × giá nhập bình quân gia quyền, 0): bình quân trên toàn bộ dòng **nhập mua** và **tồn đầu kỳ** đã ghi sổ có ngày ≤ ngày bán (mọi kho), **trả hàng NCC** trừ cả SL và giá trị (theo thành tiền của chính nó); chuyển kho, khách trả hàng không tính là nhập. Chưa có lượng nhập nào (hoặc SL lũy kế ≤ 0) ⇒ giá mua mặc định, `estimated: true`. Dịch vụ: giá vốn 0 (doanh thu vẫn tính). Khách trả hàng: doanh thu và giá vốn âm, giá vốn tính cùng cách tại ngày trả. Tính lại mỗi lần xem ⇒ sửa / nhập lùi ngày phiếu mua thay đổi lãi quá khứ.
+- Giá vốn một dòng = round(SL × giá vốn đơn vị, 0), giá vốn đơn vị theo **bình quân gia quyền liên hoàn** (sau mỗi lần nhập), chung mọi kho, tính lại mỗi lần xem từ toàn bộ dòng sổ đã ghi sổ của mã đó (kể cả trước kỳ xem): duyệt theo ngày; cùng ngày **nhập trước, xuất sau** (nhập = nhập mua, tồn đầu kỳ, khách trả hàng; xuất = bán, trả NCC), rồi theo thứ tự ghi sổ.
+  - nhập mua / tồn đầu: cộng SL và giá trị (thành tiền dòng); tồn trước đó ≤ 0 ⇒ giá bình quân = đơn giá nhập;
+  - bán: giá vốn = SL × bình quân hiện tại; trừ SL và giá trị tương ứng;
+  - khách trả hàng: nhập lại theo bình quân hiện tại (doanh thu và giá vốn âm đúng số đó);
+  - trả NCC: trừ SL và trừ giá trị theo thành tiền của phiếu trả (giá trị không xuống dưới 0);
+  - chuyển kho bỏ qua; chưa từng có nhập mua / tồn đầu trước dòng bán ⇒ giá mua mặc định, `estimated: true`. Dịch vụ: giá vốn 0.
+  - Ví dụ: mua 100 @10, bán hết, mua 1 @100, bán 1 @120 ⇒ giá vốn dòng cuối 100, lãi 20. Sửa / nhập lùi ngày phiếu mua ⇒ lãi các kỳ sau đó thay đổi.
 - Ba cách nhóm có cùng tổng; tổng doanh thu = `/reports/sales?include_returns=true` cùng kỳ.
 
 | # | Phương thức | Đường dẫn (đợt M2) |
@@ -750,3 +770,25 @@ nhập mới chỉ được áp dụng khi **có gửi** và tính năng bật (
 | 77–79 | GET, PUT, DELETE | `/api/partners/{id}/prices`, `/api/partners/{id}/prices/{product_id}` |
 | 80 | GET | `/api/products/sale-price` |
 | 81–83 | GET | `/api/reports/low-stock`, `/api/reports/debt-aging`, `/api/reports/profit` |
+
+
+## 10. Sửa sau QA bản mở rộng (M1 + M2)
+
+- `POST /api/auth/login` trả thêm `permissions` và `features` (cùng dạng `/api/auth/me`): `{"user": {...}, "permissions": [...], "features": {...}}`.
+- `PUT /api/features`: mỗi giá trị trong `features` phải đúng là `true`/`false`; `null`, chuỗi, số ⇒ `400 VALIDATION` (`details.field = "features.<khóa>"`).
+- Tắt `permissions` chỉ bị `409 IN_USE` khi còn người dùng **đang hoạt động** mang vai trò mới.
+- Mọi chuỗi gửi lên được chuẩn hóa Unicode **NFC** (body JSON kể cả chuỗi thoát `\uXXXX`, giá trị query string, ô Excel nhập vào); dữ liệu cũ của các bảng danh mục được chuẩn hóa một lần (migration 007). Mã NFC / NFD giống nhau ⇒ trùng mã.
+- `price-info`: `cost_source` là `null` với người không có `cost.view`.
+- Nhập Excel:
+  - ô công thức không có giá trị lưu sẵn ⇒ lỗi dòng "Ô công thức chưa có giá trị, hãy mở file bằng Excel và lưu lại rồi nhập lại" (không coi là 0); ô công thức có giá trị số lưu sẵn đọc như ô số;
+  - ô **chữ** có đúng một dấu chấm và 1–2 chữ số sau (`1.25`, `2.5`) ⇒ lỗi dòng yêu cầu dùng dấu phẩy thập phân hoặc ô số; `1.250` vẫn là 1250; ô số không bị ảnh hưởng (trang "Hướng dẫn" của mẫu có ghi);
+  - một cột xuất hiện hai lần ở dòng tiêu đề ⇒ 400 nêu tên cột;
+  - nhập tồn đầu kỳ khi kho đó đã có phiếu tồn đầu (tạm hoặc đã ghi sổ) cùng ngày ⇒ `notes` cảnh báo (vẫn nhập được).
+- `GET /api/audit?entity=&entity_id=&action=&user_id=&from=&to=&limit=100&offset=0` (chỉ quản trị; có ở cả bản chuẩn) — nhật ký mọi thay đổi, mới nhất trước. `entity`/`action` nhận nhiều giá trị cách nhau dấu phẩy; `from`/`to` theo ngày giờ Việt Nam; `limit` 1–1000.
+  ```json
+  {"items": [{"id": 812, "at": "2026-11-15T09:01:02Z", "user_id": 1, "user_name": "Quản trị", "username": "admin",
+              "entity": "period_lock", "entity_id": 1, "action": "updated",
+              "before": {"lock_date": null}, "after": {"lock_date": "2024-06-30", "reason": "Chốt sổ"}}],
+   "total": 37, "limit": 100, "offset": 0}
+  ```
+  Các `entity` thường gặp: `features`, `role_permissions`, `period_lock`, `import`, `document`, `voucher`, `product`, `partner`, `product_group`, `warehouse`, `cash_account`, `partner_prices`, `settings` (thay đổi người dùng chưa ghi nhật ký).

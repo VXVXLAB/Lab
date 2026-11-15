@@ -159,3 +159,13 @@ Các test chạy với tính năng được bật trong chính test; với mọi
 | C7 lãi gộp: bình quân gia quyền, trả NCC, chuyển kho bỏ qua, ước tính, dịch vụ, khách trả hàng, ba cách nhóm cùng tổng, khớp báo cáo bán, nhập lùi ngày tính lại | `TestMR_C7_LaiGop` | ĐẠT |
 | Hiệu năng tuổi nợ / lãi gộp trên 100.000 dòng | `TestMR_C7_C8_HieuNang` | ĐẠT (≤ 1,2 s mỗi báo cáo) |
 | Ma trận quyền và kiểm tra rò giá vốn mở rộng cho các route mới | `TestMR_C1_MaTranQuyenMoiEndpointGhi`, `TestMR_C1_KhongLoGiaVon` | ĐẠT |
+
+## Bản mở rộng — sửa sau QA M1 + M2
+
+| Hạng mục | Test | Kết quả |
+|---|---|---|
+| C7 bình quân gia quyền liên hoàn: ví dụ spec (lãi 20), cùng ngày nhập trước xuất sau, nhập lùi ngày, khách trả / trả NCC, ba cách nhóm, khớp báo cáo bán | `TestMR_C7_BinhQuanLienHoan`, `TestMR_C7_LaiGop`, `TestMovingAverage` (đơn vị: bán vào âm rồi mua, giá trị sàn 0) | ĐẠT |
+| M-01…M-07, M-10, Q-04, Q-07, Q-12, lịch sử khóa sổ, `/api/audit`, quyền trong phản hồi đăng nhập | `TestMR_QA_SuaLoiM1M2` | ĐẠT |
+| Q-02 người bị che giá không đổi được đơn giá đang lưu bằng bất kỳ đường nào; 403 khi sửa / bỏ ghi sổ phiếu giá vốn đã ghi sổ | `TestMR_C1_NguoiBiCheGiaKhongDoiGiaDangLuu` | ĐẠT |
+| Q-05 hai phiếu ghi sổ đồng thời không cùng lọt hạn mức | `TestMR_C8_HanMucGhiSoDongThoi` | ĐẠT |
+| M-08, M-09, Q-03, Q-06, Q-08, Q-11 nhập Excel | `TestMR_C3_SuaLoiQA` | ĐẠT |

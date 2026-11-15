@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/text/unicode/norm"
 
 	"kho/internal/apperr"
 	"kho/internal/auth"
@@ -94,6 +95,7 @@ func decode(r *http.Request, v any) error {
 	if hasJSONNul(raw) {
 		return errNUL("")
 	}
+	raw = nfcJSON(raw)
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	if err := dec.Decode(v); err != nil {
@@ -271,4 +273,93 @@ func rejectNUL(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// peekDoc đọc trước doc_type và id của body chứng từ (không báo lỗi kiểu dữ liệu) để kiểm tra quyền TRƯỚC khi giải
+// mã đầy đủ (QUYET_DINH N8: thiếu quyền ⇒ 403 dù dữ liệu sai). Body được giữ nguyên cho decode sau đó.
+func peekDoc(r *http.Request) (docType string, id int64) {
+	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxBody))
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	if err != nil {
+		return "", 0
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return "", 0
+	}
+	_ = json.Unmarshal(m["doc_type"], &docType)
+	_ = json.Unmarshal(m["id"], &id)
+	return docType, id
+}
+
+// nfcJSON chuẩn hóa Unicode NFC mọi chuỗi trong body JSON (QA M-09: chữ dạng tổ hợp NFD chép từ macOS / trình soạn thảo
+// làm tìm kiếm không ra và tạo được hai mã trông giống hệt nhau). Ký tự cấu trúc JSON đều là ASCII nên chuẩn hóa cả khối
+// byte là an toàn; chuỗi có thoát \uXXXX được giải mã, chuẩn hóa rồi mã hóa lại.
+func nfcJSON(raw []byte) []byte {
+	if bytes.Contains(raw, []byte(`\u`)) {
+		var v any
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if dec.Decode(&v) == nil && !dec.More() {
+			if b, err := json.Marshal(nfcValue(v)); err == nil {
+				return b
+			}
+		}
+	}
+	for _, c := range raw {
+		if c >= 0x80 {
+			return norm.NFC.Bytes(raw)
+		}
+	}
+	return raw
+}
+
+func nfcValue(v any) any {
+	switch x := v.(type) {
+	case string:
+		return util.NFC(x)
+	case []any:
+		for i := range x {
+			x[i] = nfcValue(x[i])
+		}
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[util.NFC(k)] = nfcValue(e)
+		}
+		return out
+	}
+	return v
+}
+
+// nfcQuery: middleware chuẩn hóa NFC các giá trị trong query string (ô tìm kiếm, mã...).
+func nfcQuery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if q := r.URL.RawQuery; q != "" && (strings.Contains(q, "%") || hasNonASCII(q)) {
+			if vals, err := url.ParseQuery(q); err == nil {
+				changed := false
+				for k, vs := range vals {
+					for i, v := range vs {
+						if n := util.NFC(v); n != v {
+							vs[i], changed = n, true
+						}
+					}
+					vals[k] = vs
+				}
+				if changed {
+					r.URL.RawQuery = vals.Encode()
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func hasNonASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return true
+		}
+	}
+	return false
 }

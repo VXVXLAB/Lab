@@ -77,6 +77,7 @@ func TestMR_C1_KhongLoGiaVon(t *testing.T) {
 		"/api/features":                 {"/api/features"},
 		"/api/role-permissions":         {"/api/role-permissions"},
 		"/api/period-lock":              {"/api/period-lock"},
+		"/api/audit":                    {"/api/audit?limit=50"},
 		"/api/import/{kind}/template":   {"/api/import/products/template", "/api/import/partners/template", "/api/import/opening_stock/template", "/api/import/opening_debt/template"},
 		"/api/users":                    {"/api/users"},
 		"/api/settings":                 {"/api/settings"},

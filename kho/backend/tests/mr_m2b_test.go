@@ -37,7 +37,8 @@ func TestMR_C7_LaiGop(t *testing.T) {
 	e.Admin.Posted(DocBody("purchase", "2026-02-01", sup, e.WH["KHO2"], Line(a, "10", "200")))
 	e.Admin.Posted(DocBody("purchase_return", "2026-02-10", sup, e.WH["KHO2"], Line(a, "5", "200")))
 	e.Admin.Posted(map[string]any{"doc_type": "transfer", "doc_date": "2026-02-12", "warehouse_id": e.WH["KHO2"], "to_warehouse_id": e.WH["KHO1"], "lines": []any{Line(a, "5", nil)}})
-	// Ngày 15/02: SL nhập lũy kế 10 + 10 − 5 = 15, giá trị 1.000 + 2.000 − 1.000 = 2.000 ⇒ bình quân 133,33…
+	// Bình quân gia quyền liên hoàn (SPEC_MO_RONG C7, viết lại sau QA Q-01): tồn đầu 10 @100; bán 2 (giá vốn 100) ⇒ còn 8,
+	// giá trị 800; mua 10 @200 ⇒ 18 / 2.800; trả NCC 5 theo giá phiếu trả 200 ⇒ 13 / 1.800 ⇒ bình quân 138,4615…
 	s2 := e.Admin.Posted(DocBody("sale", "2026-02-15", k2, e.WH["KHO1"], Line(a, "3", "300"), map[string]any{"product_id": e.DV, "description": "Phí", "unit_price": 50}))
 	e.Admin.Posted(DocBody("sale_return", "2026-02-20", k2, e.WH["KHO1"], Line(a, "1", "300")))
 	get := func(by string) profitResp {
@@ -52,19 +53,19 @@ func TestMR_C7_LaiGop(t *testing.T) {
 	// Phiếu 15/01: doanh thu 300, giá vốn 2 × 100 = 200.
 	eqDec(t, doc.Items[0].Revenue, "300", "doanh thu 15/01")
 	eqDec(t, doc.Items[0].Cost, "200", "giá vốn 15/01")
-	// Phiếu 15/02: doanh thu 900 + 50 (dịch vụ), giá vốn round(3 × 133,33…) = 400, dịch vụ 0.
+	// Phiếu 15/02: doanh thu 900 + 50 (dịch vụ), giá vốn round(3 × 138,46…) = 415, dịch vụ 0.
 	if *doc.Items[1].DocumentID != s2.ID {
 		t.Fatalf("thứ tự phiếu: %+v", doc.Items)
 	}
 	eqDec(t, doc.Items[1].Revenue, "950", "doanh thu 15/02")
-	eqDec(t, doc.Items[1].Cost, "400", "giá vốn bình quân")
-	eqDec(t, doc.Items[1].Profit, "550", "lãi")
-	eqDec(t, *doc.Items[1].Margin, "57.89", "tỷ lệ lãi")
-	// Khách trả 20/02: doanh thu −300, giá vốn −133.
+	eqDec(t, doc.Items[1].Cost, "415", "giá vốn bình quân liên hoàn")
+	eqDec(t, doc.Items[1].Profit, "535", "lãi")
+	eqDec(t, *doc.Items[1].Margin, "56.32", "tỷ lệ lãi")
+	// Khách trả 20/02: doanh thu −300, nhập lại theo bình quân hiện tại 138,46… ⇒ giá vốn −138.
 	eqDec(t, doc.Items[2].Revenue, "-300", "trả hàng giảm doanh thu")
-	eqDec(t, doc.Items[2].Cost, "-133", "trả hàng giảm giá vốn")
+	eqDec(t, doc.Items[2].Cost, "-138", "trả hàng giảm giá vốn")
 	eqDec(t, doc.Totals.Revenue, "950", "tổng doanh thu")
-	eqDec(t, doc.Totals.Cost, "467", "tổng giá vốn")
+	eqDec(t, doc.Totals.Cost, "477", "tổng giá vốn")
 	if doc.EstimatedLines != 0 {
 		t.Fatalf("không có dòng ước tính: %d", doc.EstimatedLines)
 	}

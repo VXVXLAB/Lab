@@ -121,7 +121,7 @@ func nullKeys(o map[string]any, keys ...string) {
 
 func (m maskRules) maskObject(o map[string]any) {
 	if m.noCost {
-		nullKeys(o, "purchase_price", "cost_price", "unit_cost", "total_payable", "opening_payable", "payable")
+		nullKeys(o, "purchase_price", "cost_price", "unit_cost", "total_payable", "opening_payable", "payable", "cost_source")
 		if dt, ok := o["doc_type"].(string); ok && costDocTypes[dt] {
 			nullKeys(o, "unit_price", "amount", "total_amount", "old_debt", "total_debt")
 			if lines, ok := o["lines"].([]any); ok {
@@ -142,6 +142,24 @@ func (m maskRules) maskObject(o map[string]any) {
 	if m.noDebt {
 		nullKeys(o, "old_debt", "total_debt", "total_receivable", "total_payable", "opening_receivable", "opening_payable", "receivable", "payable",
 			"credit_limit", "total_after", "over")
+		// Lời nhắn của CREDIT_WARNING có in số nợ / hạn mức ⇒ thay bằng lời nhắn không có con số (QA M-01).
+		if code, _ := o["code"].(string); code == apperr.CodeCreditWarning {
+			if _, ok := o["message"]; ok {
+				name := ""
+				if d, ok := o["details"].(map[string]any); ok {
+					if c, ok := d["credit"].(map[string]any); ok {
+						name, _ = c["partner_name"].(string)
+					}
+				}
+				msg := "Khách " + name + " sẽ vượt hạn mức công nợ nếu ghi sổ phiếu này (bạn không có quyền xem số nợ). Bấm xác nhận để vẫn ghi sổ."
+				if d, ok := o["details"].(map[string]any); ok {
+					if need, ok := d["confirm"].([]any); ok && len(need) > 1 {
+						msg += " Phiếu cũng có mặt hàng bán thấp hơn giá mua (bán lỗ)."
+					}
+				}
+				o["message"] = msg
+			}
+		}
 	}
 	if m.noCash {
 		nullKeys(o, "cash_balance", "bank_balance", "opening_balance")
@@ -258,14 +276,31 @@ func (s *Server) getFeatures(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) putFeatures(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Features map[string]bool `json:"features"`
-		Confirm  bool            `json:"confirm"`
+		Features map[string]json.RawMessage `json:"features"`
+		Confirm  bool                       `json:"confirm"`
 	}
 	if err := decode(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	st, err := ext.SaveFeatures(r.Context(), s.Pool, userOf(r).ID, in.Features, in.Confirm)
+	// Mỗi giá trị phải đúng là true / false (null, chuỗi, số ⇒ 400; không để máy khách lỗi vô tình tắt tính năng).
+	var flags map[string]bool
+	if in.Features != nil {
+		flags = make(map[string]bool, len(in.Features))
+	}
+	for k, raw := range in.Features {
+		switch string(bytes.TrimSpace(raw)) {
+		case "true":
+			flags[k] = true
+		case "false":
+			flags[k] = false
+		default:
+			writeErr(w, r, apperr.New(http.StatusBadRequest, apperr.CodeValidation,
+				fmt.Sprintf("Giá trị của tính năng %q phải là true hoặc false", k), map[string]any{"field": "features." + k}))
+			return
+		}
+	}
+	st, err := ext.SaveFeatures(r.Context(), s.Pool, userOf(r).ID, flags, in.Confirm)
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -326,7 +361,12 @@ func (s *Server) getPeriodLock(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"lock_date": extOf(r).st.RawLockDate()})
+	hist, err := s.periodLockHistory(r)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"lock_date": extOf(r).st.RawLockDate(), "history": hist})
 }
 
 func (s *Server) putPeriodLock(w http.ResponseWriter, r *http.Request) {
@@ -335,16 +375,20 @@ func (s *Server) putPeriodLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		LockDate util.Date `json:"lock_date"`
-		Reason   string    `json:"reason"`
+		LockDate util.OptDate `json:"lock_date"`
+		Reason   string       `json:"reason"`
 	}
 	if err := decode(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
+	if !in.LockDate.Set {
+		writeErr(w, r, apperr.ValidationField("lock_date", "Thiếu ngày khóa sổ (lock_date); gửi lock_date: null để bỏ khóa sổ"))
+		return
+	}
 	var lock *util.Date
-	if !in.LockDate.Empty() {
-		lock = &in.LockDate
+	if !in.LockDate.Val.Empty() {
+		lock = &in.LockDate.Val
 	}
 	got, err := ext.SetLockDate(r.Context(), s.Pool, userOf(r).ID, lock, in.Reason)
 	if err != nil {
