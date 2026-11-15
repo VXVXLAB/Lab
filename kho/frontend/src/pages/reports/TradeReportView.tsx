@@ -5,7 +5,8 @@ import type { ColumnsType } from 'antd/es/table';
 import { SearchOutlined } from '@ant-design/icons';
 import { qk } from '../../api/queryKeys';
 import { reportApi, type TradeParams } from '../../api/reports';
-import type { TradeRow } from '../../api/types';
+import { useFeature } from '../../auth/AuthContext';
+import type { TradeRow, TradeRowVat } from '../../api/types';
 import { DateRangeFilter, describeRange, rangeOf, type DateRangeValue, type Preset } from '../../components/DateRangeFilter';
 import { ProductSelect, type ProductPick } from '../../components/ProductSelect';
 import { OpenHint, PrintTitle, ReportActions, ReportTable } from '../../components/ReportTable';
@@ -70,7 +71,9 @@ export function TradeReportView({
     queryKey: qk.report(kind, params),
     queryFn: () => (isSales ? reportApi.sales(params) : reportApi.purchases(params)),
   });
+  const useFeatureFlag = useFeature('vat');
   const d = query.data;
+  const vatCols = d?.total_tax !== undefined && (useFeatureFlag || (d.total_tax ?? 0) !== 0);
   const oneProduct = !!product;
 
   const columns: ColumnsType<TradeRow> = [
@@ -97,9 +100,26 @@ export function TradeReportView({
     { title: 'SL', dataIndex: 'qty', width: 80, align: 'right', render: (n: number) => <span className={n < 0 ? 'neg' : undefined}>{formatQty(n)}</span> },
     { title: 'Đơn giá', dataIndex: 'unit_price', width: 108, align: 'right', render: (n: number | null) => formatMoney(n) },
     { title: 'Thành tiền', dataIndex: 'amount', width: 120, align: 'right', render: (n: number, r) => (r.unit_price === null ? '' : <span className={n < 0 ? 'neg' : undefined}>{formatMoney(n)}</span>) },
+    // C11: trước thuế / thuế / sau thuế (chỉ khi báo cáo có số thuế)
+    ...(vatCols
+      ? [
+          {
+            title: 'Thuế',
+            key: 'vat',
+            width: 56,
+            align: 'right' as const,
+            render: (_: unknown, r: TradeRow) => {
+              const v = (r as TradeRow & TradeRowVat).vat_rate;
+              return v === null || v === undefined ? <span className="muted">KCT</span> : `${v}%`;
+            },
+          },
+          { title: 'Tiền thuế', key: 'tax', width: 100, align: 'right' as const, render: (_: unknown, r: TradeRow) => formatMoney((r as TradeRow & TradeRowVat).tax_amount ?? 0) },
+          { title: 'Sau thuế', key: 'awt', width: 120, align: 'right' as const, render: (_: unknown, r: TradeRow) => formatMoney((r as TradeRow & TradeRowVat).amount_with_tax ?? r.amount) },
+        ]
+      : []),
     { title: 'Kho', dataIndex: 'warehouse_name', width: 104, ellipsis: true },
   ];
-  const nCols = columns.length;
+  const nCols = columns.length - (vatCols ? 3 : 0);
   const summary = d
     ? [
         <b key="l">Cộng</b>,
@@ -111,6 +131,7 @@ export function TradeReportView({
         <b key="q">{formatQty(d.total_qty)}</b>,
         null,
         <b key="a">{formatMoney(d.total_amount)}</b>,
+        ...(vatCols ? [null, <b key="t">{formatMoney(d.total_tax ?? 0)}</b>, <b key="w">{formatMoney(d.total_with_tax ?? d.total_amount)}</b>] : []),
         null,
       ]
     : null;

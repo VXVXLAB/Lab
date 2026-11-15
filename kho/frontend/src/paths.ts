@@ -36,6 +36,10 @@ export const paths = {
   lowStock: '/bao-cao/duoi-ton-toi-thieu',
   debtAging: '/bao-cao/tuoi-no',
   profit: '/bao-cao/lai-gop',
+  stocktakes: '/kho/kiem-ke',
+  vatSummary: '/bao-cao/bang-ke-thue',
+  printTemplate: '/he-thong/mau-in',
+  audit: '/he-thong/nhat-ky',
   company: '/he-thong/thong-tin-cong-ty',
   /** Mở một chứng từ kho (giai đoạn 2). */
   document: (id: number | string) => `/chung-tu/${id}`,

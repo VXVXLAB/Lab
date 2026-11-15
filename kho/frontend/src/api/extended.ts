@@ -1,6 +1,6 @@
 // API của bản mở rộng (docs/API.md §8). Chỉ gọi khi tính năng tương ứng đang bật (tắt ⇒ máy chủ trả 404 FEATURE_OFF).
 import { api, buildUrl } from './client';
-import type { DebtAging, LowStockItem, PartnerPrice, ProfitGroup, ProfitReport, SalePriceItem, FeatureKey, FeaturesResponse, ImportKind, ImportResult, PeriodLock, Permission, Role, RolePermissions } from './types';
+import type { AuditEntry, PrintTemplate, PrintTemplateResponse, ProductUnit, StocktakeLoad, VatSummary, DebtAging, LowStockItem, PartnerPrice, ProfitGroup, ProfitReport, SalePriceItem, FeatureKey, FeaturesResponse, ImportKind, ImportResult, PeriodLock, Permission, Role, RolePermissions } from './types';
 
 export const featuresApi = {
   get: () => api.get<FeaturesResponse>('/features'),
@@ -62,4 +62,47 @@ export const extReportsApi = {
   debtAgingXlsx: (p: AgingParams) => buildUrl('/reports/debt-aging', { ...clean(p), format: 'xlsx' }),
   profit: (p: ProfitParams) => api.get<ProfitReport>('/reports/profit', clean(p)),
   profitXlsx: (p: ProfitParams) => buildUrl('/reports/profit', { ...clean(p), format: 'xlsx' }),
+};
+
+// ---------- Đợt M3 ----------
+export const stocktakeApi = {
+  /** Mọi mã có tồn ≠ 0 tại kho cuối ngày (nút "Nạp toàn bộ mã đang có tồn") */
+  load: (warehouseId: number, date: string) => api.get<StocktakeLoad>('/documents/stocktake-load', { warehouse_id: warehouseId, date }),
+};
+
+export const unitsApi = {
+  get: (productId: number) => api.get<{ product_id: number; base_unit: string; items: ProductUnit[] }>(`/products/${productId}/units`),
+  set: (productId: number, items: { unit: string; factor: number }[]) =>
+    api.put<{ product_id: number; base_unit: string; items: ProductUnit[] }>(`/products/${productId}/units`, { items }),
+};
+
+export const vatApi = {
+  getDefault: () => api.get<{ codes: string[]; default_vat_rate: string | null }>('/settings/vat'),
+  setDefault: (code: string | null) => api.put<{ codes: string[]; default_vat_rate: string | null }>('/settings/vat', { default_vat_rate: code }),
+  summary: (p: { from?: string; to?: string }) => api.get<VatSummary>('/reports/vat-summary', clean(p)),
+  summaryXlsx: (p: { from?: string; to?: string }) => buildUrl('/reports/vat-summary', { ...clean(p), format: 'xlsx' }),
+};
+
+export const printTemplateApi = {
+  get: () => api.get<PrintTemplateResponse>('/print-template'),
+  set: (t: Omit<PrintTemplate, 'has_logo' | 'logo_type' | 'logo_updated_at'>) => api.put<PrintTemplateResponse>('/print-template', t),
+  logoUrl: (v?: string | null) => buildUrl('/print-template/logo', v ? { v } : undefined),
+  uploadLogo: (file: File) => {
+    const f = new FormData();
+    f.append('file', file);
+    return api.upload<unknown>('/print-template/logo', f);
+  },
+  removeLogo: () => api.del<unknown>('/print-template/logo'),
+};
+
+export interface AuditParams {
+  entity?: string;
+  user_id?: number;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}
+export const auditApi = {
+  list: (p: AuditParams) => api.get<{ items: AuditEntry[]; total: number; limit: number; offset: number }>('/audit', clean(p)),
 };

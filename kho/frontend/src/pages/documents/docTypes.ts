@@ -132,10 +132,28 @@ export const DOC_TYPES: Record<DocType, DocTypeConfig> = {
     hasDebt: false,
     lossCheck: false,
   },
+  // bản mở rộng C9 — chỉ dùng khi tính năng Kiểm kê bật
+  stocktake: {
+    type: 'stocktake',
+    name: 'Phiếu kiểm kê',
+    listTitle: 'Kiểm kê',
+    listPath: paths.stocktakes,
+    printTitle: 'BIÊN BẢN KIỂM KÊ KHO',
+    partner: null,
+    partnerLabel: '',
+    warehouseLabel: 'Kho kiểm kê',
+    toWarehouse: false,
+    hasPrice: false,
+    defaultPrice: null,
+    outgoing: false,
+    allowService: false,
+    hasDebt: false,
+    lossCheck: false,
+  },
 };
 
 export const DOC_TYPE_LIST: DocType[] = ['sale', 'sale_return', 'purchase', 'purchase_return', 'transfer', 'opening'];
 
 export function isDocType(s: string | undefined): s is DocType {
-  return !!s && (DOC_TYPE_LIST as string[]).includes(s);
+  return !!s && ((DOC_TYPE_LIST as string[]).includes(s) || s === 'stocktake');
 }

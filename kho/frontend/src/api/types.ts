@@ -141,6 +141,16 @@ export interface Product {
   active: boolean;
   /** Bản mở rộng (min_stock bật): tồn tối thiểu trên tổng các kho; null = không đặt */
   min_stock?: number | null;
+  /** C11: mã thuế suất mặc định ("KCT","0","5","8","10"; null = theo mặc định chung) */
+  vat_rate?: string | null;
+  /** C10: đơn vị quy đổi (chỉ có ở GET /products/{id}, /products/lookup) */
+  units?: ProductUnit[];
+}
+
+export interface ProductUnit {
+  unit: string;
+  factor: number;
+  in_use?: boolean;
 }
 
 /** GET /products/lookup?optional=1 */
@@ -160,6 +170,7 @@ export interface ProductBody {
   is_service: boolean;
   active: boolean;
   min_stock?: number | null;
+  vat_rate?: string | null;
 }
 
 export interface ProductListParams extends ListParams {
@@ -229,7 +240,8 @@ export interface CashAccount {
 export type CashAccountBody = Omit<CashAccount, 'id'>;
 
 // ---------- Chứng từ (dùng từ giai đoạn 2) ----------
-export type DocType = 'purchase' | 'sale_return' | 'sale' | 'purchase_return' | 'transfer' | 'opening';
+/** `stocktake`: phiếu kiểm kê (bản mở rộng C9) */
+export type DocType = 'purchase' | 'sale_return' | 'sale' | 'purchase_return' | 'transfer' | 'opening' | 'stocktake';
 export type DocStatus = 'draft' | 'posted';
 
 export interface LossWarning {
@@ -393,6 +405,21 @@ export interface DocumentLine {
   unit_price: number | null;
   amount: number;
   note: string;
+  // ---- bản mở rộng M3 (chỉ có khi tính năng bật hoặc dữ liệu đã dùng) ----
+  /** C10: hệ số quy đổi của đơn vị đã chọn, SL theo đơn vị gốc */
+  factor?: number;
+  base_qty?: number;
+  base_unit?: string;
+  /** C11: thuế suất (null = không thuế / KCT) */
+  vat_rate?: number | null;
+  tax_amount?: number | null;
+  amount_with_tax?: number | null;
+  /** C9 kiểm kê: tồn sổ sách, thực tế, chênh lệch (đơn vị gốc) */
+  book_qty?: number | null;
+  counted_qty?: number | null;
+  diff_qty?: number | null;
+  current_book_qty?: number | null;
+  book_changed?: boolean;
 }
 
 export interface DocumentFull {
@@ -431,11 +458,19 @@ export interface DocumentFull {
   warnings: LossWarning[];
   old_debt: number | null;
   total_debt: number | null;
+  /** C11: tiền hàng, tiền thuế (total_amount = tổng thanh toán), bằng chữ */
+  goods_amount?: number | null;
+  tax_amount?: number | null;
+  amount_in_words?: string | null;
+  /** C9: số dòng có tồn sổ sách đã thay đổi sau khi kiểm kê */
+  book_changed_lines?: number;
 }
 
 export interface DocumentLineBody {
   /** id dòng đang có của chính phiếu này (giữ id khi sửa); không có = dòng mới */
   id?: number;
+  /** C11 thuế suất dòng (chỉ gửi khi có) */
+  vat_rate?: number | null;
   product_id: number;
   description: string;
   unit: string;
@@ -575,6 +610,12 @@ export interface TradeRow {
   unit_price: number | null;
   amount: number;
 }
+export interface TradeRowVat {
+  vat_rate?: number | null;
+  tax_amount?: number | null;
+  amount_with_tax?: number | null;
+}
+
 export interface TradeReport {
   kind: 'sales' | 'purchases';
   from: string;
@@ -583,6 +624,9 @@ export interface TradeReport {
   total_qty: number;
   total_amount: number;
   document_count: number;
+  /** C11 (có khi tính năng thuế bật / dữ liệu có thuế) */
+  total_tax?: number;
+  total_with_tax?: number;
 }
 
 export interface DraftDemandItem {
@@ -864,4 +908,56 @@ export interface ProfitReport {
   items: ProfitRow[];
   totals: { revenue: number; cost: number; profit: number; margin: number | null; estimated: boolean };
   estimated_lines: number;
+}
+
+// ---------- Bản mở rộng M3 ----------
+export interface StocktakeLoad {
+  warehouse_id: number;
+  date: string;
+  items: { product_id: number; product_code: string; product_name: string; unit: string; book_qty: number }[];
+}
+export interface PrintTemplate {
+  paper_size_document: 'A4' | 'A5';
+  paper_size_voucher: 'A4' | 'A5';
+  footer: string;
+  hide_unit_column: boolean;
+  hide_code_column: boolean;
+  signatures: Partial<Record<string, string[]>>;
+  has_logo?: boolean;
+  logo_type?: string | null;
+  logo_updated_at?: string | null;
+}
+export interface PrintTemplateResponse {
+  template: PrintTemplate;
+  default_signatures: Record<string, string[]>;
+}
+export interface VatRow {
+  vat_rate: number | null;
+  label: string;
+  goods_amount: number;
+  tax_amount: number;
+  total: number;
+}
+export interface VatSide {
+  rows: VatRow[];
+  totals: { goods_amount: number; tax_amount: number; total: number };
+  document_count: number;
+}
+export interface VatSummary {
+  from: string;
+  to: string;
+  sales: VatSide;
+  purchases: VatSide | null;
+}
+export interface AuditEntry {
+  id: number;
+  at: string;
+  user_id: number | null;
+  user_name: string | null;
+  username?: string | null;
+  entity: string;
+  entity_id: number | null;
+  action: string;
+  before: unknown;
+  after: unknown;
 }

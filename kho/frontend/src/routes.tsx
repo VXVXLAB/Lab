@@ -95,6 +95,7 @@ export const menu: MenuGroup[] = [
       { path: paths.stockNxt, label: 'Tổng hợp NXT', element: <StockNxtPage /> },
       { path: paths.transfers, label: 'Chuyển kho', element: <DocumentListPage key="transfer" type="transfer" /> },
       { path: paths.opening, label: 'Tồn đầu kỳ', element: <DocumentListPage key="opening" type="opening" /> },
+      { path: paths.stocktakes, label: 'Kiểm kê', element: <DocumentListPage key="stocktake" type="stocktake" />, need: { feature: 'stocktake' } },
     ],
   },
   {

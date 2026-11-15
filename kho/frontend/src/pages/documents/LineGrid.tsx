@@ -2,14 +2,35 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { Button, Tooltip } from 'antd';
 import { DeleteOutlined, FileSearchOutlined, HistoryOutlined, PlusOutlined } from '@ant-design/icons';
 import { Checkbox } from 'antd';
-import type { PriceInfoWh, Product } from '../../api/types';
+import type { PriceInfoWh, Product, ProductUnit } from '../../api/types';
+import { storage } from '../../lib/storage';
 import { NumberInput } from '../../components/NumberInput';
 import { formatDate, formatMoney, formatQty } from '../../lib/format';
 import type { DocTypeConfig } from './docTypes';
 import { emptyLine, fromProduct, isBlank, lineAmount, withTrailingBlank, type LineDraft, type ProductLite } from './draft';
 import { ProductCodeInput } from './ProductCodeInput';
 
-export type Col = 'code' | 'desc' | 'qty' | 'price' | 'note';
+export type Col = 'code' | 'desc' | 'unit' | 'qty' | 'price' | 'vat' | 'note';
+
+/** Phần mở rộng của lưới (bản mở rộng M3). Không truyền ⇒ lưới y như bản chuẩn. */
+export interface GridExt {
+  /** C9 kiểm kê: tồn sổ sách (đơn vị gốc) của dòng; chỉ dòng lệch */
+  stocktake?: { book: (l: LineDraft) => number | null; onlyDiff: boolean };
+  /** C10: đơn vị quy đổi của mặt hàng (chưa tải ⇒ undefined) */
+  units?: (productId: number) => ProductUnit[] | undefined;
+  /** C11: cột Thuế suất */
+  vat?: { stop: boolean; defaultFor: (p: ProductLite) => number | null };
+}
+
+export const VAT_OPTIONS: { value: string; label: string }[] = [
+  { value: 'KCT', label: 'KCT' },
+  { value: '0', label: '0%' },
+  { value: '5', label: '5%' },
+  { value: '8', label: '8%' },
+  { value: '10', label: '10%' },
+];
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const LAST_UNIT = 'kho.lastUnit';
 
 export interface LineHint {
   /** Thiếu hàng (phiếu xuất): số thiếu và tồn hiện có */
@@ -43,6 +64,10 @@ interface Props {
   onPicked?: (lineKey: string, productId: number, price: number | null) => void;
   /** Yêu cầu đặt con trỏ từ ngoài (vd. sau lỗi máy chủ) */
   focusRequest?: { key: string; col: Col; n: number } | null;
+  /** Bản mở rộng M3 */
+  ext?: GridExt;
+  /** Nút / ô thêm ở thanh dưới lưới (bản mở rộng) */
+  gridExtra?: React.ReactNode;
 }
 
 /**
@@ -50,7 +75,16 @@ interface Props {
  * Bàn phím: Enter đi Mã → SL → Đơn giá → dòng sau (dịch vụ: Mã → Diễn giải → Đơn giá);
  * ↑↓ đổi dòng cùng cột; Ctrl+Delete xóa dòng; Ctrl+Insert chèn dòng phía trên.
  */
-export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInfo, showNote, onToggleNote, onShowLedger, onShowHistory, hints, focusRequest, onPicked }: Props) {
+export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInfo, showNote, onToggleNote, onShowLedger, onShowHistory, hints, focusRequest, onPicked, ext, gridExtra }: Props) {
+  const st = ext?.stocktake;
+  const unitsOf = (l: LineDraft): ProductUnit[] => (l.product && !l.product.is_service ? (ext?.units?.(l.product.id) ?? []) : []);
+  const hasUnitChoice = (l: LineDraft) => unitsOf(l).length > 0;
+  /** C9: dòng ẩn khi lọc "chỉ dòng lệch" */
+  const hidden = (l: LineDraft) => {
+    if (!st?.onlyDiff || isBlank(l) || l.qty === null) return false;
+    const b = st.book(l);
+    return b !== null && Math.abs(l.qty * (l.factor ?? 1) - b) < 1e-9;
+  };
   const wrapRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<{ key: string; col: Col } | null>(null);
 
@@ -66,7 +100,7 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
     const el = wrapRef.current?.querySelector<HTMLInputElement>(`[data-cell="${pending.key}:${pending.col}"]`);
     if (el) {
       el.focus();
-      el.select();
+      if (el instanceof HTMLInputElement) el.select(); // ô chọn (ĐVT, thuế) không có select()
       el.closest('tr')?.scrollIntoView({ block: 'nearest' });
     }
     setPending(null);
@@ -106,26 +140,68 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
   };
 
   const pick = (l: LineDraft, p: Product) => {
+    // C9: mỗi mã một dòng trên phiếu kiểm kê ⇒ chọn lại mã đã có thì nhảy tới dòng đó
+    if (st) {
+      const dup = lines.find((x) => x.key !== l.key && x.product?.id === p.id);
+      if (dup) {
+        update(l.key, { codeText: '', product: null });
+        focus(dup.key, 'qty');
+        return;
+      }
+    }
+    const same = l.product?.id === p.id;
     let price: number | null = null;
     if (cfg.hasPrice) {
-      if (l.product?.id === p.id) price = l.unit_price; // chọn lại đúng mã: giữ giá đã sửa
+      if (same) price = l.unit_price; // chọn lại đúng mã: giữ giá đã sửa
       else if (!p.is_service && cfg.defaultPrice) price = p[cfg.defaultPrice]; // REQ-026 giá mặc định
+    }
+    // C10: đơn vị dùng lần trước cho mã này trên loại phiếu này (nếu đã biết các đơn vị của mã)
+    let unit = same ? l.unit : p.unit;
+    let factor = same ? l.factor : undefined;
+    if (!same && ext?.units && !p.is_service) {
+      const last = storage.get(`${LAST_UNIT}.${cfg.type}.${p.id}`);
+      const u = last ? ext.units(p.id)?.find((x) => x.unit === last) : undefined;
+      if (u) {
+        unit = u.unit;
+        factor = u.factor;
+        if (price !== null) price = round2(price * u.factor);
+      }
     }
     update(l.key, {
       product: fromProduct(p),
       codeText: p.code,
-      unit: p.unit,
+      unit,
+      ...(factor !== undefined ? { factor } : {}),
       description: p.is_service ? l.description : '',
-      qty: l.qty ?? 1,
+      qty: st ? l.qty : (l.qty ?? 1),
       unit_price: price,
+      // C11: thuế suất mặc định của mặt hàng (rồi mặc định chung)
+      ...(ext?.vat && !same ? { vat_rate: ext.vat.defaultFor(fromProduct(p)) } : {}),
     });
-    if (!p.is_service && l.product?.id !== p.id) onPicked?.(l.key, p.id, price);
-    focus(l.key, p.is_service ? 'desc' : 'qty');
+    if (!p.is_service && !same) onPicked?.(l.key, p.id, price);
+    focus(l.key, p.is_service ? 'desc' : st ? 'qty' : hasUnitChoice({ ...l, product: fromProduct(p) }) ? 'unit' : 'qty');
+  };
+
+  /** C10: đổi đơn vị — giá tự điền (giá mặc định × hệ số) đổi theo; giá đã gõ tay giữ nguyên */
+  const changeUnit = (l: LineDraft, unit: string) => {
+    if (!l.product) return;
+    const u = unit === l.product.unit ? { unit, factor: 1 } : unitsOf(l).find((x) => x.unit === unit);
+    if (!u) return;
+    const oldF = l.factor ?? 1;
+    const base = cfg.defaultPrice ? l.product[cfg.defaultPrice] : undefined;
+    let price = l.unit_price;
+    if (base !== undefined && base !== null && l.unit_price !== null && Math.abs(l.unit_price - round2(base * oldF)) < 0.005) price = round2(base * u.factor);
+    else if (l.unit_price !== null && oldF !== u.factor && hints[l.key]?.priceTag) price = round2((l.unit_price / oldF) * u.factor);
+    update(l.key, { unit: u.unit, factor: u.factor, unit_price: price });
+    storage.set(`${LAST_UNIT}.${cfg.type}.${l.product.id}`, u.unit);
+    if (price !== l.unit_price) onPicked?.(l.key, l.product.id, price);
   };
 
   const nextRowKey = (key: string, dir: 1 | -1): string | undefined => {
     const idx = lines.findIndex((l) => l.key === key);
-    return lines[idx + dir]?.key;
+    let j = idx + dir;
+    while (lines[j] && hidden(lines[j]!)) j += dir; // C9: bỏ qua dòng đang ẩn
+    return lines[j]?.key;
   };
 
   const afterLast = (l: LineDraft) => {
@@ -159,6 +235,7 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
       insertBefore(l.key);
       return;
     }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && (col === 'unit' || col === 'vat')) return; // ↑↓ đổi lựa chọn trong ô chọn
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       const nk = nextRowKey(l.key, e.key === 'ArrowDown' ? 1 : -1);
       if (nk) {
@@ -176,7 +253,28 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
     const service = !!l.product?.is_service;
     if (col === 'code') {
       // ô mã trống: dòng trống cuối ⇒ không làm gì (Ctrl+S lưu, F9 ghi sổ)
-      if (!isBlank(l) && l.product) focus(l.key, service ? 'desc' : 'qty');
+      if (!isBlank(l) && l.product) focus(l.key, service ? 'desc' : !st && hasUnitChoice(l) ? 'unit' : 'qty');
+      return;
+    }
+    if (col === 'unit') {
+      focus(l.key, 'qty');
+      return;
+    }
+    if (st && col === 'qty') {
+      // C9: Enter đi xuống cùng cột "Tồn thực tế"
+      const nk = nextRowKey(l.key, 1);
+      const target = nk ? lines.find((x) => x.key === nk) : undefined;
+      if (target?.product) focus(target.key, 'qty');
+      else afterLast(l);
+      return;
+    }
+    if (col === 'price' && ext?.vat?.stop) {
+      focus(l.key, 'vat');
+      return;
+    }
+    if (col === 'vat') {
+      if (showNote) focus(l.key, 'note');
+      else afterLast(l);
       return;
     }
     if (col === 'desc' || col === 'qty') {
@@ -192,7 +290,8 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
     afterLast(l);
   };
 
-  const showStock = true;
+  const showStock = !st;
+  const showVat = !!ext?.vat && cfg.hasPrice;
 
   return (
     <div className="line-grid" ref={wrapRef}>
@@ -202,9 +301,12 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
           <col style={{ width: 150 }} />
           <col />
           <col style={{ width: 64 }} />
+          {st && <col style={{ width: 110 }} />}
           <col style={{ width: 100 }} />
+          {st && <col style={{ width: 110 }} />}
           {cfg.hasPrice && <col style={{ width: 120 }} />}
           {cfg.hasPrice && <col style={{ width: 122 }} />}
+          {showVat && <col style={{ width: 76 }} />}
           {showNote && <col style={{ width: 150 }} />}
           {showStock && <col style={{ width: 104 }} />}
           {!readOnly && <col style={{ width: 84 }} />}
@@ -215,9 +317,16 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
             <th>Mã hàng</th>
             <th>Tên hàng / diễn giải</th>
             <th>ĐVT</th>
-            <th className="num">Số lượng</th>
+            {st && (
+              <th className="num">
+                <Tooltip title="Tồn theo sổ sách tại kho đến hết ngày kiểm kê">Tồn sổ sách</Tooltip>
+              </th>
+            )}
+            <th className="num">{st ? 'Tồn thực tế' : 'Số lượng'}</th>
+            {st && <th className="num">Chênh lệch</th>}
             {cfg.hasPrice && <th className="num">Đơn giá</th>}
             {cfg.hasPrice && <th className="num">Thành tiền</th>}
+            {showVat && <th>Thuế</th>}
             {showNote && <th>Ghi chú dòng</th>}
             {showStock && (
               <th className="num">
@@ -246,6 +355,11 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
               .filter(Boolean)
               .join(' ');
             if (readOnly && blank) return null;
+            if (hidden(l)) return null;
+            const f = l.factor ?? 1;
+            const uChoices = unitsOf(l);
+            const book = st && l.product ? st.book(l) : null;
+            const diff = st && l.product && l.qty !== null && book !== null ? Math.round((l.qty * f - book) * 1000) / 1000 : null;
             return (
               <tr key={l.key} className={rowCls}>
                 <td className="num stt">{blank ? '' : i + 1}</td>
@@ -309,8 +423,32 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                   {h.error && <div className="line-note neg">{h.error}</div>}
                 </td>
                 <td>
-                  <span className="ro">{l.product ? l.unit : ''}</span>
+                  {!readOnly && uChoices.length > 0 && l.product ? (
+                    // C10: chỉ mã có đơn vị quy đổi mới có ô chọn
+                    <select
+                      className="cell-select"
+                      data-cell={`${l.key}:unit`}
+                      value={l.unit}
+                      onChange={(e) => changeUnit(l, e.target.value)}
+                      onKeyDown={onCellKey(l, 'unit') as unknown as React.KeyboardEventHandler<HTMLSelectElement>}
+                      aria-label={`Đơn vị tính dòng ${i + 1}`}
+                    >
+                      <option value={l.product.unit}>{l.product.unit}</option>
+                      {uChoices.map((u) => (
+                        <option key={u.unit} value={u.unit}>
+                          {u.unit}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="ro">{l.product ? l.unit : ''}</span>
+                  )}
                 </td>
+                {st && (
+                  <td className="num">
+                    <span className="ro muted">{book === null ? (l.product ? '…' : '') : formatQty(book / f, true)}</span>
+                  </td>
+                )}
                 <td className="num">
                   {readOnly ? (
                     <span className="ro">{blank ? '' : formatQty(l.qty, true)}</span>
@@ -324,8 +462,14 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                       disabled={!l.product}
                       onChange={(v) => update(l.key, { qty: v })}
                       onKeyDown={onCellKey(l, 'qty')}
-                      aria-label={`Số lượng dòng ${i + 1}`}
+                      aria-label={st ? `Tồn thực tế dòng ${i + 1}` : `Số lượng dòng ${i + 1}`}
+                      placeholder={st && l.product ? 'đếm được' : undefined}
                     />
+                  )}
+                  {f !== 1 && l.product && l.qty !== null && (
+                    <div className="line-note muted">
+                      = {formatQty(Math.round(l.qty * f * 1000) / 1000)} {l.product.unit}
+                    </div>
                   )}
                   {h.shortage && (
                     <div className="line-note neg" title={h.shortage.message}>
@@ -372,9 +516,43 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                     )}
                   </td>
                 )}
+                {st && (
+                  <td className="num">
+                    {diff === null ? '' : diff === 0 ? <span className="muted">khớp</span> : (
+                      <b className={diff > 0 ? 'pos' : 'neg'}>
+                        {diff > 0 ? 'thừa +' : 'thiếu '}
+                        {formatQty(Math.abs(diff) / f)}
+                      </b>
+                    )}
+                  </td>
+                )}
                 {cfg.hasPrice && (
                   <td className="num amount">
                     {!l.product || (service && l.unit_price === null) ? '' : formatMoney(amount)}
+                  </td>
+                )}
+                {showVat && (
+                  <td>
+                    {readOnly ? (
+                      <span className="ro">{l.product ? (l.vat_rate === null || l.vat_rate === undefined ? 'KCT' : `${l.vat_rate}%`) : ''}</span>
+                    ) : (
+                      <select
+                        className="cell-select"
+                        data-cell={`${l.key}:vat`}
+                        value={l.vat_rate === null || l.vat_rate === undefined ? 'KCT' : String(l.vat_rate)}
+                        disabled={!l.product}
+                        tabIndex={ext?.vat?.stop ? undefined : -1}
+                        onChange={(e) => update(l.key, { vat_rate: e.target.value === 'KCT' ? null : Number(e.target.value) })}
+                        onKeyDown={onCellKey(l, 'vat') as unknown as React.KeyboardEventHandler<HTMLSelectElement>}
+                        aria-label={`Thuế suất dòng ${i + 1}`}
+                      >
+                        {VAT_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </td>
                 )}
                 {showNote && (
@@ -402,6 +580,7 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                       <>
                         <span className={whQty !== undefined && whQty <= 0 ? 'neg' : undefined}>{whQty === undefined ? '…' : formatQty(whQty)}</span>
                         <span className="stock-total-mini"> / {total === undefined ? '…' : formatQty(total)}</span>
+                        {f !== 1 && <span className="stock-total-mini"> {l.product.unit}</span>}
                       </>
                     )}
                   </td>
@@ -446,8 +625,9 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
           <Checkbox checked={showNote} onChange={(e) => onToggleNote(e.target.checked)} tabIndex={-1}>
             Ghi chú dòng
           </Checkbox>
+          {gridExtra}
           <span className="hint">
-            Enter: Mã → SL → Giá → dòng sau · Alt+↑↓ dời dòng · Ctrl+Del xóa · Ctrl+Ins chèn · F6 thẻ kho · F7 lịch sử · <b>DV</b> = dịch vụ
+            {st ? 'Enter: Mã → Tồn thực tế → dòng dưới' : 'Enter: Mã → SL → Giá → dòng sau'} · Alt+↑↓ dời dòng · Ctrl+Del xóa · Ctrl+Ins chèn · F6 thẻ kho · F7 lịch sử · <b>DV</b> = dịch vụ
           </span>
         </div>
       )}

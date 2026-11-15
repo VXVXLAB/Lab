@@ -1,3 +1,4 @@
+import { ProductUnitsEditor } from '../extended/ProductUnits';
 import { useMemo, useState } from 'react';
 import { useCan, useFeature } from '../../auth/AuthContext';
 import { AutoComplete, Button, Empty, Form, Input, Segmented, Select, Skeleton, Switch, Table, Tag, Tooltip } from 'antd';
@@ -98,6 +99,8 @@ export function ProductsPage() {
   const rec = ed.record;
   const costView = useCan('cost.view');
   const minOn = useFeature('min_stock');
+  const vatOn = useFeature('vat');
+  const unitsOn = useFeature('unit_conversion');
   const [groupId, setGroupId] = useState<number | undefined>(undefined);
   const [kind, setKind] = useState<Kind>('all');
   const groups = useAllGroups();
@@ -239,6 +242,8 @@ export function ProductsPage() {
             active: v.active,
             // bản mở rộng (tồn tối thiểu bật): gửi kèm; tắt ⇒ không gửi (máy chủ giữ nguyên)
             ...(minOn ? { min_stock: v.min_stock ?? null } : {}),
+            // C11: thuế suất mặc định (trống = theo mặc định chung)
+            ...(vatOn ? { vat_rate: v.vat_rate ?? null } : {}),
           };
           return rec ? productsApi.update(rec.id, body) : productsApi.create(body);
         }}
@@ -285,6 +290,27 @@ export function ProductsPage() {
             <NumberInput style={{ width: 180 }} suffix="đ" />
           </Form.Item>
         )}
+        {vatOn && (
+          <Form.Item label="Thuế suất mặc định" name="vat_rate" extra="Tự điền vào cột Thuế của phiếu mua / bán. Để trống = theo mặc định chung (Hệ thống › Thông tin công ty).">
+            <Select<string>
+              allowClear
+              placeholder="Theo mặc định chung"
+              style={{ width: 200 }}
+              options={[
+                { value: 'KCT', label: 'Không chịu thuế (KCT)' },
+                { value: '0', label: '0%' },
+                { value: '5', label: '5%' },
+                { value: '8', label: '8%' },
+                { value: '10', label: '10%' },
+              ]}
+            />
+          </Form.Item>
+        )}
+        {unitsOn && rec && !rec.is_service && (
+          <Form.Item label="Đơn vị quy đổi">
+            <ProductUnitsEditor productId={rec.id} baseUnit={rec.unit} />
+          </Form.Item>
+        )}
         {minOn && (
           <Form.Item
             label="Tồn tối thiểu"
@@ -321,6 +347,7 @@ function toBody(p: Product, over: Partial<ProductBody> = {}): ProductBody {
     is_service: p.is_service,
     active: p.active,
     ...(p.min_stock !== undefined ? { min_stock: p.min_stock } : {}),
+    ...(p.vat_rate !== undefined ? { vat_rate: p.vat_rate } : {}),
     ...over,
   };
 }

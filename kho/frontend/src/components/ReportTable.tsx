@@ -7,6 +7,8 @@ import { download, printReport } from '../lib/download';
 import { isTypingTarget } from '../lib/keyboard';
 import { useElementHeight } from '../lib/useDebounced';
 import { Kbd } from './Kbd';
+import { usePrintTemplate } from '../lib/printTemplate';
+import { PrintFooter, PrintLogo } from './PrintExtras';
 
 export interface ReportTableProps<T> {
   columns: ColumnsType<T>;
@@ -140,11 +142,14 @@ export function OpenHint({ what = 'xem chứng từ' }: { what?: string }) {
 /** Tiêu đề khi In báo cáo: tên báo cáo + MỌI bộ lọc đang dùng + thời điểm in. */
 export function PrintTitle({ title, filters }: { title: string; filters: (string | false | null | undefined | 0)[] }) {
   const f = filters.filter((x): x is string => typeof x === 'string' && x.length > 0);
+  const tpl = usePrintTemplate(); // bản mở rộng C12: logo + chân trang
   return (
     <div className="print-only report-print-title">
+      <PrintLogo tpl={tpl} />
       <div>{title}</div>
       {f.length > 0 && <div className="print-filters">{f.join(' · ')}</div>}
       <div className="print-filters">In lúc {new Date().toLocaleString('vi-VN')}</div>
+      <PrintFooter tpl={tpl} />
     </div>
   );
 }

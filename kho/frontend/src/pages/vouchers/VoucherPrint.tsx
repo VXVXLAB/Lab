@@ -3,16 +3,22 @@ import type { Voucher } from '../../api/types';
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format';
 import { moneyInWords } from '../../lib/numberWords';
 import { VOUCHER_TITLE } from './voucherText';
+import { signersOf, usePrintTemplate } from '../../lib/printTemplate';
+import { PrintFooter, PrintLogo } from '../../components/PrintExtras';
 
 /** Bản in phiếu thu / phiếu chi (khổ A5), có dòng "Bằng chữ". In từ dữ liệu đã lưu. */
 export function VoucherPrint({ v }: { v: Voucher }) {
   const co = useSettings().data;
   const receipt = v.voucher_type === 'receipt';
-  const signers = receipt
-    ? ['Giám đốc', 'Kế toán trưởng', 'Người nộp tiền', 'Người lập phiếu', 'Thủ quỹ']
-    : ['Giám đốc', 'Kế toán trưởng', 'Thủ quỹ', 'Người lập phiếu', 'Người nhận tiền'];
+  const tpl = usePrintTemplate();
+  const signers = signersOf(
+    tpl,
+    v.voucher_type,
+    receipt ? ['Giám đốc', 'Kế toán trưởng', 'Người nộp tiền', 'Người lập phiếu', 'Thủ quỹ'] : ['Giám đốc', 'Kế toán trưởng', 'Thủ quỹ', 'Người lập phiếu', 'Người nhận tiền'],
+  );
   return (
     <div className="print-sheet voucher-sheet">
+      <PrintLogo tpl={tpl} />
       {co && (co.company_name || co.company_address) && (
         <div className="ps-company">
           {co.company_name && <div className="ps-company-name">{co.company_name}</div>}
@@ -87,6 +93,7 @@ export function VoucherPrint({ v }: { v: Voucher }) {
           </div>
         ))}
       </div>
+      <PrintFooter tpl={tpl} />
       <div className="ps-foot">
         In lúc {formatDateTime(new Date().toISOString())} · Lập bởi {v.created_by_name}
       </div>

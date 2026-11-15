@@ -80,7 +80,9 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
   const navigate = useNavigate();
   const access = useAccess();
   // quyền (bản mở rộng): loại phiếu được lập; giá bị che với phiếu mua / tồn đầu khi không có "Xem giá mua"
-  const writable = useWritableDocTypes();
+  // C9: phiếu kiểm kê chỉ có khi tính năng bật
+  const typeList: DocType[] = access.on('stocktake') ? [...DOC_TYPE_LIST, 'stocktake'] : DOC_TYPE_LIST;
+  const writable = useWritableDocTypes().filter((t) => typeList.includes(t));
   const da = type ? docAccess(type, access, access.isAdmin) : null;
   const cfg = da ? da.cfg : null;
   const canNew = type ? !!da?.canWrite : writable.length > 0;
@@ -292,7 +294,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
               type="primary"
               onClick={() => newDoc(firstNew)}
               menu={{
-                items: DOC_TYPE_LIST.filter((t) => writable.includes(t)).map((t) => ({ key: t, label: DOC_TYPES[t].name })),
+                items: typeList.filter((t) => writable.includes(t)).map((t) => ({ key: t, label: DOC_TYPES[t].name })),
                 onClick: ({ key }) => newDoc(key as DocType),
               }}
             >
@@ -352,7 +354,7 @@ export function DocumentListPage({ type, draftsOnly = false }: Props) {
             style={{ width: 170 }}
             value={typeFilter}
             onChange={setTypeFilter}
-            options={DOC_TYPE_LIST.map((t) => ({ value: t, label: DOC_TYPES[t].listTitle }))}
+            options={typeList.map((t) => ({ value: t, label: DOC_TYPES[t].listTitle }))}
           />
         )}
         {(!cfg || cfg.partner) && (

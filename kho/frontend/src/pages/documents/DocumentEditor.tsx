@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { filterByLabel } from '../../lib/text';
 import { createPortal } from 'react-dom';
 import { useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, App, Button, Dropdown, Input, Modal, Result, Segmented, Select, Skeleton, Space, Tag, Tooltip, type InputRef } from 'antd';
+import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Alert, App, Button, Checkbox, Dropdown, Input, Modal, Result, Segmented, Select, Skeleton, Space, Tag, Tooltip, type InputRef } from 'antd';
 import {
   ArrowLeftOutlined,
   CopyOutlined,
@@ -27,7 +27,8 @@ import { documentsApi } from '../../api/documents';
 import { qk } from '../../api/queryKeys';
 import type { CreditWarning, SalePriceItem, DocType, DocumentFull, LossWarning, PriceInfoWh, Shortage, VersionConflictDetails, Warehouse } from '../../api/types';
 import { useAccess, useCurrentUser } from '../../auth/AuthContext';
-import { priceListApi } from '../../api/extended';
+import { priceListApi, stocktakeApi, unitsApi, vatApi } from '../../api/extended';
+import { VAT_OPTIONS, type GridExt } from './LineGrid';
 import { partnersApi } from '../../api/catalog';
 import { docAccess } from '../../auth/guard';
 import { isLocked, LockBadge, lockDateWarning, lockedText, lockTooltip, useLockDate } from '../../lib/periodLock';
@@ -52,11 +53,13 @@ import {
   fingerprint,
   isBlank,
   lineAmount,
+  lineTax,
   sentLines,
   toBody,
   withTrailingBlank,
   type HeaderDraft,
   type LineDraft,
+  type ProductLite,
 } from './draft';
 import { HistoryDrawer } from './HistoryDrawer';
 
@@ -407,6 +410,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     () => [...new Set(lines.filter((l) => l.product && !l.product.is_service).map((l) => l.product!.id))].sort((x, y) => x - y),
     [lines],
   );
+  const spIdsAll = spIds;
   const spQ = useQuery({
     queryKey: ['sale-price', partnerId, spIds.join(','), dateStr ?? ''],
     queryFn: () => priceListApi.salePrice(partnerId!, spIds, dateStr),
@@ -432,10 +436,12 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
         return l;
       }
       const sp = spMap.get(a.pid);
-      if (!sp || sp.price === null || sp.price === l.unit_price) return l;
+      // giá theo khách là giá theo đơn vị gốc ⇒ × hệ số của đơn vị đang chọn (C10)
+      const want = sp && sp.price !== null ? Math.round(sp.price * (l.factor ?? 1) * 100) / 100 : null;
+      if (want === null || want === l.unit_price) return l;
       changed = true;
-      autoPrice.current.set(l.key, { pid: a.pid, value: sp.price });
-      return { ...l, unit_price: sp.price };
+      autoPrice.current.set(l.key, { pid: a.pid, value: want });
+      return { ...l, unit_price: want };
     });
     if (changed) setLines(next);
   }, [spMap, lines, priceOn]);
@@ -481,6 +487,137 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   });
   const creditLimit = creditOn ? (partnerFull.data?.credit_limit ?? null) : null;
 
+  // ---------- Bản mở rộng M3 ----------
+  const stOn = type === 'stocktake';
+  // C10: đơn vị quy đổi của các mã trên phiếu (mỗi mã một lần gọi, giữ trong bộ nhớ đệm)
+  const unitsOn = access.on('unit_conversion');
+  const unitQs = useQueries({
+    queries: (unitsOn ? spIdsAll : []).map((id) => ({
+      queryKey: ['product-units', id],
+      queryFn: () => unitsApi.get(id),
+      staleTime: 5 * 60_000,
+    })),
+  });
+  const unitMap = new Map<number, { unit: string; factor: number }[]>();
+  unitQs.forEach((q) => q.data && unitMap.set(q.data.product_id, q.data.items));
+  // C11: thuế suất — chỉ phiếu mua / bán / trả hàng
+  const vatType = type === 'sale' || type === 'sale_return' || type === 'purchase' || type === 'purchase_return';
+  const vatOn = access.on('vat') && vatType && !!cfg?.hasPrice;
+  const vatShown = !!cfg?.hasPrice && (vatOn || lines.some((l) => l.vat_rate !== undefined && l.vat_rate !== null));
+  const vatDefQ = useQuery({ queryKey: ['settings', 'vat'], queryFn: vatApi.getDefault, enabled: vatOn, staleTime: 5 * 60_000 });
+  const codeToRate = (c: string | null | undefined): number | null => (c === null || c === undefined || c === 'KCT' ? null : Number(c));
+  const [vatStop, setVatStop] = useState(() => storage.get('kho.vatStop') === '1');
+  // C9: tồn sổ sách tại kho đến hết ngày kiểm kê (phiếu tạm: tính lúc xem; đã ghi sổ: số máy chủ đã lưu)
+  const [onlyDiff, setOnlyDiff] = useState(false);
+  const stLoadQ = useQuery({
+    queryKey: ['stocktake-load', header.warehouse_id, dateStr],
+    queryFn: () => stocktakeApi.load(header.warehouse_id!, dateStr!),
+    enabled: stOn && !!header.warehouse_id && !!dateStr && loaded?.status !== 'posted',
+    staleTime: 15_000,
+  });
+  const bookMap = useMemo(() => new Map((stLoadQ.data?.items ?? []).map((x) => [x.product_id, x.book_qty])), [stLoadQ.data]);
+  const bookOf = (l: LineDraft): number | null => {
+    if (!l.product) return null;
+    if (loaded?.status === 'posted' && !editing) return l.book_qty ?? null;
+    if (stLoadQ.data) return bookMap.get(l.product.id) ?? 0;
+    return l.book_qty ?? null;
+  };
+  const stSums = useMemo(() => {
+    const out = { surplus: 0, shortage: 0, uncounted: 0 };
+    if (!stOn) return out;
+    for (const l of lines) {
+      if (!l.product) continue;
+      if (l.qty === null) {
+        out.uncounted++;
+        continue;
+      }
+      const b = bookOf(l);
+      if (b === null) continue;
+      const d = l.qty * (l.factor ?? 1) - b;
+      if (d > 1e-9) out.surplus++;
+      else if (d < -1e-9) out.shortage++;
+    }
+    return out;
+  }, [lines, stOn, bookMap, stLoadQ.data, loaded?.status, editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadAllStock = async () => {
+    if (!header.warehouse_id || !dateStr) return message.warning('Chọn kho và ngày kiểm kê trước', 2);
+    try {
+      const r = await stocktakeApi.load(header.warehouse_id, dateStr);
+      const have = new Set(lines.filter((l) => l.product).map((l) => l.product!.id));
+      const add = r.items.filter((x) => !have.has(x.product_id));
+      if (!add.length) return message.info('Mọi mã đang có tồn đã có trên phiếu', 2);
+      setLines((ls) =>
+        withTrailingBlank([
+          ...ls.filter((l) => !isBlank(l)),
+          ...add.map((x) => ({
+            ...emptyLine(),
+            product: { id: x.product_id, code: x.product_code, name: x.product_name, unit: x.unit, is_service: false },
+            codeText: x.product_code,
+            unit: x.unit,
+          })),
+        ]),
+      );
+      message.success(`Đã nạp ${add.length} mã — gõ số đếm được vào cột "Tồn thực tế"`, 2.5);
+    } catch (e) {
+      message.error(errorMessage(e));
+    }
+  };
+  const fillCountedFromBook = () =>
+    setLines((ls) => ls.map((l) => (l.product && l.qty === null && bookOf(l) !== null ? { ...l, qty: (bookOf(l) ?? 0) / (l.factor ?? 1) } : l)));
+  const gridExt: GridExt | undefined =
+    stOn || unitsOn || vatShown
+      ? {
+          ...(stOn ? { stocktake: { book: bookOf, onlyDiff } } : {}),
+          ...(unitsOn ? { units: (id: number) => unitMap.get(id) } : {}),
+          ...(vatShown
+            ? { vat: { stop: vatStop, defaultFor: (p: ProductLite) => (vatOn ? codeToRate(p.vat_rate ?? vatDefQ.data?.default_vat_rate) : null) } }
+            : {}),
+        }
+      : undefined;
+  const gridExtra =
+    stOn || (vatOn && !readOnlyBase) ? (
+      <>
+        {stOn && !readOnlyBase && (
+          <>
+            <Button size="small" onClick={() => void loadAllStock()} tabIndex={-1}>
+              Nạp toàn bộ mã đang có tồn
+            </Button>
+            <Button size="small" type="link" onClick={fillCountedFromBook} tabIndex={-1}>
+              Điền thực tế = sổ sách cho dòng chưa đếm
+            </Button>
+          </>
+        )}
+        {stOn && (
+          <Checkbox checked={onlyDiff} onChange={(e) => setOnlyDiff(e.target.checked)} tabIndex={-1}>
+            Chỉ dòng lệch
+          </Checkbox>
+        )}
+        {vatOn && !readOnlyBase && (
+          <>
+            <Select
+              size="small"
+              placeholder="Áp thuế suất cho tất cả dòng"
+              style={{ width: 200 }}
+              value={null}
+              options={VAT_OPTIONS}
+              onChange={(v: string) => setLines((ls) => ls.map((l) => (l.product ? { ...l, vat_rate: v === 'KCT' ? null : Number(v) } : l)))}
+              aria-label="Áp thuế suất cho tất cả dòng"
+            />
+            <Checkbox
+              checked={vatStop}
+              onChange={(e) => {
+                setVatStop(e.target.checked);
+                storage.set('kho.vatStop', e.target.checked ? '1' : '0');
+              }}
+              tabIndex={-1}
+            >
+              Dừng ở ô thuế
+            </Checkbox>
+          </>
+        )}
+      </>
+    ) : undefined;
+
   const hints = useMemo(() => {
     const out: Record<string, LineHint> = {};
     if (!cfg) return out;
@@ -491,14 +628,16 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       const p = l.product;
       if (p && !p.is_service) {
         const pi = piMap.get(p.id);
-        if (cfg.lossCheck && pi && pi.cost_source !== 'none' && pi.cost_price !== null && l.unit_price !== null && l.unit_price < pi.cost_price) h.loss = pi.cost_price;
+        // bán lỗ so theo đơn vị gốc (C10: đơn giá / hệ số); giá mua hiển thị theo đơn vị đang chọn
+        if (cfg.lossCheck && pi && pi.cost_source !== 'none' && pi.cost_price !== null && l.unit_price !== null && l.unit_price / (l.factor ?? 1) < pi.cost_price)
+          h.loss = pi.cost_price * (l.factor ?? 1);
         const sh = check?.stock_shortages.find((s) => s.product_id === p.id);
         if (sh && editing) h.shortage = { short: sh.shortage, available: sh.available, required: sh.required, date: sh.date, message: sh.message, docDate: dateStr };
       }
       if (priceOn && p && !p.is_service && !readOnlyBase) {
         const sp = spMap.get(p.id);
         if (sp && sp.price !== null) {
-          if (l.unit_price === sp.price) h.priceTag = priceTag(sp);
+          if (l.unit_price === Math.round(sp.price * (l.factor ?? 1) * 100) / 100) h.priceTag = priceTag(sp);
           else if (l.unit_price !== null && access.can('sale.write')) h.onSavePrice = () => void savePriceForCustomer(l);
         }
       }
@@ -512,6 +651,9 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   }, [lines, cfg, editing, lineErrors, piMap, check, dateStr, spMap, priceOn, readOnlyBase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const liveTotal = lines.reduce((s, l) => s + lineAmount(l), 0);
+  // C11: tiền thuế từng dòng; tổng thanh toán = tiền hàng + thuế (không thuế ⇒ bằng tiền hàng như bản chuẩn)
+  const taxTotal = lines.reduce((s, l) => s + lineTax(l), 0);
+  const grandTotal = liveTotal + taxTotal;
   const goodsQty = lines.filter((l) => l.product && !l.product.is_service).reduce((s, l) => s + (l.qty ?? 0), 0);
   const lineCount = sentLines(lines).length;
 
@@ -1363,8 +1505,16 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
             {partnerDebt.data && (
               <span className="partner-debt">
                 {' '}
-                · {cfg.partner === 'customer' ? 'Khách đang nợ' : 'Mình đang nợ'}:{' '}
-                <b className={partnerDebt.data.closing > 0 ? 'neg' : undefined}>{formatMoney(partnerDebt.data.closing)} đ</b>{' '}
+                ·{' '}
+                {creditLimit !== null ? (
+                  // C8: một dòng gọn thay cho "Khách đang nợ"
+                  <CreditLine limit={creditLimit} receivable={partnerDebt.data.closing - (loaded?.status === 'posted' ? (loaded.total_amount ?? 0) : 0)} slip={grandTotal} />
+                ) : (
+                  <>
+                    {cfg.partner === 'customer' ? 'Khách đang nợ' : 'Mình đang nợ'}:{' '}
+                    <b className={partnerDebt.data.closing > 0 ? 'neg' : undefined}>{formatMoney(partnerDebt.data.closing)} đ</b>
+                  </>
+                )}{' '}
                 <Button
                   type="link"
                   size="small"
@@ -1381,15 +1531,20 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                 >
                   Xem công nợ
                 </Button>
-                {creditLimit !== null && (
-                  <CreditLine limit={creditLimit} receivable={partnerDebt.data.closing - (loaded?.status === 'posted' ? (loaded.total_amount ?? 0) : 0)} slip={liveTotal} />
-                )}
               </span>
             )}
           </div>
         )}
       </div>
 
+      {stOn && loaded?.status === 'posted' && !!loaded.book_changed_lines && (
+        <Alert
+          className="doc-alert"
+          type="warning"
+          showIcon
+          message={`Sổ sách đã thay đổi sau khi kiểm kê (${loaded.book_changed_lines} dòng): có chứng từ lùi ngày được ghi sổ / sửa sau ngày kiểm. Cột "Tồn sổ sách" là số đã dùng lúc ghi sổ; điều chỉnh không tự đổi — sửa phiếu (F8) rồi lưu để tính lại.`}
+        />
+      )}
       {/* ---------- dòng hàng ---------- */}
       <div className="doc-body">
         <LineGrid
@@ -1414,6 +1569,8 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
           hints={hints}
           focusRequest={focusReq}
           onPicked={priceOn ? (key, pid, price) => autoPrice.current.set(key, { pid, value: price }) : undefined}
+          ext={gridExt}
+          gridExtra={gridExtra}
         />
       </div>
 
@@ -1470,11 +1627,43 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
             <span>Tổng SL hàng</span>
             <b>{formatQty(goodsQty)}</b>
           </div>
-          {cfg.hasPrice && (
+          {cfg.hasPrice && !vatShown && (
             <div className="sum-main">
               <span>Cộng</span>
               <b>{formatMoney(liveTotal)}</b>
             </div>
+          )}
+          {cfg.hasPrice && vatShown && (
+            <>
+              <div>
+                <span>Cộng tiền hàng</span>
+                <b>{formatMoney(liveTotal)}</b>
+              </div>
+              <div>
+                <span>Tiền thuế</span>
+                <b>{formatMoney(taxTotal)}</b>
+              </div>
+              <div className="sum-main">
+                <span>Tổng thanh toán</span>
+                <b>{formatMoney(grandTotal)}</b>
+              </div>
+            </>
+          )}
+          {stOn && (
+            <>
+              <div>
+                <span>Thừa</span>
+                <b className="pos">{stSums.surplus ? `${stSums.surplus} mã` : '–'}</b>
+              </div>
+              <div>
+                <span>Thiếu</span>
+                <b className="neg">{stSums.shortage ? `${stSums.shortage} mã` : '–'}</b>
+              </div>
+              <div>
+                <span>Chưa đếm</span>
+                <b>{stSums.uncounted || '–'}</b>
+              </div>
+            </>
           )}
           {cfg.hasDebt && (
             <>
@@ -1487,7 +1676,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                   Tổng nợ{header.doc_date ? ` đến ${header.doc_date.format('DD/MM/YYYY')}` : ''}
                   {dirty && oldDebt !== null && <span className="muted"> (tạm tính)</span>}
                 </span>
-                <b>{oldDebt === null ? '—' : formatMoney(oldDebt + liveTotal)}</b>
+                <b>{oldDebt === null ? '—' : formatMoney(oldDebt + grandTotal)}</b>
               </div>
             </>
           )}
@@ -1547,8 +1736,7 @@ function CreditLine({ limit, receivable, slip }: { limit: number; receivable: nu
   return (
     <Tooltip title={`Nợ sau phiếu này: ${formatMoney(after)} đ`}>
       <span className={`credit-line${over > 0 ? ' credit-over' : ''}`}>
-        · Nợ hiện tại / Hạn mức: <b>{formatMoney(receivable)}</b> / {formatMoney(limit)} đ
-        {over > 0 && <b> — phiếu này vượt hạn mức {formatMoney(over)} đ</b>}
+        Nợ / hạn mức: <b>{formatMoney(receivable)}</b> / {formatMoney(limit)} đ{over > 0 && <b> (vượt {formatMoney(over)})</b>}
       </span>
     </Tooltip>
   );

@@ -7,6 +7,7 @@ export const DOC_TYPE_LABEL: Record<DocType, string> = {
   purchase_return: 'Trả hàng NCC',
   transfer: 'Chuyển kho',
   opening: 'Tồn đầu kỳ',
+  stocktake: 'Kiểm kê',
 };
 
 export const ROLE_LABEL: Record<Role, string> = {

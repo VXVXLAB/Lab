@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { App, Alert, Button, Form, Input, Skeleton } from 'antd';
+import { App, Alert, Button, Form, Input, Select, Skeleton, Space } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, errorMessage } from '../../api/client';
 import { useSettings } from '../../api/hooks';
+import { vatApi } from '../../api/extended';
+import { useFeature } from '../../auth/AuthContext';
 import { qk } from '../../api/queryKeys';
 import { settingsApi } from '../../api/reports';
 import type { Settings } from '../../api/types';
@@ -14,6 +16,7 @@ import { enterToNext, focusFirstField, useHotkeys } from '../../lib/keyboard';
 
 /** Thông tin công ty in trên đầu mọi phiếu và file xuất (chỉ quản trị sửa). */
 export function CompanySettingsPage() {
+  const vatOn = useFeature('vat');
   const q = useSettings();
   const qc = useQueryClient();
   const { message } = App.useApp();
@@ -85,6 +88,46 @@ export function CompanySettingsPage() {
           </div>
         )}
       </div>
+      {vatOn && <VatDefaultSetting />}
+    </div>
+  );
+}
+
+/** C11: thuế suất mặc định chung (dùng khi mặt hàng không đặt thuế suất riêng). */
+function VatDefaultSetting() {
+  const { message } = App.useApp();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['settings', 'vat'], queryFn: vatApi.getDefault });
+  const save = async (v: string | null) => {
+    try {
+      const r = await vatApi.setDefault(v);
+      qc.setQueryData(['settings', 'vat'], r);
+      message.success('Đã lưu thuế suất mặc định', 1.5);
+    } catch (e) {
+      message.error(errorMessage(e));
+    }
+  };
+  return (
+    <div className="settings-card" style={{ marginTop: 12 }}>
+      <h3 style={{ marginTop: 0 }}>Thuế GTGT</h3>
+      <Space align="center" wrap>
+        <span>Thuế suất mặc định cho mặt hàng chưa đặt riêng:</span>
+        <Select<string>
+          style={{ width: 220 }}
+          loading={q.isLoading}
+          value={q.data ? (q.data.default_vat_rate ?? 'KCT') : undefined}
+          onChange={(v) => void save(v === 'KCT' ? null : v)}
+          options={[
+            { value: 'KCT', label: 'Không thuế / KCT' },
+            { value: '0', label: '0%' },
+            { value: '5', label: '5%' },
+            { value: '8', label: '8%' },
+            { value: '10', label: '10%' },
+          ]}
+          aria-label="Thuế suất mặc định"
+        />
+      </Space>
+      <div className="muted" style={{ marginTop: 6 }}>Áp cho dòng phiếu mua / bán mới; phiếu đã lập giữ nguyên thuế suất của từng dòng.</div>
     </div>
   );
 }

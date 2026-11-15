@@ -13,11 +13,14 @@ export interface Need {
   all?: Permission[];
   /** Cần ít nhất một quyền trong số này */
   any?: Permission[];
+  /** Điều kiện riêng (vd. có loại dữ liệu nhập được, có tính năng mở rộng nào bật) */
+  check?: (a: Access, isAdmin: boolean) => boolean;
 }
 
 export function allowed(need: Need | undefined, a: Access, isAdmin: boolean): boolean {
   if (!need) return true;
   if (need.feature && !a.features[need.feature]) return false;
+  if (need.check && !need.check(a, isAdmin)) return false;
   if (isAdmin) return true;
   if (need.all && !need.all.every((p) => a.permissions.has(p))) return false;
   if (need.any && !need.any.some((p) => a.permissions.has(p))) return false;
@@ -78,6 +81,7 @@ export const DOC_WRITE_PERM: Record<DocType, Permission> = {
   purchase_return: 'purchase.write',
   transfer: 'stock.write',
   opening: 'stock.write',
+  stocktake: 'stock.write',
 };
 
 /** Loại phiếu mang giá vốn (đơn giá = giá mua): không có quyền "Xem giá mua" ⇒ máy chủ che giá / tiền. */

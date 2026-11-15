@@ -13,6 +13,8 @@ export interface ProductLite {
   is_service: boolean;
   sale_price?: number;
   purchase_price?: number | null;
+  /** C11: mã thuế suất mặc định của mặt hàng */
+  vat_rate?: string | null;
 }
 
 export interface LineDraft {
@@ -27,6 +29,13 @@ export interface LineDraft {
   qty: number | null;
   unit_price: number | null;
   note: string;
+  // ---- bản mở rộng M3 (không có ⇒ như bản chuẩn) ----
+  /** C10: hệ số quy đổi của `unit` (1 = đơn vị gốc) */
+  factor?: number;
+  /** C11: thuế suất dòng; undefined = chưa đặt (không gửi), null = không thuế / KCT */
+  vat_rate?: number | null;
+  /** C9: tồn sổ sách máy chủ trả (đơn vị gốc) */
+  book_qty?: number | null;
 }
 
 export interface HeaderDraft {
@@ -65,6 +74,7 @@ export function fromProduct(p: Product): ProductLite {
     is_service: p.is_service,
     sale_price: p.sale_price,
     purchase_price: p.purchase_price,
+    ...(p.vat_rate !== undefined ? { vat_rate: p.vat_rate } : {}),
   };
 }
 
@@ -90,6 +100,9 @@ export function draftFromDoc(d: DocumentFull): { header: HeaderDraft; lines: Lin
         qty: l.qty,
         unit_price: l.unit_price,
         note: l.note,
+        ...(l.factor !== undefined ? { factor: l.factor } : {}),
+        ...(l.vat_rate !== undefined ? { vat_rate: l.vat_rate } : {}),
+        ...(l.book_qty !== undefined ? { book_qty: l.book_qty } : {}),
       })),
     ),
   };
@@ -98,6 +111,13 @@ export function draftFromDoc(d: DocumentFull): { header: HeaderDraft; lines: Lin
 export function lineAmount(l: LineDraft): number {
   if (l.qty === null || l.unit_price === null) return 0;
   return Math.round(l.qty * l.unit_price);
+}
+
+/** C11: tiền thuế của dòng = round(thành tiền × thuế suất / 100) đến đồng (0 nếu không thuế). */
+export function lineTax(l: LineDraft): number {
+  if (l.vat_rate === undefined || l.vat_rate === null) return 0;
+  const a = lineAmount(l);
+  return Math.sign(a) * Math.round((Math.abs(a) * l.vat_rate) / 100);
 }
 
 /** Dòng thật sự gửi lên (bỏ dòng trống), kèm vị trí trong lưới để báo lỗi đúng dòng. */
@@ -121,8 +141,10 @@ export function toBody(type: DocType, h: HeaderDraft, lines: LineDraft[]): Docum
         description: l.description.trim(),
         unit: l.unit,
         qty: l.qty,
-        unit_price: type === 'transfer' ? null : l.unit_price,
+        unit_price: type === 'transfer' || type === 'stocktake' ? null : l.unit_price,
         note: l.note,
+        // C11: chỉ gửi khi dòng có thuế suất (bản chuẩn: không bao giờ có)
+        ...(l.vat_rate !== undefined ? { vat_rate: l.vat_rate } : {}),
       }),
     ),
   };
@@ -141,13 +163,20 @@ export const DOC_FIELDS: MergeField<LineDraft>[] = [
   {
     label: 'Mặt hàng',
     value: (l) => l.product?.id ?? null,
-    copy: (to, from) => ({ ...to, product: from.product, codeText: from.codeText, unit: from.unit }),
+    copy: (to, from) => ({ ...to, product: from.product, codeText: from.codeText, unit: from.unit, factor: from.factor }),
     show: (l) => l.product?.code ?? '',
   },
   { label: 'Diễn giải', value: (l) => l.description.trim(), copy: (to, from) => ({ ...to, description: from.description }), show: (l) => l.description.trim() || '(trống)' },
-  { label: 'ĐVT', value: (l) => l.unit, copy: (to, from) => ({ ...to, unit: from.unit }), show: (l) => l.unit || '(trống)' },
+  // đơn vị đi cùng hệ số quy đổi (C10)
+  { label: 'ĐVT', value: (l) => `${l.unit}|${l.factor ?? 1}`, copy: (to, from) => ({ ...to, unit: from.unit, factor: from.factor }), show: (l) => l.unit || '(trống)' },
   { label: 'SL', value: (l) => l.qty, copy: (to, from) => ({ ...to, qty: from.qty }), show: (l) => show(l.qty, false) },
   { label: 'Đơn giá', value: (l) => l.unit_price, copy: (to, from) => ({ ...to, unit_price: from.unit_price }), show: (l) => show(l.unit_price, true) },
+  {
+    label: 'Thuế suất',
+    value: (l) => (l.vat_rate === undefined ? 'x' : l.vat_rate === null ? 'KCT' : String(l.vat_rate)),
+    copy: (to, from) => ({ ...to, vat_rate: from.vat_rate }),
+    show: (l) => (l.vat_rate === undefined || l.vat_rate === null ? 'KCT' : `${l.vat_rate}%`),
+  },
   { label: 'Ghi chú', value: (l) => l.note.trim(), copy: (to, from) => ({ ...to, note: from.note }), show: (l) => l.note.trim() || '(trống)' },
 ];
 
