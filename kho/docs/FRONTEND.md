@@ -288,3 +288,40 @@ Giai đoạn 4: `frontend/screenshots/stage4/` (thu chi nhiều dòng, hoàn ti�
 máy chủ thật: đăng nhập sai/đúng, thêm/sửa/xóa từng danh mục bằng bàn phím, lỗi trùng mã, thiếu ĐVT, bỏ cả KH/NCC,
 mật khẩu ngắn, hạ quyền admin cuối, xóa mục đã dùng ⇒ ngừng sử dụng, tìm không dấu, phân quyền kế toán, hai trình duyệt
 (máy 2 thấy kho/phiếu tạm mới < 0,5 giây), tắt rồi bật lại máy chủ (tự nối lại), khóa tài khoản đang dùng (về đăng nhập).
+
+## Bản mở rộng — đợt M1 (SPEC_MO_RONG.md: §0, C1, C4, C3)
+
+Nguyên tắc: **mọi tính năng tắt ⇒ giao diện y như bản chuẩn** (không thêm menu, nút, cột, lệnh gọi lỗi). Chỉ một ngoại lệ có
+chủ ý: quản trị thấy thêm **Danh mục › Tính năng mở rộng** ở cả bản chuẩn (để bật tính năng). API của tính năng tắt trả
+404 `FEATURE_OFF` ⇒ giao diện **không gọi** khi tắt (vd. `/period-lock` chỉ gọi khi `period_lock` bật).
+
+- **Trạng thái** (`auth/AuthContext.tsx`): `/auth/me` trả `features` + `permissions`; lệnh đăng nhập chỉ trả người dùng nên
+  đăng nhập xong gọi thêm `/auth/me`. `useAccess()` (features, permissions, `can`, `on`, `isAdmin`), `useFeature(key)`,
+  `useCan(perm)`. Máy chủ cũ / bản chuẩn không gửi `permissions` ⇒ coi như đủ quyền. SSE `features` (quản trị đổi tính năng,
+  ma trận quyền, ngày khóa sổ) ⇒ `refresh()` đọc lại `/auth/me` + làm mới mọi query (số liệu bị che khác đi).
+- **Màn & menu** (`auth/guard.tsx`): `ScreenDef.need = { feature?, all?, any? }`; menu ẩn mục không đủ điều kiện (nhóm rỗng
+  ẩn luôn); mở thẳng đường dẫn ⇒ `GuardedScreen` báo "Bạn không có quyền xem màn hình này" kèm tên quyền tiếng Việt.
+  Thẻ ở trang Báo cáo dùng cùng điều kiện.
+- **Chứng từ theo quyền**: `docAccess(type)` ⇒ `{cfg, canWrite, canEditPosted, costHidden}`. Không có `cost.view` với phiếu
+  mua / trả NCC / tồn đầu ⇒ `cfg.hasPrice = false` (bỏ cột Đơn giá/Thành tiền, dòng Cộng, giống phiếu chuyển kho — khớp file
+  xuất của máy chủ), không có `debt.view` ⇒ bỏ Nợ cũ/Tổng nợ. Dùng ở DocumentListPage, DocumentEditor, PrintSheet, DocumentView.
+  Editor: `mayEdit` (phiếu tạm: quyền lập loại đó; đã ghi sổ: thêm `posted.edit`, ngoài kỳ khóa) quyết định chỉ xem; ẩn F2,
+  F8, F9, Bỏ ghi sổ, Xóa, "Thu/Chi tiền phiếu này" (`cash.write`); không gọi `/documents/check`, sổ công nợ khi không có quyền.
+  Bán lỗ khi giá mua bị che: "Bán lỗ (thấp hơn giá mua)" không kèm số. Ô tiền bị che (null) ⇒ "—" hoặc bỏ cột, không bao giờ
+  "null"/"0"/NaN. Lập phiếu mới không có quyền ⇒ trang 403.
+- **Danh mục**: `CatalogList` không có `catalog.write` ⇒ chỉ xem (không Thêm/Sửa/Xóa, F2). Giá mua (hàng hóa), nợ đầu kỳ (đối
+  tác: phải thu cần `debt.view`, phải trả thêm `cost.view`), số dư đầu kỳ (tài khoản tiền: `cash.view`) bị ẩn; khi lưu gửi
+  `null` để máy chủ giữ số cũ. `PartnerSelect` không thêm tại chỗ (F4) khi thiếu `catalog.write`.
+- **Phiếu thu chi**: không có `cash.write` hoặc phiếu trong kỳ khóa ⇒ chỉ xem (`ReadOnlyWrap` = `<fieldset disabled>`
+  `display: contents`, chỉ thêm vào DOM khi chỉ xem); công nợ trước/sau phiếu chỉ khi được xem công nợ.
+- **Tổng quan**: ô doanh thu / công nợ / quỹ bị che (null) thì không hiện.
+- **Màn mới** (`pages/extended/`): `FeaturesPage` (mô tả bằng lời thường, hộp xác nhận nói rõ tác dụng; 409 `IN_USE` khi tắt
+  phân quyền ⇒ nêu tên người dùng, hỏi lại rồi gửi `confirm: true`; tính năng `available: false` hiện mờ "Sắp có"),
+  `PermissionsPage` (ma trận vai trò × quyền, cột Quản trị khóa, "Về mặc định", Ctrl+S), `PeriodLockPage` (ngày khóa, lý do
+  bắt buộc, khóa / đổi / bỏ; lịch sử hiện nếu máy chủ trả `history`), `ImportPage` (3 bước; tự thử khi chọn file; tiến độ tải
+  lên qua `api.upload` (XMLHttpRequest); bảng lỗi lọc theo cột / chữ; "Nhập N dòng" chỉ bật khi hết lỗi; tồn đầu kỳ: chọn ngày,
+  sau khi nhập có đường dẫn tới từng phiếu tạm).
+- **Khóa sổ** (`lib/periodLock.tsx`): `useLockDate()`, `isLocked`, `LockBadge` (dòng "Lập: …" của phiếu), cảnh báo ngay dưới ô
+  ngày khi chọn ngày trong kỳ khóa, nút Sửa/Ghi sổ/Bỏ ghi sổ/Lưu/Xóa mờ kèm chú thích; 422 `PERIOD_LOCKED` ⇒ hộp "Kỳ này đã
+  khóa sổ" + lỗi ở ô ngày. Ô nợ đầu kỳ / số dư đầu kỳ bị khóa khi đang khóa sổ (máy chủ không cho đổi).
+- Mã lỗi mới trong `api/client.ts`: `FEATURE_OFF`, `PERIOD_LOCKED`, `IMPORT_INVALID` (câu dự phòng tiếng Việt).

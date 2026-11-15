@@ -116,3 +116,40 @@ Trường hợp đặc biệt: **thu tiền của nhà cung cấp** (họ hoàn 
 ## Đổi mật khẩu
 
 Bấm vào tên của bạn ở góc trên bên phải, chọn **Đổi mật khẩu**. Quên mật khẩu thì nhờ người quản trị đặt lại.
+
+## Tính năng mở rộng
+
+Ngoài bản chuẩn, phần mềm có thêm một số tính năng **bật/tắt được**. Người quản trị vào **Danh mục › Tính năng mở rộng**, gạt công tắc của từng tính năng; máy nào đang mở cũng thấy thay đổi ngay. Tắt một tính năng thì phần mềm trở lại đúng như bản chuẩn, số liệu đã ghi vẫn giữ nguyên. Tính năng ghi "Sắp có" là phần chưa làm xong, chưa bật được.
+
+### Phân quyền
+
+Khi bật, người dùng có thêm các vai trò **Bán hàng**, **Mua hàng**, **Thủ kho** (chọn trong Hệ thống › Người dùng). Mỗi vai trò chỉ làm được phần việc của mình:
+
+- Ai không được lập một loại phiếu thì không thấy nút **Lập phiếu** / phím **F2** của loại đó; mở phiếu thì chỉ xem.
+- Ai không được sửa phiếu đã ghi sổ thì không thấy nút **Sửa phiếu (F8)**, **Bỏ ghi sổ**.
+- Ai không được xem giá mua thì không thấy giá mua, giá vốn, đơn giá và tiền trên phiếu nhập, phiếu tồn đầu; cảnh báo bán lỗ vẫn hiện nhưng không kèm giá mua.
+- Ai không được xem công nợ, sổ quỹ, báo cáo thì các menu, ô số trên Tổng quan tương ứng được ẩn.
+- Xem tồn kho, thẻ kho, danh mục, chứng từ: ai cũng xem được.
+
+Quản trị chỉnh việc của từng vai trò ở **Hệ thống › Phân quyền** (đánh dấu rồi bấm **Lưu**; **Về mặc định** trả lại cách chia ban đầu). Quản trị luôn làm được mọi việc. Tắt tính năng Phân quyền khi còn người mang vai trò mới: phần mềm nêu tên những người đó và hỏi lại; nếu vẫn tắt, họ được coi như Kế toán.
+
+### Khóa sổ
+
+Cuối kỳ, người quản trị vào **Hệ thống › Khóa sổ**, chọn ngày, ghi lý do (ví dụ "Chốt sổ tháng 10") rồi bấm **Khóa sổ**. Từ đó:
+
+- Phiếu kho và phiếu thu chi có ngày từ ngày khóa trở về trước có nhãn **"Đã khóa sổ đến dd/mm/yyyy"**: không sửa, không ghi sổ, không bỏ ghi sổ, không xóa được (nút bị mờ).
+- Không lập được phiếu mới có ngày trong kỳ đã khóa — gõ ngày đó vào ô ngày là phần mềm cảnh báo ngay.
+- Phiếu tạm đã có trong kỳ khóa vẫn sửa, xóa được; muốn ghi sổ thì đổi ngày ra ngoài kỳ khóa.
+- Không đổi được nợ đầu kỳ của đối tác và số dư đầu kỳ tài khoản tiền.
+
+Cần sửa lại kỳ cũ: quản trị **đổi ngày khóa** về trước, hoặc **Bỏ khóa sổ** (đều phải ghi lý do).
+
+### Nhập từ Excel
+
+**Danh mục › Nhập từ Excel**, làm theo 3 bước:
+
+1. Chọn loại dữ liệu (hàng hóa; khách hàng, nhà cung cấp; tồn đầu kỳ; công nợ đầu kỳ) rồi bấm **Tải file mẫu**. Mở file, điền vào trang "Dữ liệu" (trang "Hướng dẫn" giải thích từng cột). Số gõ kiểu Việt Nam được: 1.500.000; 2,5.
+2. Bấm **Chọn file…** và chọn file đã điền. Phần mềm tự kiểm tra cả file, **chưa ghi gì**.
+3. Xem kết quả: bao nhiêu dòng, thêm mới bao nhiêu, cập nhật bao nhiêu. Có lỗi thì bảng lỗi ghi rõ **dòng, cột, lỗi gì** (lọc được theo cột) — sửa trong Excel, lưu, bấm **Kiểm tra lại**. Hết lỗi thì bấm **Nhập N dòng**: phần mềm nhập tất cả, hoặc không nhập dòng nào nếu có trục trặc.
+
+Mặt hàng, đối tác đã có (trùng mã) thì được cập nhật các ô có dữ liệu, ô để trống giữ nguyên. Tồn đầu kỳ: chọn **ngày tồn đầu kỳ** trước khi chọn file; phần mềm tạo mỗi kho một **phiếu Tồn đầu kỳ TẠM** và hiện đường dẫn tới từng phiếu — mở, xem lại rồi bấm **Ghi sổ (F9)**. Công nợ đầu kỳ (chỉ quản trị) thay số cũ của các đối tác có trong file.
