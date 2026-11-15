@@ -52,7 +52,7 @@ Trạng thái: **Đã làm** = đã có trong phần mềm, bỏ được nếu 
 | # | Đề xuất | Lợi ích | Ưu tiên em gợi ý |
 |---|---|---|---|
 | C1 | Phân quyền chi tiết: kế toán bán, kế toán mua, thủ kho (chỉ xem), quản trị; quyền sửa phiếu đã ghi sổ, quyền xem giá mua | Giá mua và việc sửa phiếu cũ là thứ nhạy cảm | Cao |
-| C2 | Sao lưu dữ liệu tự động hằng ngày + hướng dẫn khôi phục | Một máy chủ hỏng là mất toàn bộ sổ sách | **Đã làm phần script và hướng dẫn** (`scripts/sao-luu.sh`, `khoi-phuc.sh`, `docs/CAI_DAT.md`); còn việc đặt lịch và ổ lưu ngoài trên máy thật |
+| C2 | Sao lưu dữ liệu tự động hằng ngày + hướng dẫn khôi phục | Một máy chủ hỏng là mất toàn bộ sổ sách | Đã làm: bộ cài tự đặt lịch sao lưu 12:15 và 18:30 hằng ngày, có lệnh khôi phục. Còn lại: đặt thư mục lưu ngoài máy chủ (SAO_LUU_THU_MUC_2) trên máy thật |
 | C3 | Nhập danh mục và tồn đầu kỳ từ Excel (hàng hóa, khách, NCC, tồn 4 kho, công nợ đầu kỳ) | Chuyển dữ liệu từ phần mềm cũ, không phải gõ tay vài nghìn mã | Cao |
 | C4 | Khóa sổ theo kỳ | Tránh sửa nhầm số liệu đã báo cáo thuế | Trung bình |
 | C5 | Mức tồn tối thiểu từng mã + cảnh báo | "Hàng sắp hết" sát thực tế hơn | Trung bình |
