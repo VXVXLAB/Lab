@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"net/http"
+
+	"github.com/shopspring/decimal"
 	"strings"
 
 	"kho/internal/apperr"
@@ -9,6 +11,7 @@ import (
 	"kho/internal/docs"
 	"kho/internal/events"
 	"kho/internal/export"
+	"kho/internal/ext"
 )
 
 func (s *Server) publishDoc(r *http.Request, d *docs.Document, action string) {
@@ -43,9 +46,31 @@ func (s *Server) listDocuments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// docAccess kiểm tra quyền thao tác trên chứng từ đang có: quyền lập loại phiếu đó, và posted.edit nếu phiếu đã ghi sổ
+// (khi postedNeedsEdit). Trả loại và trạng thái hiện tại.
+func (s *Server) docAccess(r *http.Request, id int64, postedNeedsEdit bool) (string, string, error) {
+	var typ, status string
+	if err := s.Pool.QueryRow(r.Context(), `SELECT doc_type, status FROM documents WHERE id=$1`, id).Scan(&typ, &status); err != nil {
+		return "", "", apperr.NotFound("chứng từ")
+	}
+	if err := need(r, docWritePerm(typ)); err != nil {
+		return "", "", err
+	}
+	if postedNeedsEdit && status == docs.StatusPosted {
+		if err := need(r, ext.PPostedEdit); err != nil {
+			return "", "", err
+		}
+	}
+	return typ, status, nil
+}
+
 func (s *Server) createDocument(w http.ResponseWriter, r *http.Request) {
 	var in docs.Input
 	if err := decode(r, &in); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if err := need(r, docWritePerm(in.DocType)); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -83,6 +108,18 @@ func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	typ, _, err := s.docAccess(r, id, true)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if costDocTypes[typ] && !can(r, ext.PCostView) {
+		// Người không xem được giá mua nhận đơn giá null: giữ đơn giá cũ cho dòng gửi lại id (không làm mất giá vốn).
+		if err := s.keepHiddenPrices(r, id, &in); err != nil {
+			writeErr(w, r, err)
+			return
+		}
+	}
 	d, err := s.Docs.Update(r.Context(), userOf(r).ID, id, in)
 	if err != nil {
 		writeErr(w, r, err)
@@ -108,6 +145,10 @@ func (s *Server) postDocument(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	if _, _, err := s.docAccess(r, id, false); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	d, err := s.Docs.Post(r.Context(), userOf(r).ID, id, in.Version, in.ConfirmLoss)
 	if err != nil {
 		writeErr(w, r, err)
@@ -128,6 +169,10 @@ func (s *Server) unpostDocument(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	if _, _, err := s.docAccess(r, id, true); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	d, err := s.Docs.Unpost(r.Context(), userOf(r).ID, id, in.Version)
 	if err != nil {
 		writeErr(w, r, err)
@@ -145,6 +190,10 @@ func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	v, err := qInt(r, "version", 0)
 	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if _, _, err := s.docAccess(r, id, true); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -185,6 +234,17 @@ func (s *Server) checkDocumentInput(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, apperr.ValidationField("id", "id không hợp lệ"))
 		return
 	}
+	typ := in.DocType
+	if in.ID > 0 {
+		var err error
+		if typ, _, err = s.docAccess(r, in.ID, false); err != nil {
+			writeErr(w, r, err)
+			return
+		}
+	} else if err := need(r, docWritePerm(typ)); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	res, err := s.Docs.CheckInput(r.Context(), in.Input, in.ID)
 	if err != nil {
 		writeErr(w, r, err)
@@ -216,7 +276,7 @@ func (s *Server) exportDocument(w http.ResponseWriter, r *http.Request) {
 	if d.Status != docs.StatusPosted {
 		name = "PHIEU_TAM_" + d.DraftNo
 	}
-	if err := s.sendFile(w, r, format, name, export.DocumentTable(d)); err != nil {
+	if err := s.sendFile(w, r, format, name, export.DocumentTableMasked(d, !can(r, ext.PCostView), !can(r, ext.PDebtView))); err != nil {
 		writeErr(w, r, err)
 	}
 }
@@ -248,7 +308,19 @@ func (s *Server) publishVoucher(r *http.Request, v *cash.Voucher, action string)
 	s.publish(r, events.Event{Type: "voucher.changed", ID: v.ID, DocType: v.VoucherType, Action: action})
 }
 
+// voucherRead: xem phiếu thu chi cần quyền xem sổ quỹ hoặc quyền lập phiếu thu chi.
+func voucherRead(r *http.Request) error {
+	if can(r, ext.PCashView) || can(r, ext.PCashWrite) {
+		return nil
+	}
+	return need(r, ext.PCashView)
+}
+
 func (s *Server) listVouchers(w http.ResponseWriter, r *http.Request) {
+	if err := voucherRead(r); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	p, err := listParams(r, 50, 500)
 	if err != nil {
 		writeErr(w, r, err)
@@ -273,6 +345,10 @@ func (s *Server) listVouchers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createVoucher(w http.ResponseWriter, r *http.Request) {
+	if err := need(r, ext.PCashWrite); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	var in cash.Input
 	if err := decode(r, &in); err != nil {
 		writeErr(w, r, err)
@@ -288,6 +364,10 @@ func (s *Server) createVoucher(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getVoucher(w http.ResponseWriter, r *http.Request) {
+	if err := voucherRead(r); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	id, err := pathID(r)
 	if err != nil {
 		writeErr(w, r, err)
@@ -302,6 +382,10 @@ func (s *Server) getVoucher(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateVoucher(w http.ResponseWriter, r *http.Request) {
+	if err := need(r, ext.PCashWrite); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	id, err := pathID(r)
 	if err != nil {
 		writeErr(w, r, err)
@@ -322,6 +406,10 @@ func (s *Server) updateVoucher(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteVoucher(w http.ResponseWriter, r *http.Request) {
+	if err := need(r, ext.PCashWrite); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	id, err := pathID(r)
 	if err != nil {
 		writeErr(w, r, err)
@@ -342,6 +430,10 @@ func (s *Server) deleteVoucher(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) exportVoucher(w http.ResponseWriter, r *http.Request) {
+	if err := voucherRead(r); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	id, err := pathID(r)
 	if err != nil {
 		writeErr(w, r, err)
@@ -366,6 +458,10 @@ func (s *Server) exportVoucher(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) voucherHistory(w http.ResponseWriter, r *http.Request) {
+	if err := voucherRead(r); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	id, err := pathID(r)
 	if err != nil {
 		writeErr(w, r, err)
@@ -377,4 +473,25 @@ func (s *Server) voucherHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": h})
+}
+
+// keepHiddenPrices: dòng gửi lại id của chính phiếu mà đơn giá null (người sửa không thấy giá) ⇒ dùng lại đơn giá cũ.
+func (s *Server) keepHiddenPrices(r *http.Request, id int64, in *docs.Input) error {
+	old, err := s.Docs.Get(r.Context(), s.Pool, id)
+	if err != nil {
+		return err
+	}
+	prices := map[int64]*decimal.Decimal{}
+	for _, l := range old.Lines {
+		prices[l.ID] = l.UnitPrice
+	}
+	for i := range in.Lines {
+		if in.Lines[i].UnitPrice == nil && in.Lines[i].ID != 0 {
+			if p, ok := prices[in.Lines[i].ID]; ok && p != nil {
+				v := *p
+				in.Lines[i].UnitPrice = &v
+			}
+		}
+	}
+	return nil
 }

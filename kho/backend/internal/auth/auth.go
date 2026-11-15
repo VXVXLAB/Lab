@@ -14,6 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"kho/internal/apperr"
+	"kho/internal/ext"
 )
 
 // SessionTTL là thời hạn một phiên đăng nhập.
@@ -140,7 +141,7 @@ func (s *Service) hash(pw string) (string, error) {
 	return string(h), err
 }
 
-func validRole(r string) bool { return r == "admin" || r == "ketoan" }
+func validRole(r string) bool { return ext.ValidRole(r) }
 
 // CreateUser tạo người dùng.
 func (s *Service) CreateUser(ctx context.Context, in UserInput) (*User, error) {
@@ -159,7 +160,7 @@ func (s *Service) CreateUser(ctx context.Context, in UserInput) (*User, error) {
 		in.Role = "ketoan"
 	}
 	if !validRole(in.Role) {
-		return nil, apperr.ValidationField("role", "Vai trò phải là admin hoặc ketoan")
+		return nil, apperr.ValidationField("role", "Vai trò không hợp lệ (admin, ketoan, banhang, muahang, thukho)")
 	}
 	active := true
 	if in.Active != nil {
@@ -197,7 +198,7 @@ func (s *Service) UpdateUser(ctx context.Context, id int64, in UserInput) (*User
 	}
 	if in.Role != "" {
 		if !validRole(in.Role) {
-			return nil, apperr.ValidationField("role", "Vai trò phải là admin hoặc ketoan")
+			return nil, apperr.ValidationField("role", "Vai trò không hợp lệ (admin, ketoan, banhang, muahang, thukho)")
 		}
 		cur.Role = in.Role
 	}

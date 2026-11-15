@@ -7,6 +7,7 @@
 //	ADMIN_PASSWORD (mật khẩu admin khi seed lần đầu, mặc định admin123)
 //	STATIC_DIR     (thư mục giao diện đã build, mặc định ../frontend/dist)
 //	COOKIE_SECURE  (true nếu chạy sau HTTPS)
+//	KHO_EDITION    (extended ⇒ lần cài đầu bật mọi tính năng mở rộng; bỏ trống ⇒ bản chuẩn)
 //	LOG_FILE       (ghi log ra file này thay vì màn hình; dùng khi chạy nền)
 //
 // Bản cài đặt: nếu cạnh file chạy có file kho.env (mỗi dòng KHÓA=giá trị, dòng bắt đầu bằng # là ghi chú) thì các
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"kho/internal/db"
+	"kho/internal/ext"
 	"kho/internal/httpapi"
 )
 
@@ -107,6 +109,10 @@ func main() {
 	}
 	if err := db.Seed(ctx, pool, db.SeedOptions{AdminPassword: env("ADMIN_PASSWORD", "admin123")}); err != nil {
 		log.Fatalf("Lỗi seed dữ liệu: %v", err)
+	}
+	// Bản cài: KHO_EDITION=extended ⇒ bật mọi tính năng mở rộng — chỉ lần đầu, không đè lựa chọn của quản trị.
+	if err := ext.SeedFeatures(ctx, pool, os.Getenv("KHO_EDITION")); err != nil {
+		log.Fatalf("Lỗi seed tính năng: %v", err)
 	}
 
 	srv := httpapi.New(httpapi.Config{Pool: pool, StaticDir: static, SecureCookie: env("COOKIE_SECURE", "") == "true"})

@@ -585,3 +585,87 @@ Gợi ý frontend: nhận sự kiện ⇒ invalidate query liên quan (TanStack 
 | 52–60 | GET | `/api/reports/stock-summary`, `stock-nxt`, `stock-ledger`, `sales`, `purchases`, `debt-summary`, `debt-ledger`, `cash-book`, `draft-demand` |
 | 61 | GET | `/api/dashboard` |
 | 62 | GET | `/api/events` (SSE) |
+
+---
+
+## 8. Bản mở rộng (SPEC_MO_RONG.md) — đợt M1
+
+Mọi tính năng mở rộng **tắt** ⇒ mọi endpoint ở các mục 1–7 hoạt động y như bản chuẩn. API riêng của tính năng đang tắt trả
+`404` với `code: "FEATURE_OFF"` ("Tính năng "…" chưa được bật (Danh mục › Tính năng mở rộng)").
+Mã lỗi mới: `FEATURE_OFF` (404), `PERIOD_LOCKED` (422), `IMPORT_INVALID` (422).
+
+### 8.1 Công tắc tính năng
+- `GET /api/features` (mọi người dùng) → `{"features": {"permissions": false, "period_lock": false, "import_excel": false, "min_stock": false, "price_list": false, "credit_limit": false, "profit_report": false, "stocktake": false, "unit_conversion": false, "vat": false, "print_template": false}, "keys": [{"key": "permissions", "name": "Phân quyền"}, …]}`.
+- `PUT /api/features` (quản trị) body `{"features": {"permissions": true, "import_excel": true}, "confirm": false}` — chỉ đổi các khóa gửi lên → `{"features": {…đủ 11 khóa}}`. Khóa lạ ⇒ 400. Có audit (entity `features`) và phát SSE `{"type":"features","action":"updated",…}` (cũng phát khi đổi ma trận quyền / ngày khóa sổ) — giao diện tải lại `/api/features`, `/api/auth/me`.
+  Tắt `permissions` khi còn người dùng mang vai trò `banhang`/`muahang`/`thukho` ⇒ `409 IN_USE`, message nêu tên, `details.users`; gửi lại với `"confirm": true` để tắt (họ được coi như `ketoan`).
+- Bản cài: biến môi trường `KHO_EDITION=extended` ⇒ lần khởi động đầu tiên bật hết; không đặt ⇒ tắt hết. Chỉ áp dụng một lần (cột `settings.features_initialized`), sau đó chỉ quản trị đổi.
+- `GET /api/auth/me` có thêm `"permissions": ["sale.write", …]` (tính năng tắt ⇒ đủ 10 quyền) và `"features": {…}`.
+
+### 8.2 Phân quyền (`permissions`)
+Vai trò: `admin`, `ketoan`, `banhang`, `muahang`, `thukho` (`POST/PUT /api/users` nhận `role` mới chỉ khi tính năng bật, ngược lại 400).
+Quyền: `sale.write`, `purchase.write`, `stock.write`, `cash.write`, `catalog.write`, `posted.edit`, `cost.view`, `debt.view`, `cash.view`, `report.view`.
+- `GET /api/role-permissions` (quản trị) → `{"matrix": {"ketoan": [...], "banhang": ["sale.write","cash.write","debt.view","report.view"], "muahang": [...], "thukho": ["stock.write"], "admin": [đủ 10]}, "permissions": [{"key","name"}], "roles": [{"key","name"}]}`.
+- `PUT /api/role-permissions` (quản trị) body `{"matrix": {"thukho": ["stock.write","sale.write"]}}` — thay quyền của các vai trò gửi lên; `admin` không sửa được (400); quyền lạ ⇒ 400; có audit.
+- Thiếu quyền ⇒ `403 FORBIDDEN`, message "Bạn không có quyền "<tên quyền>"…", `details.permission`. Kiểm tra quyền chạy **trước** kiểm tra dữ liệu.
+
+| Thao tác | Quyền |
+|---|---|
+| POST/PUT/DELETE `/warehouses`, `/product-groups`, `/products`, `/partners`, `/cash-accounts` | `catalog.write` |
+| Tạo / sửa / ghi sổ / xóa phiếu tạm, `POST /documents/check` — bán, khách trả | `sale.write` |
+| … — nhập mua, trả NCC | `purchase.write` |
+| … — chuyển kho, tồn đầu kỳ | `stock.write` |
+| Sửa / bỏ ghi sổ / xóa chứng từ **đã ghi sổ** | quyền loại phiếu + `posted.edit` |
+| POST/PUT/DELETE `/vouchers` | `cash.write` |
+| GET `/vouchers`, `/vouchers/{id}` (+ export, history) | `cash.view` **hoặc** `cash.write` |
+| `/reports/sales` | `report.view` |
+| `/reports/purchases` | `report.view` + `cost.view` |
+| `/reports/debt-summary`, `/reports/debt-ledger` (side=receivable), `/partners/{id}/balance` | `debt.view` |
+| `/reports/debt-*` với `side=payable` | `debt.view` + `cost.view` |
+| `/reports/cash-book` | `cash.view` |
+| Người dùng, cài đặt công ty, tính năng, ma trận quyền, ngày khóa sổ, nhập công nợ đầu kỳ | chỉ `admin` |
+| Tồn kho, thẻ kho, NXT, hàng cần đặt, danh mục, xem chứng từ, dashboard, đổi mật khẩu | mọi vai trò |
+
+**Che số liệu ở máy chủ** (mọi phản hồi JSON, kể cả lỗi, lịch sử, dashboard; trường vẫn có mặt, giá trị `null`):
+- Không có `cost.view`: `purchase_price`, `cost_price`; với mọi object có `doc_type` ∈ `purchase`, `purchase_return`, `opening` (chứng từ, dòng danh sách, dòng thẻ kho, lịch sử): `unit_price`, `amount`, `total_amount`, `old_debt`, `total_debt` và `unit_price`/`amount` của các dòng; `sum_total_amount` của `/documents` (trừ khi `type=` chỉ gồm loại không phải mua/tồn đầu); `total_payable`, `opening_payable`, `payable`. Cảnh báo bán lỗ vẫn có (`type:"loss"`, `line_no`, `product_code`, `unit_price` bán) nhưng `cost_price: null` và message không có con số. File xuất chứng từ mua / trả NCC / tồn đầu bỏ cột Đơn giá, Thành tiền và Nợ cũ/Tổng nợ.
+- Không có `debt.view`: `old_debt`, `total_debt`, `total_receivable`, `total_payable`, `opening_receivable`, `opening_payable`, `receivable`, `payable`; file xuất chứng từ bỏ Nợ cũ/Tổng nợ.
+- Không có `cash.view`: `cash_balance`, `bank_balance`, `opening_balance` (tài khoản tiền).
+- Không có `report.view`: `revenue_today`, `revenue_month`.
+- Khi lưu, trường bị che không bị ghi đè: sửa mặt hàng giữ `purchase_price` cũ (tạo mới ⇒ 0); sửa đối tác giữ số dư đầu kỳ; sửa tài khoản tiền giữ `opening_balance`; sửa chứng từ mua/tồn đầu: dòng gửi lại `id` với `unit_price: null` giữ đơn giá cũ (dòng mới ⇒ giá mua mặc định).
+- Sự kiện SSE không mang số liệu tiền.
+
+### 8.3 Khóa sổ (`period_lock`)
+- `GET /api/period-lock` (mọi người dùng) → `{"lock_date": "2026-01-31"}` (hoặc `null`).
+- `PUT /api/period-lock` (quản trị) body `{"lock_date": "2026-01-31", "reason": "Chốt sổ tháng 1"}`; `lock_date: null` = bỏ khóa. Ngày tương lai ⇒ 400. Có audit (lưu cả lý do).
+- Khi bật, với ngày khóa L (`422 PERIOD_LOCKED`, message "Kỳ đến dd/mm/yyyy đã khóa sổ…", `details.lock_date`):
+  - tạo chứng từ (kể cả phiếu tạm) hoặc phiếu thu chi có ngày ≤ L;
+  - ghi sổ, bỏ ghi sổ chứng từ có ngày ≤ L; sửa chứng từ **đã ghi sổ** có ngày cũ hoặc ngày mới ≤ L (không sửa trong kỳ, không dời vào/ra kỳ);
+  - sửa / xóa phiếu thu chi có ngày cũ hoặc mới ≤ L;
+  - phiếu **tạm** đã nằm trong kỳ khóa: sửa, xóa, dời ngày ra ngoài kỳ được; không ghi sổ được; không được dời phiếu tạm từ ngoài vào trong kỳ;
+  - nhập tồn đầu kỳ từ Excel với `date` ≤ L (cả `dry_run`).
+- Tính năng tắt ⇒ không áp dụng khóa (ngày khóa đã lưu vẫn giữ để bật lại).
+
+### 8.4 Nhập từ Excel (`import_excel`)
+`{loai}` ∈ `products` (quyền `catalog.write`), `partners` (`catalog.write`), `opening_stock` (`stock.write`), `opening_debt` (chỉ quản trị).
+- `GET /api/import/{loai}/template` → file `Mau_nhap_{loai}.xlsx`: trang "Dữ liệu" (dòng tiêu đề + 2 dòng ví dụ; ví dụ tồn đầu / công nợ đầu dùng mã có thật trong danh mục), trang "Hướng dẫn".
+- `POST /api/import/{loai}?dry_run=1[&date=YYYY-MM-DD]` — `multipart/form-data`, trường `file` (.xlsx, ≤ 10 MB, ≤ 20.000 dòng dữ liệu; vượt ⇒ 400). Không ghi gì. → `200`:
+  ```json
+  {"kind": "products", "dry_run": true, "rows": 4, "creates": 3, "updates": 1,
+   "errors": [{"row": 9, "column": "Giá bán", "message": "\"abc\" không phải là số"}],
+   "notes": ["Sẽ tạo 1 nhóm VTHH mới."]}
+  ```
+  `row` = số dòng trong Excel; `column` = tiêu đề cột ("" nếu lỗi cả dòng).
+- `POST /api/import/{loai}` (không `dry_run`): **tất cả hoặc không gì**. Còn lỗi ⇒ `422 IMPORT_INVALID`, `details` = kết quả như trên (không ghi gì). Thành công ⇒ `200` cùng hình dạng (`dry_run: false`); `opening_stock` có thêm `"documents": [{"id", "draft_no", "warehouse_id", "warehouse_code", "lines"}]`.
+- Đọc file: trang đầu tiên không tên "Hướng dẫn"; dòng tiêu đề tìm trong 30 dòng đầu, nhận cột theo **tiêu đề** (không phân biệt dấu/hoa thường, bỏ ký tự như `*`), thứ tự cột tùy ý, cột lạ bỏ qua; dòng trống bỏ qua; cắt khoảng trắng; mã trùng trong file ⇒ lỗi "trùng với dòng N".
+- Số: ô kiểu số của Excel đọc nguyên giá trị; ô chữ đọc kiểu Việt: `1.500.000` = 1500000, `2,5` = 2,5, `1.200.000,5` = 1200000,5, `2.5` = 2,5 (dấu chấm chỉ là ngăn nghìn khi đúng dạng nhóm 3 chữ số). Giá làm tròn 2 chữ số, SL 3 chữ số.
+- `products` — cột: Mã hàng*, Tên hàng*, ĐVT, Nhóm VTHH, Giá bán, Giá mua. Mã đã có ⇒ cập nhật các ô có dữ liệu (ô trống giữ nguyên); mã mới cần Tên và ĐVT. Nhóm tìm theo mã hoặc tên, chưa có ⇒ tự tạo. Mã `DV`/`DICHVU` không nhập được. Không có `cost.view` ⇒ cột Giá mua bị bỏ qua (có `notes`).
+- `partners` — Mã đối tác*, Tên đối tác*, Là KH, Là NCC (`x`/`có`/`1` = có), Địa chỉ, Điện thoại, MST. Đối tác mới phải là KH hoặc NCC.
+- `opening_stock` — Mã hàng*, Mã kho*, Số lượng* (> 0), Đơn giá (trống ⇒ giá mua mặc định). Mã hàng / kho phải có sẵn (đang dùng, không phải dịch vụ); cặp mã hàng + kho trùng ⇒ lỗi. Tạo phiếu **Tồn đầu kỳ TẠM** ngày `date` (mặc định hôm nay), mỗi kho một phiếu (tối đa 1000 dòng/phiếu, nhiều hơn thì tách); người dùng xem lại rồi ghi sổ.
+- `opening_debt` — Mã đối tác*, Phải thu, Phải trả (âm được). Đặt `opening_receivable` / `opening_payable` theo đúng cơ chế hiện có, **thay** số cũ: cột có mặt mà ô trống ⇒ 0; cột không có trong file ⇒ giữ số cũ.
+- Mỗi lần nhập thật ghi một dòng audit (entity `import`); SSE `catalog.changed` (entity `product`/`partner`, action `imported`) hoặc `document.changed` cho từng phiếu tồn đầu tạo ra.
+
+| # | Phương thức | Đường dẫn (bản mở rộng) |
+|---|---|---|
+| 69–70 | GET, PUT | `/api/features` |
+| 71–72 | GET, PUT | `/api/role-permissions` |
+| 73–74 | GET, PUT | `/api/period-lock` |
+| 75–76 | GET, POST | `/api/import/{loai}/template`, `/api/import/{loai}` |

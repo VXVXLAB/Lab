@@ -11,6 +11,7 @@ import (
 	"kho/internal/apperr"
 	"kho/internal/catalog"
 	"kho/internal/debt"
+	"kho/internal/ext"
 	"kho/internal/stock"
 	"kho/internal/util"
 )
@@ -46,6 +47,10 @@ func mount[T any, I any](s *Server, r chi.Router, path string, c crud[T, I]) {
 			writeJSON(w, http.StatusOK, out)
 		})
 		r.Post("/", func(w http.ResponseWriter, r *http.Request) {
+			if err := need(r, ext.PCatalogWrite); err != nil {
+				writeErr(w, r, err)
+				return
+			}
 			var in I
 			if err := decode(r, &in); err != nil {
 				writeErr(w, r, err)
@@ -73,6 +78,10 @@ func mount[T any, I any](s *Server, r chi.Router, path string, c crud[T, I]) {
 			writeJSON(w, http.StatusOK, x)
 		})
 		r.Put("/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if err := need(r, ext.PCatalogWrite); err != nil {
+				writeErr(w, r, err)
+				return
+			}
 			id, err := pathID(r)
 			if err != nil {
 				writeErr(w, r, err)
@@ -92,6 +101,10 @@ func mount[T any, I any](s *Server, r chi.Router, path string, c crud[T, I]) {
 			writeJSON(w, http.StatusOK, x)
 		})
 		r.Delete("/{id}", func(w http.ResponseWriter, r *http.Request) {
+			if err := need(r, ext.PCatalogWrite); err != nil {
+				writeErr(w, r, err)
+				return
+			}
 			id, err := pathID(r)
 			if err != nil {
 				writeErr(w, r, err)
@@ -162,6 +175,15 @@ func (s *Server) catalogRoutes(r chi.Router) {
 			return cat.GetProduct(r.Context(), s.Pool, id)
 		},
 		save: func(r *http.Request, uid, id int64, in catalog.ProductInput) (*catalog.Product, error) {
+			// Không có quyền xem giá mua ⇒ không được đặt/đổi giá mua (giữ giá cũ khi sửa, 0 khi tạo).
+			if !can(r, ext.PCostView) {
+				in.PurchasePrice = nil
+				if id != 0 {
+					if old, err := cat.GetProduct(r.Context(), s.Pool, id); err == nil {
+						in.PurchasePrice = &old.PurchasePrice
+					}
+				}
+			}
 			return cat.SaveProduct(r.Context(), uid, id, in)
 		},
 		del:  func(r *http.Request, uid, id int64) error { return cat.DeleteProduct(r.Context(), uid, id) },
@@ -176,6 +198,26 @@ func (s *Server) catalogRoutes(r chi.Router) {
 			return cat.GetPartner(r.Context(), s.Pool, id)
 		},
 		save: func(r *http.Request, uid, id int64, in catalog.PartnerInput) (*catalog.Partner, error) {
+			// Không có quyền xem công nợ (hoặc giá mua với nợ phải trả) ⇒ giữ nguyên số dư đầu kỳ đang có.
+			hideRec, hidePay := !can(r, ext.PDebtView), !can(r, ext.PDebtView) || !can(r, ext.PCostView)
+			if hideRec || hidePay {
+				var old *catalog.Partner
+				if id != 0 {
+					old, _ = cat.GetPartner(r.Context(), s.Pool, id)
+				}
+				if hideRec {
+					in.OpeningReceivable = nil
+					if old != nil {
+						in.OpeningReceivable = &old.OpeningReceivable
+					}
+				}
+				if hidePay {
+					in.OpeningPayable = nil
+					if old != nil {
+						in.OpeningPayable = &old.OpeningPayable
+					}
+				}
+			}
 			return cat.SavePartner(r.Context(), uid, id, in)
 		},
 		del:  func(r *http.Request, uid, id int64) error { return cat.DeletePartner(r.Context(), uid, id) },
@@ -190,6 +232,14 @@ func (s *Server) catalogRoutes(r chi.Router) {
 			return cat.GetCashAccount(r.Context(), s.Pool, id)
 		},
 		save: func(r *http.Request, uid, id int64, in catalog.CashAccountInput) (*catalog.CashAccount, error) {
+			if !can(r, ext.PCashView) {
+				in.OpeningBalance = nil
+				if id != 0 {
+					if old, err := cat.GetCashAccount(r.Context(), s.Pool, id); err == nil {
+						in.OpeningBalance = &old.OpeningBalance
+					}
+				}
+			}
 			return cat.SaveCashAccount(r.Context(), uid, id, in)
 		},
 		del:  func(r *http.Request, uid, id int64) error { return cat.DeleteCashAccount(r.Context(), uid, id) },
@@ -320,6 +370,10 @@ func (s *Server) priceInfoBatch(w http.ResponseWriter, r *http.Request) {
 // partnerBalance: GET /partners/{id}/balance?date=&exclude_document_id=&exclude_voucher_id=
 // Số dư phải thu và phải trả hiện tại của một đối tác (nhẹ hơn sổ chi tiết công nợ).
 func (s *Server) partnerBalance(w http.ResponseWriter, r *http.Request) {
+	if err := need(r, ext.PDebtView); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	id, err := pathID(r)
 	if err != nil {
 		writeErr(w, r, err)

@@ -17,6 +17,7 @@ import (
 	"kho/internal/catalog"
 	"kho/internal/db"
 	"kho/internal/docs"
+	"kho/internal/ext"
 	"kho/internal/util"
 )
 
@@ -287,6 +288,9 @@ func (s *Service) Create(ctx context.Context, userID int64, in Input) (*Voucher,
 		if err != nil {
 			return err
 		}
+		if err := lockCheck(ctx, tx, in.VoucherDate); err != nil {
+			return err
+		}
 		prefix := Prefix(in.VoucherType, acc.Kind)
 		n, err := db.NextNumber(ctx, tx, prefix)
 		if err != nil {
@@ -356,6 +360,9 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Vouc
 		if err != nil {
 			return err
 		}
+		if err := lockCheck(ctx, tx, before.VoucherDate, in.VoucherDate); err != nil {
+			return err
+		}
 		no := r.No
 		if Prefix(in.VoucherType, acc.Kind) != Prefix(r.Type, r.Kind) {
 			// Đổi thu↔chi hoặc tiền mặt↔ngân hàng thì số phiếu phải theo dãy mới.
@@ -399,6 +406,9 @@ func (s *Service) Delete(ctx context.Context, userID, id int64, version int) (*V
 		}
 		before, err = s.Get(ctx, tx, id)
 		if err != nil {
+			return err
+		}
+		if err := lockCheck(ctx, tx, before.VoucherDate); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM cash_vouchers WHERE id=$1`, id); err != nil {
@@ -524,4 +534,13 @@ func (s *Service) List(ctx context.Context, f Filter) (ListResult, error) {
 		out.Items = append(out.Items, x)
 	}
 	return res, rows.Err()
+}
+
+// lockCheck: khóa sổ (bản mở rộng C4) — phiếu thu chi có ngày (cũ hoặc mới) ≤ ngày khóa ⇒ 422 PERIOD_LOCKED.
+func lockCheck(ctx context.Context, q db.Q, dates ...util.Date) error {
+	st, err := ext.Load(ctx, q)
+	if err != nil {
+		return err
+	}
+	return st.CheckLock(dates...)
 }

@@ -21,6 +21,7 @@ import (
 	"kho/internal/catalog"
 	"kho/internal/db"
 	"kho/internal/docs"
+	"kho/internal/ext"
 	"kho/internal/util"
 )
 
@@ -48,6 +49,9 @@ func main() {
 		}
 	}
 	if err := db.Seed(ctx, pool, db.SeedOptions{AdminPassword: envOr("ADMIN_PASSWORD", "admin123")}); err != nil {
+		log.Fatal(err)
+	}
+	if err := ext.SeedFeatures(ctx, pool, os.Getenv("KHO_EDITION")); err != nil {
 		log.Fatal(err)
 	}
 	var n int

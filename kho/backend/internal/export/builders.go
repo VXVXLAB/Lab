@@ -62,8 +62,18 @@ func exportStamp() string {
 }
 
 // DocumentTable dựng bảng xuất file cho một chứng từ — cùng nội dung, nhãn, ô ký với bản in.
-func DocumentTable(d *docs.Document) Table {
+func DocumentTable(d *docs.Document) Table { return DocumentTableMasked(d, false, false) }
+
+// DocumentTableMasked như DocumentTable; hideCost (người xem không có quyền xem giá mua) bỏ cột đơn giá/thành tiền
+// và Nợ cũ/Tổng nợ của phiếu mua, trả NCC, tồn đầu kỳ; hideDebt bỏ Nợ cũ/Tổng nợ.
+func DocumentTableMasked(d *docs.Document, hideCost, hideDebt bool) Table {
 	cfg := docPrints[d.DocType]
+	if hideCost && (d.DocType == docs.TypePurchase || d.DocType == docs.TypePurchaseReturn || d.DocType == docs.TypeOpening) {
+		cfg.hasPrice, cfg.hasDebt = false, false
+	}
+	if hideDebt {
+		cfg.hasDebt = false
+	}
 	draft := d.Status != docs.StatusPosted
 	t := Table{SheetName: d.DisplayNo}
 	no := d.DisplayNo

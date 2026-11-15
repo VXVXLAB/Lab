@@ -22,6 +22,9 @@ const (
 	CodeInsufficientStock = "INSUFFICIENT_STOCK"
 	CodeInUse             = "IN_USE"
 	CodeInternal          = "INTERNAL"
+	CodeFeatureOff        = "FEATURE_OFF"
+	CodePeriodLocked      = "PERIOD_LOCKED"
+	CodeImportInvalid     = "IMPORT_INVALID"
 )
 
 // Error là lỗi trả về cho client.
@@ -93,4 +96,9 @@ func From(err error) *Error {
 		}
 	}
 	return New(http.StatusInternalServerError, CodeInternal, "Lỗi hệ thống, vui lòng thử lại hoặc báo quản trị", nil)
+}
+
+// FeatureOff tạo lỗi 404 khi tính năng mở rộng đang tắt.
+func FeatureOff(name string) *Error {
+	return New(http.StatusNotFound, CodeFeatureOff, "Tính năng \""+name+"\" chưa được bật (Danh mục › Tính năng mở rộng)", nil)
 }

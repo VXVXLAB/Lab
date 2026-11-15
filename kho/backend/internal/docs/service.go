@@ -16,6 +16,7 @@ import (
 	"kho/internal/catalog"
 	"kho/internal/db"
 	"kho/internal/debt"
+	"kho/internal/ext"
 	"kho/internal/stock"
 	"kho/internal/util"
 )
@@ -471,6 +472,9 @@ func (s *Service) Create(ctx context.Context, userID int64, in Input) (*Document
 		if err != nil {
 			return err
 		}
+		if err := checkLock(ctx, tx, h.DocDate); err != nil {
+			return err
+		}
 		n, err := db.NextNumber(ctx, tx, "TAM")
 		if err != nil {
 			return err
@@ -522,6 +526,9 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Docu
 			return err
 		}
 		posted := r.Status == StatusPosted
+		if err := checkUpdateLock(ctx, tx, posted, before.DocDate, h.DocDate); err != nil {
+			return err
+		}
 		if posted {
 			if len(lines) == 0 {
 				return apperr.ValidationField("lines", "Phiếu đã ghi sổ phải có ít nhất một dòng")
@@ -617,6 +624,9 @@ func (s *Service) Post(ctx context.Context, userID, id int64, version int, confi
 		if err != nil {
 			return err
 		}
+		if err := checkLock(ctx, tx, before.DocDate); err != nil {
+			return err
+		}
 		if len(before.Lines) == 0 {
 			return apperr.ValidationField("lines", "Phiếu chưa có dòng nào, không ghi sổ được")
 		}
@@ -691,6 +701,9 @@ func (s *Service) Unpost(ctx context.Context, userID, id int64, version int) (*D
 		}
 		before, err := s.Get(ctx, tx, id)
 		if err != nil {
+			return err
+		}
+		if err := checkLock(ctx, tx, before.DocDate); err != nil {
 			return err
 		}
 		pairs, err := existingPairs(ctx, tx, id)
@@ -1008,4 +1021,33 @@ func History(ctx context.Context, q db.Q, entity string, id int64) ([]HistoryEnt
 		out = []HistoryEntry{}
 	}
 	return out, err
+}
+
+// checkLock: khóa sổ (bản mở rộng C4) — ngày ≤ ngày khóa ⇒ 422 PERIOD_LOCKED. Tính năng tắt ⇒ không làm gì.
+func checkLock(ctx context.Context, q db.Q, dates ...util.Date) error {
+	st, err := ext.Load(ctx, q)
+	if err != nil {
+		return err
+	}
+	return st.CheckLock(dates...)
+}
+
+// checkUpdateLock: phiếu đã ghi sổ ⇒ ngày cũ và ngày mới đều phải ngoài kỳ khóa (không sửa trong kỳ, không đổi ngày
+// vào/ra kỳ). Phiếu tạm ⇒ sửa được kể cả trong kỳ khóa, nhưng không được dời ngày từ ngoài vào trong kỳ khóa.
+func checkUpdateLock(ctx context.Context, q db.Q, posted bool, oldDate, newDate util.Date) error {
+	st, err := ext.Load(ctx, q)
+	if err != nil {
+		return err
+	}
+	lock := st.LockDate()
+	if lock == nil {
+		return nil
+	}
+	if posted {
+		return st.CheckLock(oldDate, newDate)
+	}
+	if oldDate.After(lock.Time) && !newDate.After(lock.Time) {
+		return ext.LockedErr(*lock)
+	}
+	return nil
 }

@@ -8,6 +8,7 @@ import (
 
 	"kho/internal/apperr"
 	"kho/internal/export"
+	"kho/internal/ext"
 	"kho/internal/reports"
 	"kho/internal/util"
 )
@@ -102,6 +103,14 @@ func (s *Server) reportStockLedger(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) reportTrade(kind string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		perms := []string{ext.PReportView}
+		if kind == "purchases" {
+			perms = append(perms, ext.PCostView)
+		}
+		if err := need(r, perms...); err != nil {
+			writeErr(w, r, err)
+			return
+		}
 		from, e1 := qDate(r, "from")
 		to, e2 := qDate(r, "to")
 		pa, e3 := qInt64(r, "partner_id")
@@ -132,6 +141,15 @@ func (s *Server) reportTrade(kind string) http.HandlerFunc {
 }
 
 func (s *Server) debtParams(r *http.Request) (reports.DebtParams, error) {
+	if err := need(r, ext.PDebtView); err != nil {
+		return reports.DebtParams{}, err
+	}
+	if r.URL.Query().Get("side") == "payable" {
+		// Nợ phải trả thể hiện giá trị hàng mua ⇒ cần thêm quyền xem giá mua.
+		if err := need(r, ext.PCostView); err != nil {
+			return reports.DebtParams{}, err
+		}
+	}
 	from, e1 := qDate(r, "from")
 	to, e2 := qDate(r, "to")
 	pid, e3 := qInt64(r, "partner_id")
@@ -185,6 +203,10 @@ func (s *Server) reportDebtLedger(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) reportCashBook(w http.ResponseWriter, r *http.Request) {
+	if err := need(r, ext.PCashView); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	acc, e1 := qInt64(r, "account_id")
 	from, e2 := qDate(r, "from")
 	to, e3 := qDate(r, "to")

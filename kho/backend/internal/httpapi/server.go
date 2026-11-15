@@ -21,6 +21,7 @@ import (
 	"kho/internal/catalog"
 	"kho/internal/docs"
 	"kho/internal/events"
+	"kho/internal/ext"
 	"kho/internal/reports"
 )
 
@@ -94,7 +95,16 @@ func (s *Server) Handler() http.Handler {
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.withExt)
 			r.Get("/auth/me", s.me)
+			r.Get("/features", s.getFeatures)
+			r.With(requireAdmin).Put("/features", s.putFeatures)
+			r.With(requireAdmin).Get("/role-permissions", s.getRolePermissions)
+			r.With(requireAdmin).Put("/role-permissions", s.putRolePermissions)
+			r.Get("/period-lock", s.getPeriodLock)
+			r.With(requireAdmin).Put("/period-lock", s.putPeriodLock)
+			r.Get("/import/{kind}/template", s.importTemplate)
+			r.Post("/import/{kind}", s.importRun)
 			r.Post("/auth/change-password", s.changePassword)
 			r.Get("/settings", s.getSettings)
 			r.With(requireAdmin).Put("/settings", s.putSettings)
@@ -181,7 +191,7 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 func requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !userOf(r).IsAdmin() {
-			writeErr(w, r, apperr.Forbidden("Chỉ quản trị mới được thực hiện thao tác này"))
+			writeErr(w, r, apperr.Forbidden("Chỉ quản trị mới có quyền thực hiện thao tác này"))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -216,7 +226,20 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"user": userOf(r)})
+	x := extOf(r)
+	writeJSON(w, http.StatusOK, map[string]any{"user": userOf(r), "permissions": x.perms.List(), "features": x.st.AllFlags()})
+}
+
+func eventFeatures() events.Event {
+	return events.Event{Type: "features", Action: "updated"}
+}
+
+// checkRole: vai trò mới (banhang, muahang, thukho) chỉ dùng được khi bật tính năng Phân quyền.
+func checkRole(r *http.Request, role string) error {
+	if ext.IsNewRole(role) && !extOf(r).st.On(ext.FPermissions) {
+		return apperr.ValidationField("role", "Vai trò "+ext.RoleNames[role]+" chỉ dùng được khi bật tính năng Phân quyền")
+	}
+	return nil
 }
 
 func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
@@ -274,6 +297,10 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	if err := checkRole(r, in.Role); err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	u, err := s.Auth.CreateUser(r.Context(), in)
 	if err != nil {
 		writeErr(w, r, err)
@@ -291,6 +318,10 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var in auth.UserInput
 	if err := decode(r, &in); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	if err := checkRole(r, in.Role); err != nil {
 		writeErr(w, r, err)
 		return
 	}

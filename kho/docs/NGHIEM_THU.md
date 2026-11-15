@@ -128,3 +128,20 @@
 ## Bộ QA hộp đen độc lập (`qa/`)
 
 `cd qa && ./run.sh` (ngày 15/11/2026, sau đợt sửa F-09/F-12/F-13/F-16): **45 test, 45 ĐẠT**, 0 phản hồi 5xx.
+
+## Bản mở rộng — đợt M1 (SPEC_MO_RONG.md)
+
+Các test chạy với tính năng được bật trong chính test; với mọi tính năng tắt, 56 test cũ và bộ `qa/` (45/45) đạt nguyên vẹn.
+
+| Hạng mục | Test | Kết quả |
+|---|---|---|
+| §0 công tắc: mặc định tắt, FEATURE_OFF, chỉ quản trị bật/tắt, audit, SSE `features` | `TestMR_Features_MacDinhTatVaBatTat` | ĐẠT |
+| §0 `KHO_EDITION=extended` chỉ bật ở lần seed đầu, không đè | `TestMR_Features_SeedBanCaiChiLanDau` | ĐẠT |
+| C1 tắt phân quyền khi còn vai trò mới ⇒ 409 / confirm ⇒ như kế toán | `TestMR_Features_TatPhanQuyenCanXacNhan` | ĐẠT |
+| C1 ma trận quyền: mọi endpoint ghi (đối chiếu router) × 4 vai trò; quyền đọc; sửa ma trận; tắt tính năng | `TestMR_C1_MaTranQuyenMoiEndpointGhi` | ĐẠT |
+| C1 không rò giá vốn: mọi route GET (đối chiếu router), file xlsx/docx, check, LOSS_WARNING, SSE; giữ giá khi người không thấy giá sửa | `TestMR_C1_KhongLoGiaVon` | ĐẠT |
+| C4 khóa sổ: tạo/sửa/ghi sổ/bỏ ghi sổ/xóa, dời ngày hai chiều, phiếu tạm, phiếu thu chi, nhập tồn đầu | `TestMR_C4_KhoaSo` | ĐẠT |
+| C3 file mẫu tải về → thử nguyên vẹn OK (4 loại) | `TestMR_C3_FileMauNhapLaiNgay` | ĐẠT |
+| C3 thử không ghi gì, tất cả hoặc không gì, số kiểu Việt, nhận cột theo tiêu đề, trùng mã | `TestMR_C3_NhapHangHoaTatCaHoacKhongGi` | ĐẠT |
+| C3 đối tác, tồn đầu kỳ (phiếu tạm từng kho), công nợ đầu kỳ (thay thế) | `TestMR_C3_DoiTacTonDauCongNoDau` | ĐẠT |
+| C3 file 20.000 dòng (thử ≈ 2,1 s, nhập ≈ 2,8 s), 20.001 dòng ⇒ 400 | `TestMR_C3_File20000Dong` | ĐẠT |
