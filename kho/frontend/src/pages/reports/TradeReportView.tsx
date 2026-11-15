@@ -89,11 +89,11 @@ export function TradeReportView({
       width: 96,
       render: (s: string, r) => <span className={r.qty < 0 ? 'neg link-text' : 'link-text'}>{s}</span>,
     },
-    { title: isSales ? 'Khách hàng' : 'Nhà cung cấp', dataIndex: 'partner_name', ellipsis: true, width: oneProduct ? undefined : 190 },
+    { title: isSales ? 'Khách hàng' : 'Nhà cung cấp', dataIndex: 'partner_name', ellipsis: true, width: oneProduct ? undefined : vatCols ? 150 : 190 },
     ...(oneProduct
       ? []
       : [
-          { title: 'Mã hàng', dataIndex: 'product_code', width: 110, ellipsis: true },
+          { title: 'Mã hàng', dataIndex: 'product_code', width: vatCols ? 96 : 110, ellipsis: true },
           {
             title: 'Tên hàng / diễn giải',
             key: 'desc',
@@ -103,28 +103,33 @@ export function TradeReportView({
         ]),
     { title: 'ĐVT', dataIndex: 'unit', width: 60 },
     { title: 'SL', dataIndex: 'qty', width: 80, align: 'right', render: (n: number) => <span className={n < 0 ? 'neg' : undefined}>{formatQty(n)}</span> },
-    { title: 'Đơn giá', dataIndex: 'unit_price', width: 108, align: 'right', render: (n: number | null) => formatMoney(n) },
-    { title: 'Thành tiền', dataIndex: 'amount', width: 120, align: 'right', render: (n: number, r) => (r.unit_price === null ? '' : <span className={n < 0 ? 'neg' : undefined}>{formatMoney(n)}</span>) },
+    { title: 'Đơn giá', dataIndex: 'unit_price', width: vatCols ? 100 : 108, align: 'right', render: (n: number | null) => formatMoney(n) },
+    { title: vatCols ? 'Trước thuế' : 'Thành tiền', dataIndex: 'amount', width: vatCols ? 110 : 120, align: 'right', render: (n: number, r) => (r.unit_price === null ? '' : <span className={n < 0 ? 'neg' : undefined}>{formatMoney(n)}</span>) },
     // C11: trước thuế / thuế / sau thuế (chỉ khi báo cáo có số thuế)
     ...(vatCols
       ? [
           {
             title: 'Thuế',
-            key: 'vat',
-            width: 56,
+            key: 'tax',
+            width: 104,
             align: 'right' as const,
             render: (_: unknown, r: TradeRow) => {
-              const v = (r as TradeRow & TradeRowVat).vat_rate;
-              return v === null || v === undefined ? <span className="muted">KCT</span> : `${v}%`;
+              const x = r as TradeRow & TradeRowVat;
+              return (
+                <>
+                  {formatMoney(x.tax_amount ?? 0)}
+                  <span className="muted cell-sub"> {x.vat_rate === null || x.vat_rate === undefined ? 'KCT' : `${x.vat_rate}%`}</span>
+                </>
+              );
             },
           },
-          { title: 'Tiền thuế', key: 'tax', width: 100, align: 'right' as const, render: (_: unknown, r: TradeRow) => formatMoney((r as TradeRow & TradeRowVat).tax_amount ?? 0) },
-          { title: 'Sau thuế', key: 'awt', width: 120, align: 'right' as const, render: (_: unknown, r: TradeRow) => formatMoney((r as TradeRow & TradeRowVat).amount_with_tax ?? r.amount) },
+          { title: 'Sau thuế', key: 'awt', width: 108, align: 'right' as const, render: (_: unknown, r: TradeRow) => formatMoney((r as TradeRow & TradeRowVat).amount_with_tax ?? r.amount) },
         ]
       : []),
-    { title: 'Kho', dataIndex: 'warehouse_name', width: 104, ellipsis: true },
+    // có cột thuế: bỏ cột Kho để vừa màn 1366 (vẫn lọc theo kho được)
+    ...(vatCols ? [] : [{ title: 'Kho', dataIndex: 'warehouse_name', width: 104, ellipsis: true }]),
   ];
-  const nCols = columns.length - (vatCols ? 3 : 0);
+  const nCols = columns.length - (vatCols ? 1 : 0);
   const summary = d
     ? [
         <b key="l">Cộng</b>,
@@ -136,8 +141,7 @@ export function TradeReportView({
         <b key="q">{formatQty(d.total_qty)}</b>,
         null,
         <b key="a">{formatMoney(d.total_amount)}</b>,
-        ...(vatCols ? [null, <b key="t">{formatMoney(d.total_tax ?? 0)}</b>, <b key="w">{formatMoney(d.total_with_tax ?? d.total_amount)}</b>] : []),
-        null,
+        ...(vatCols ? [<b key="t">{formatMoney(d.total_tax ?? 0)}</b>, <b key="w">{formatMoney(d.total_with_tax ?? d.total_amount)}</b>] : [null]),
       ]
     : null;
 
@@ -192,7 +196,7 @@ export function TradeReportView({
           loading={query.isLoading}
           error={query.error}
           summary={summary}
-          minWidth={oneProduct ? 760 : 1060}
+          minWidth={oneProduct ? 760 : vatCols ? 1090 : 1060}
           onOpen={(r) => drawers.push({ kind: 'document', id: r.document_id, title: `${DOC_TYPES[r.doc_type].name} ${r.doc_no}` })}
         />
       </div>

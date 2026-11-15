@@ -127,7 +127,7 @@ export function ProductsPage() {
       ),
     },
     { title: 'ĐVT', dataIndex: 'unit', width: 66 },
-    { title: 'Nhóm', dataIndex: 'group_name', width: 150, ellipsis: true, render: (g: string | null) => g ?? <span className="muted">–</span> },
+    { title: 'Nhóm', dataIndex: 'group_name', width: minOn ? 128 : 150, ellipsis: true, render: (g: string | null) => g ?? <span className="muted">–</span> },
     { title: 'Giá bán', dataIndex: 'sale_price', width: 108, align: 'right', render: (n: number) => formatMoney(n) },
     // không có quyền "Xem giá mua" (bản mở rộng) ⇒ bỏ hẳn cột
     ...(costView ? [{ title: 'Giá mua', dataIndex: 'purchase_price', width: 108, align: 'right' as const, render: (n: number) => formatMoney(n) }] : []),
@@ -175,7 +175,7 @@ export function ProductsPage() {
         searchPlaceholder="Tìm mã, tên hàng (gõ không dấu được)"
         describe={(r) => `${r.code} – ${r.name}`}
         columns={columns}
-        minWidth={1120}
+        minWidth={minOn ? 1100 : 1120}
         extraActionsWidth={64}
         extraActions={(r) =>
           r.is_service ? null : (
