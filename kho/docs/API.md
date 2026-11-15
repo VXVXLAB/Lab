@@ -807,6 +807,13 @@ làm xong). Tắt ⇒ API riêng trả `404 FEATURE_OFF`, JSON chứng từ / m�
 mới) — trừ khi dữ liệu đã có giá trị khác mặc định từ lúc tính năng bật (vd. dòng có hệ số ≠ 1, phiếu có thuế): khi đó
 các trường đó vẫn hiện để số liệu đọc được.
 
+**Dòng không có id (QA M-15/M-16):** khi PUT một phiếu mà **mọi** dòng gửi lên đều không có `id` và phiếu đang có dòng
+mang dữ liệu có thể mất (hệ số quy đổi ≠ 1, thuế suất, hoặc đơn giá mà người sửa không được xem): cùng số dòng và cùng
+mặt hàng ở từng vị trí ⇒ ghép theo vị trí (xử lý như có id); khác ⇒ `400 LINE_IDS_REQUIRED` ("…hãy gửi kèm id của từng
+dòng"). Phiếu không có dòng nào như vậy giữ hành vi cũ (dòng không id = dòng mới).
+**Trường không thuộc loại phiếu (M-13):** `to_warehouse_id` khác null/0 trên phiếu không phải chuyển kho ⇒ 400 (như
+`partner_id` trên chuyển kho / tồn đầu / kiểm kê, đơn giá / thuế trên kiểm kê, thuế trên chuyển kho / tồn đầu).
+
 **Máy khách cũ / không gửi trường mới:** dòng gửi lại `id` của chính phiếu (cùng mặt hàng) mà **không gửi** `unit` hoặc
 gửi đúng đơn vị đang lưu ⇒ giữ đơn vị + hệ số; không gửi `vat_rate` ⇒ giữ thuế suất đang lưu. Dòng mới ⇒ mặc định.
 
@@ -836,12 +843,13 @@ gửi đúng đơn vị đang lưu ⇒ giữ đơn vị + hệ số; không gử
 ### 11.2 Quy đổi đơn vị (`unit_conversion`)
 - `GET /api/products/{id}/units` → `{"product_id", "base_unit": "Lon", "items": [{"unit": "Thùng", "factor": 24, "in_use": true}]}`
   (1 Thùng = 24 Lon). `PUT` (`catalog.write`) body `{"items": [{"unit": "Thùng", "factor": 24}, …]}` **thay cả danh sách**;
-  hệ số > 0, tối đa 6 chữ số thập phân, < 10⁹; không trùng đơn vị gốc; không lặp. Đơn vị đang dùng trên chứng từ (cùng tên,
+  hệ số **≥ 1** (đơn vị gốc phải là đơn vị nhỏ nhất), tối đa 6 chữ số thập phân, < 10⁹; không trùng đơn vị gốc; không lặp. Đơn vị đang dùng trên chứng từ (cùng tên,
   cùng hệ số) mà bị bỏ / đổi hệ số ⇒ `409 IN_USE`. `GET /products/{id}` và `/products/lookup` kèm `"units": [...]`.
   Đổi đơn vị gốc của mặt hàng đã có dòng quy đổi ⇒ 400.
 - Dòng chứng từ (mọi loại, kể cả chuyển kho, kiểm kê): `unit` = đơn vị gốc hoặc đơn vị đã khai báo (không phân biệt hoa
   thường; khác ⇒ 400). `qty`, `unit_price`, `amount` theo đơn vị đã chọn — `amount = round(qty × unit_price)` đúng như nhập.
-  JSON dòng thêm `{"factor": 24, "base_qty": 48, "base_unit": "Lon"}`; `base_qty = round(qty × factor, 3)` (bằng 0 ⇒ 400).
+  JSON dòng thêm `{"factor": 24, "base_qty": 48, "base_unit": "Lon"}`; `base_qty = qty × factor` — phải chính xác đến 3 chữ số thập phân, lẻ hơn ⇒ 400 "số lượng quy đổi ra đơn vị gốc bị lẻ quá 3
+  số thập phân" (không làm tròn âm thầm).
 - Sổ kho, tồn, kiểm tra thiếu hàng (thông báo theo đơn vị gốc), hàng cần đặt, tồn tối thiểu, lãi gộp, thẻ kho (ĐVT = đơn
   vị gốc, đơn giá = đơn giá / hệ số) đều theo đơn vị gốc. Báo cáo mua / bán: dòng giữ đơn vị đã chọn + `base_qty`;
   `total_qty` cộng theo đơn vị gốc.

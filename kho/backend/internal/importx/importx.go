@@ -1459,6 +1459,9 @@ func planProductUnits(ctx context.Context, tx pgx.Tx, sd *sheetData, res *Result
 		} else if f == nil || !f.IsPositive() {
 			addErr(res, r.num, k, "factor", "Hệ số phải lớn hơn 0")
 			ok = false
+		} else if f.LessThan(decimal.NewFromInt(1)) {
+			addErr(res, r.num, k, "factor", "Hệ số phải ≥ 1. Đơn vị gốc phải là đơn vị nhỏ nhất; hãy đổi đơn vị gốc của mặt hàng")
+			ok = false
 		} else if !f.Equal(f.Round(6)) {
 			addErr(res, r.num, k, "factor", "Hệ số tối đa 6 chữ số thập phân")
 			ok = false

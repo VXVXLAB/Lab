@@ -183,3 +183,4 @@ Các test chạy với tính năng được bật trong chính test; với mọi
 | C12 mẫu in: kiểm tra cấu hình, logo theo nội dung, quyền, file xuất dùng ô ký / chân trang / ẩn cột, mặc định = như tắt | `TestMR_C12_MauIn` | ĐẠT |
 | C13 HTTPS: chứng thư tự ký, cookie Secure, lỗi file rõ ràng, cảnh báo hết hạn | `TestMR_C13_HTTPS` | ĐẠT |
 | Ma trận quyền / không rò giá vốn mở rộng cho route M3 (phiếu mua có thuế + đơn vị quy đổi, kiểm kê) | `TestMR_C1_MaTranQuyenMoiEndpointGhi`, `TestMR_C1_KhongLoGiaVon` | ĐẠT |
+| M-13 trường không thuộc loại phiếu; M-14 hệ số ≥ 1, SL quy đổi chính xác (bán lẻ 24 Lon hết đúng 1 Thùng); M-15/M-16 lưu lại không id dòng không mất đơn vị / hệ số / thuế / giá bị che (bật, tắt, máy khách cũ, kiểm kê), khác dãy ⇒ LINE_IDS_REQUIRED, tồn / công nợ không đổi | `TestMR_QA_M13_…`, `TestMR_QA_M14_HeSoVaSoLe`, `TestMR_QA_M15_M16_LuuLaiKhongIDDong` | ĐẠT |

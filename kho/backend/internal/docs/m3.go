@@ -313,3 +313,71 @@ func decorate(ctx context.Context, q db.Q, d *Document) error {
 	}
 	return nil
 }
+
+// exactBase: SL × hệ số phải biểu diễn đúng bằng 3 chữ số thập phân (thang SL của sổ kho) — không làm tròn âm thầm
+// (QA M-14). Dòng giữ nguyên SL và hệ số đang lưu thì không kiểm lại (dữ liệu cũ).
+func exactBase(qty, factor decimal.Decimal, ol *Line, i int) error {
+	if ol != nil && ol.factor.Equal(factor) && ol.Qty.Equal(qty) {
+		return nil
+	}
+	b := qty.Mul(factor)
+	if !b.Equal(b.Round(3)) {
+		return lineErr(i, "qty", "số lượng quy đổi ra đơn vị gốc bị lẻ quá 3 số thập phân ("+b.String()+"); hãy nhập số lượng khác hoặc dùng đơn vị gốc")
+	}
+	return nil
+}
+
+// lineAtRisk: dòng đang lưu có dữ liệu mà máy khách không gửi id dòng sẽ làm mất (hệ số quy đổi, thuế suất, đơn giá bị
+// che với người không xem được giá mua).
+func lineAtRisk(l Line, maskedPrices bool) bool {
+	return (!l.factor.IsZero() && l.factor.Cmp(one) != 0) || l.vatRate != nil || (maskedPrices && l.UnitPrice != nil)
+}
+
+func sameProduct(li LineInput, l Line) bool {
+	if li.ProductID != 0 {
+		return li.ProductID == l.ProductID
+	}
+	c := strings.TrimSpace(li.ProductCode)
+	if strings.EqualFold(c, l.ProductCode) {
+		return true
+	}
+	return strings.EqualFold(l.ProductCode, "DV") && (strings.EqualFold(c, "DICHVU") || strings.EqualFold(util.Fold(c), "dich vu"))
+}
+
+// MatchLineIDs (QA M-15/M-16): máy khách gửi lại các dòng KHÔNG có id cho một phiếu đang có dòng mang dữ liệu sẽ mất
+// (hệ số ≠ 1, thuế suất, giá bị che) ⇒ cùng số dòng và cùng mặt hàng ở từng vị trí ⇒ gán id dòng đang lưu theo vị trí
+// (rồi xử lý như dòng có id: trường không gửi được giữ); khác dãy ⇒ 400 LINE_IDS_REQUIRED. Phiếu không có dòng nào như
+// vậy ⇒ giữ đúng hành vi bản chuẩn (dòng không id = dòng mới). Dòng có id ở bất kỳ đâu ⇒ không đổi gì.
+func MatchLineIDs(old *Document, lines []LineInput, maskedPrices bool) error {
+	if old == nil || len(old.Lines) == 0 {
+		return nil
+	}
+	for _, li := range lines {
+		if li.ID != 0 {
+			return nil
+		}
+	}
+	risky := false
+	for _, l := range old.Lines {
+		if lineAtRisk(l, maskedPrices) {
+			risky = true
+			break
+		}
+	}
+	if !risky {
+		return nil
+	}
+	same := len(lines) == len(old.Lines)
+	for i := 0; same && i < len(lines); i++ {
+		same = sameProduct(lines[i], old.Lines[i])
+	}
+	if !same {
+		return apperr.New(400, apperr.CodeLineIDsRequired,
+			"Phiếu có dòng dùng đơn vị quy đổi, thuế suất hoặc đơn giá bạn không xem được; các dòng gửi lên không có id và không khớp từng dòng đang lưu. Hãy tải lại phiếu và gửi kèm id của từng dòng (lines[].id).",
+			map[string]any{"field": "lines"})
+	}
+	for i := range lines {
+		lines[i].ID = old.Lines[i].ID
+	}
+	return nil
+}

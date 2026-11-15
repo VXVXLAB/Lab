@@ -109,6 +109,10 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 	if h.ToWarehouseID != nil && *h.ToWarehouseID == 0 {
 		h.ToWarehouseID = nil
 	}
+	// Trường không thuộc loại phiếu ⇒ 400, không âm thầm bỏ qua (QUYET_DINH B6, QA M-13).
+	if h.DocType != TypeTransfer && h.ToWarehouseID != nil {
+		return h, nil, apperr.ValidationField("to_warehouse_id", TypeNames[h.DocType]+" không có kho nhận (to_warehouse_id chỉ dùng cho phiếu chuyển kho)")
+	}
 	switch {
 	case h.DocType == TypeTransfer:
 		if h.ToWarehouseID == nil {
@@ -212,6 +216,9 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 				return h, nil, lineErr(i, "qty", "số lượng thực tế không được âm")
 			}
 			pl.Qty = li.Qty.Round(3)
+			if err := exactBase(pl.Qty, pl.Factor, ol, i); err != nil {
+				return h, nil, err
+			}
 			pl.BaseQty = pl.Qty.Mul(pl.Factor).Round(3)
 			if pl.BaseQty.GreaterThanOrEqual(maxQty) {
 				return h, nil, lineErr(i, "qty", "số lượng quá lớn")
@@ -296,6 +303,9 @@ func (s *Service) validate(ctx context.Context, q db.Q, in Input, strict bool, o
 		}
 		pl.BaseQty = pl.Qty
 		if pl.Factor.Cmp(one) != 0 {
+			if err := exactBase(pl.Qty, pl.Factor, ol, i); err != nil {
+				return h, nil, err
+			}
 			pl.BaseQty = pl.Qty.Mul(pl.Factor).Round(3)
 			if !pl.BaseQty.IsPositive() {
 				return h, nil, lineErr(i, "qty", "số lượng quy về đơn vị gốc bằng 0 (quá nhỏ)")
@@ -657,6 +667,9 @@ func (s *Service) Update(ctx context.Context, userID, id int64, in Input) (*Docu
 		}
 		before, err := s.Get(ctx, tx, id)
 		if err != nil {
+			return err
+		}
+		if err := MatchLineIDs(before, in.Lines, false); err != nil {
 			return err
 		}
 		h, lines, err := s.validate(ctx, tx, in, false, before)
@@ -1035,6 +1048,9 @@ func (s *Service) CheckInput(ctx context.Context, in Input, id int64) (*CheckRes
 			return nil, apperr.ValidationField("doc_type", "Không được đổi loại chứng từ")
 		}
 		strict, oldDoc = false, d
+		if err := MatchLineIDs(d, in.Lines, false); err != nil {
+			return nil, err
+		}
 	}
 	h, lines, err := s.validate(ctx, s.Pool, in, strict, oldDoc)
 	if err != nil {

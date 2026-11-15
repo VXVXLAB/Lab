@@ -119,6 +119,14 @@ func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	// Dòng không có id (máy khách cũ): ghép theo vị trí khi cùng dãy mặt hàng; khác dãy mà phiếu có dữ liệu sẽ mất
+	// (hệ số quy đổi, thuế suất, giá bị che) ⇒ 400 LINE_IDS_REQUIRED (QA M-15/M-16).
+	if old, err := s.Docs.Get(r.Context(), s.Pool, id); err == nil {
+		if err := docs.MatchLineIDs(old, in.Lines, costDocTypes[typ] && !can(r, ext.PCostView)); err != nil {
+			writeErr(w, r, err)
+			return
+		}
+	}
 	if costDocTypes[typ] && !can(r, ext.PCostView) {
 		// Người không xem được giá mua nhận đơn giá null: giữ đơn giá cũ cho dòng gửi lại id (không làm mất giá vốn).
 		if err := s.keepHiddenPrices(r, id, &in); err != nil {

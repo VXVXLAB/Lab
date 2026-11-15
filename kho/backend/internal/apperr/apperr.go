@@ -26,6 +26,7 @@ const (
 	CodePeriodLocked      = "PERIOD_LOCKED"
 	CodeImportInvalid     = "IMPORT_INVALID"
 	CodeCreditWarning     = "CREDIT_WARNING"
+	CodeLineIDsRequired   = "LINE_IDS_REQUIRED"
 )
 
 // Error là lỗi trả về cho client.

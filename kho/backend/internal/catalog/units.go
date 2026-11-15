@@ -20,6 +20,9 @@ type ProductUnit struct {
 	InUse  bool            `json:"in_use"`
 }
 
+// MinFactorMsg: hệ số < 1 bị từ chối (QA M-14) — đơn vị gốc phải là đơn vị nhỏ nhất để SL quy đổi luôn chính xác.
+const MinFactorMsg = "hệ số phải ≥ 1. Đơn vị gốc phải là đơn vị nhỏ nhất; hãy đổi đơn vị gốc của mặt hàng"
+
 // MaxFactor là hệ số quy đổi lớn nhất.
 var MaxFactor = decimal.New(1, 9)
 
@@ -100,6 +103,8 @@ func (s *Service) SaveUnits(ctx context.Context, userID, productID int64, items 
 				return bad("unit", "đơn vị "+u+" bị lặp")
 			case it.Factor == nil || !it.Factor.IsPositive():
 				return bad("factor", "hệ số phải lớn hơn 0")
+			case it.Factor.LessThan(decimal.NewFromInt(1)):
+				return bad("factor", MinFactorMsg)
 			case !it.Factor.Equal(it.Factor.Round(6)):
 				return bad("factor", "hệ số tối đa 6 chữ số thập phân")
 			case it.Factor.GreaterThanOrEqual(MaxFactor):
