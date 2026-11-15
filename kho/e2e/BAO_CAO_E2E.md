@@ -2,7 +2,28 @@
 
 Người kiểm thử độc lập, đóng vai kế toán của khách, thao tác trên trình duyệt thật (Chromium, 1366×768) bằng nhãn tiếng Việt, vai trò và bàn phím. API chỉ dùng để chuẩn bị dữ liệu nền (danh mục, tồn đầu, phiếu nền cho báo cáo) và đối chiếu số đã thấy trên màn hình.
 
-Báo cáo có ba vòng: **Vòng 3 (kiểm lại sau khi đội phát triển sửa F-09…F-16)** ở mục 1–4; **Vòng 2** giữ nguyên ở mục 5 và **Vòng 1** ở mục 6 làm lịch sử.
+Báo cáo có bốn vòng: **Vòng 4 (kiểm lại F-17…F-19)** ở mục 0; **Vòng 3 (kiểm lại F-09…F-16)** ở mục 1–4; **Vòng 2** ở mục 5 và **Vòng 1** ở mục 6 giữ nguyên làm lịch sử.
+
+## 0. Vòng 4 — kiểm lại F-17, F-18, F-19 (frontend `b1df408`)
+
+**Kết quả hai lần chạy đầy đủ liên tiếp (`./run.sh`, CSDL mới mỗi lần):**
+
+| Lần | Kết quả Playwright | Thời gian | Mã thoát |
+|---|---|---|---|
+| A | `168 passed (11.1m)` — expected 168, unexpected 0, flaky 0 | 11 phút 5 giây | 0 |
+| B | `168 passed (10.9m)` — expected 168, unexpected 0, flaky 0 | 10 phút 57 giây | 0 |
+
+168 test, **không còn test "lỗi đã biết" nào** (`test.fail` = 0). Lần chạy trước đó (cùng mã, trước khi sửa dữ liệu test): `1 failed, 5 did not run, 162 passed` hai lần — hỏng ở test F-19 mới vì phiếu tạm vượt tồn của chính test (COS10 × 500) không còn "thiếu" khi chạy cả bộ (các câu chuyện trước đã nhập nhiều COS10); đã đổi thành 999.999 — lỗi dữ liệu test, không phải ứng dụng.
+
+| Mã | Kết luận vòng 4 | Bằng chứng |
+|---|---|---|
+| **F-17** danh sách gợi ý không đóng sau Enter | **Đã sửa** | `15`: 10 ô chọn có tìm ở bộ lọc — Thẻ kho (mặt hàng), Lịch sử bán (mặt hàng, khách), Chi tiết bán (khách, mặt hàng), Chi tiết mua (NCC), danh sách Phiếu bán (khách, "Có mặt hàng…"), Phiếu nhập (NCC), Thu tiền (đối tác): gõ + Enter ⇒ chọn đúng; 0,8 s sau danh sách đã đóng; Enter lần nữa ⇒ lựa chọn giữ nguyên (10/10). Helper `selectByTyping` không còn bấm Esc hộ (story 12 bấm dòng báo cáo ngay sau khi chọn — đạt). |
+| **F-18** phiếu đã ghi sổ thoát chế độ sửa sau "Tải bản mới" | **Đã sửa** | `08`: hai máy cùng F8 sửa phiếu đã ghi sổ; sau "Tải bản mới" máy 1 vẫn "ĐANG SỬA phiếu đã ghi sổ", có ngay "Thêm các dòng này vào phiếu" (không bấm F8), gộp đúng (MATNA 8 × 340.000, GANGTAY 20, KINHBH 9), tồn GANGTAY −4, nợ +96.000, máy 2 tự hiện đúng. |
+| **F-19** người khác đăng nhập cùng cửa sổ thấy "Đã khôi phục" trên phiếu trống | **Đã sửa** (không tái hiện trong 24 lần lặp — 8 lần × 3 lần chạy, cộng test F-04 "người KHÁC" ở mỗi lần chạy; vòng 3 là ~1/10–1/20) | `14` (mới): (1) móc ghi `sessionStorage.setItem` cài trước khi trang chạy + đọc sessionStorage ở 0/100/250/500/1000/1500 ms: mở phiếu mới chưa gõ gì cho cả 6 loại phiếu kho, phiếu thu, phiếu chi, F2 từ danh sách Phiếu bán và Thu tiền, phiếu nhập **điền sẵn** từ "Hàng cần đặt", phiếu thu **điền sẵn** từ "Thu tiền phiếu này" ⇒ **không một lần ghi** khóa `kho.unsaved.*`, không lúc nào có khóa, không "Có thay đổi chưa lưu"; đối chứng: gõ ghi chú + một dòng ⇒ có đúng 1 khóa và móc bắt được lần ghi, "Bỏ thay đổi" ⇒ khóa mất. (2) Lặp 8 lần mỗi lần chạy: phiên lan ngắt khi đang gõ phiếu, hoa đăng nhập cùng cửa sổ, mở phiếu bán mới ⇒ hoa: 0 thông báo khôi phục, 0 "thay đổi chưa lưu", không bị hỏi khi rời, 0 khóa của hoa, khóa của lan còn 1; ở lần 0, 3, 6 hoa đăng xuất, lan đăng nhập lại ⇒ phiếu của lan được khôi phục đúng (khách, ghi chú, dòng, SL). |
+| **F-10** (thay đổi đã chốt) chỗ của dòng giữ lại | **Đúng quy tắc** | `08` vòng 6: "Dùng của tôi" cho dòng máy kia đã xóa ⇒ dòng về chỗ cũ (MATNA, GANGTAY, KINHBH); các vòng 7–9 theo thứ tự đó. Thêm 3 vòng trên phiếu ba dòng BUAGO kiểm đủ ba nhánh của quy tắc: dòng đầu (không có dòng trước) ⇒ về đầu, trước dòng kế; dòng mà dòng đứng trước cũng bị xóa ⇒ đứng trước dòng kế (MATNA); dòng cuối mà dòng trước bị xóa và không có dòng kế ⇒ cuối phiếu. Mỗi vòng kiểm bản lưu máy chủ, máy 2, tổng, tồn, nợ. |
+
+Không có phát hiện mới ở vòng 4. Thời gian chạy tăng ~1,5 phút do hai test F-19 (lặp 8 lần đổi người dùng).
+
 
 ## 1. Cách chạy và kết quả (vòng 3)
 

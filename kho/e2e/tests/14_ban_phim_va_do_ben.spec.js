@@ -351,7 +351,7 @@ test.describe('Câu chuyện 14: bàn phím, chặn rời trang, phiên hết h�
     // dữ liệu cho phiếu điền sẵn: một phiếu tạm bán vượt tồn (⇒ "Hàng cần đặt") và một phiếu bán đã ghi sổ (⇒ "Thu tiền phiếu này")
     const kho1 = await api.wh('KHO1');
     const tc = await api.findByCode('partners', 'THANHCONG');
-    await api.post('/documents', { doc_type: 'sale', partner_id: tc.id, warehouse_id: kho1.id, doc_date: '2026-11-03', lines: [{ product_code: 'COS10', qty: 500 }] });
+    await api.post('/documents', { doc_type: 'sale', partner_id: tc.id, warehouse_id: kho1.id, doc_date: '2026-11-03', lines: [{ product_code: 'COS10', qty: 999999 }] }); // vượt tồn chắc chắn, kể cả khi chạy cả bộ
     const sold = await api.postedDoc({ doc_type: 'sale', doc_date: '2026-11-03', partner_id: tc.id, warehouse_id: kho1.id, lines: [{ product_code: QUE.code, qty: 1 }] });
     const res = {};
     const NEW = p.getByText('PHIẾU MỚI — chưa lưu', { exact: true });
