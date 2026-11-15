@@ -22,7 +22,7 @@ echo "$VER" > "$W/PHIEN-BAN.txt"
 # ---- Linux
 L="$OUT/l/KhoSetup"; mkdir -p "$L/lenh"
 cp -r "$ROOT/frontend/dist" "$L/app/giao-dien"
-cp "$HERE/linux/cai-dat.sh" "$L/"; cp "$ROOT/scripts/sao-luu.sh" "$ROOT/scripts/khoi-phuc.sh" "$L/lenh/"
+cp "$HERE/linux/cai-dat.sh" "$HERE/linux/cau-hinh-https.sh" "$L/"; cp "$ROOT/scripts/sao-luu.sh" "$ROOT/scripts/khoi-phuc.sh" "$L/lenh/"
 cp "$ROOT/docs/CAI_DAT.md" "$L/"; echo "$VER" > "$L/PHIEN-BAN.txt"
 tar -C "$OUT/l" -czf "$OUT/KhoSetup-linux-x64.tar.gz" KhoSetup
 rm -rf "$OUT/w" "$OUT/l"
