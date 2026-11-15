@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Black-box QA of the EXTENDED edition (M1 + M2):
 #   1. fresh DB kho_qa_mr      -> khoserver with KHO_EDITION=extended on 127.0.0.1:18391 -> all mr_*.py tests
+#      (C13 starts extra khoserver processes with TLS on 127.0.0.1:18396 against the same DB)
 #   2. fresh DB kho_qa_mr_base -> khoserver WITHOUT KHO_EDITION   on 127.0.0.1:18392 -> mr_base.py
 # Never touches :8080 / :8090 / :18091, never rebuilds the binary.
 # Usage: ./run_mr.sh [test-name-filter ...]      (filters apply to the extended phase; the base phase always runs)
@@ -11,6 +12,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN="${KHOSERVER:-$HERE/../backend/bin/khoserver}"
 PORT_EXT="${MR_PORT:-18391}"
 PORT_BASE="${MR_PORT_BASE:-18392}"
+PORT_TLS="${MR_TLS_PORT:-18396}"   # C13: a second khoserver with a self-signed certificate (started by mr_m3_c12.py)
 DB_EXT="${MR_DB:-kho_qa_mr}"
 DB_BASE="${MR_DB_BASE:-kho_qa_mr_base}"
 export PGPASSWORD="${PGPASSWORD:-kho}"
@@ -18,7 +20,7 @@ PGH="-h 127.0.0.1 -U kho"
 OUT="$HERE/out"
 mkdir -p "$OUT"
 
-for p in "$PORT_EXT" "$PORT_BASE"; do
+for p in "$PORT_EXT" "$PORT_BASE" "$PORT_TLS"; do
   case "$p" in 8080|8090|18091) echo "refusing to use port $p"; exit 2;; esac
   if curl -s -m 1 "http://127.0.0.1:$p/api/health" >/dev/null 2>&1; then echo "port $p already in use"; exit 2; fi
 done
@@ -61,7 +63,8 @@ start_server() {  # db port edition logfile
 
 echo "=== phase 1: EXTENDED edition (KHO_EDITION=extended) on :$PORT_EXT, db $DB_EXT"
 start_server "$DB_EXT" "$PORT_EXT" extended "$OUT/mr_server_extended.log"
-QA_BASE="http://127.0.0.1:$PORT_EXT" MR_MODE=extended python3 "$HERE/mr_main.py" "$@" 2>&1 | tee "$OUT/mr_run_extended.log"
+QA_BASE="http://127.0.0.1:$PORT_EXT" MR_MODE=extended KHOSERVER="$BIN" MR_TLS_PORT="$PORT_TLS" \
+  MR_DATABASE_URL="postgres://kho:kho@127.0.0.1:5432/$DB_EXT?sslmode=disable" python3 "$HERE/mr_main.py" "$@" 2>&1 | tee "$OUT/mr_run_extended.log"
 RC1=${PIPESTATUS[0]}
 
 echo

@@ -12,7 +12,7 @@ def off(r, label):
 
 @test("F", "test_BASE_edition_defaults_all_off")
 def _():
-    f = features()
+    f = features()  # runs first: nothing has been switched yet
     eq(f.get("edition"), "base", "edition base")
     for k in ALL_KEYS:
         eq(f["features"].get(k), False, f"{k} off in base edition")
@@ -105,9 +105,9 @@ def _():
         eq(set_product(p["id"], min_stock=4).status, 200, "set min_stock")
         eq(a.ok("GET", f"/products/{p['id']}").get("min_stock"), 4, "field appears")
         eq(a.get("/reports/low-stock").status, 200, "low-stock available")
-        eq(set_features(vat=True).status, 400, "unavailable feature still rejected")
+        eq(set_features(khong_co=True).status, 400, "unknown feature key rejected")
     finally:
-        set_features(min_stock=False)
+        set_features(**{k: False for k in ALL_KEYS})
     check("min_stock" not in a.ok("GET", f"/products/{p['id']}"), "field hidden again")
     eq(features()["features"]["min_stock"], False, "off again")
 
@@ -125,4 +125,35 @@ def _():
     eq(Client(None).get("/audit").status, 401, "anon")
     j = requests.post(lib.BASE + "/auth/login", json={"username": "admin", "password": "admin123"}).json()
     eq(sorted(j.get("permissions") or []), sorted(PERMS), "login permissions in base = all 10")
-    check(all(v is False for v in (j.get("features") or {"x": True}).values()), "login features all false in base")
+    eq(j.get("features"), features()["features"], "login features = effective features (independent of other tests)")
+
+
+@test("F", "test_BASE_m3_endpoints_off_and_no_m3_fields")
+def _():
+    a = admin()
+    k1 = wh("KHO1")
+    p = mk_product(sale=100, purchase=10)
+    c = mk_partner(cust=True)
+    for path in [f"/products/{p['id']}/units", f"/documents/stocktake-load?warehouse_id={k1}", "/reports/vat-summary",
+                 "/settings/vat", "/print-template", "/print-template/logo"]:
+        off(a.get(path), path)
+    off(a.put(f"/products/{p['id']}/units", {"items": []}), "PUT units")
+    eq(a.post("/documents", {"doc_type": "stocktake", "doc_date": "2026-01-02", "warehouse_id": k1, "lines": [L(p["id"], 1)]}).status, 400,
+       "stocktake doc_type -> 400 like the original base")
+    g = a.ok("GET", f"/products/{p['id']}")
+    check(not ({"units", "vat_rate"} & set(g)), f"product without units / vat_rate: {sorted(g)}")
+    posted("opening", "2026-01-01", k1, [L(p["id"], 10, 10)])
+    d = posted("sale", "2026-01-02", k1, [L(p["id"], 2, 100, unit="Thùng")], c["id"])
+    new_doc = {"goods_amount", "tax_amount", "amount_in_words", "book_changed_lines"}
+    new_line = {"factor", "base_qty", "base_unit", "vat_rate", "tax_amount", "amount_with_tax", "book_qty", "counted_qty", "diff_qty"}
+    check(not (new_doc & set(d)), f"document without M3 fields: {sorted(new_doc & set(d))}")
+    check(not (new_line & set(d["lines"][0])), f"line without M3 fields: {sorted(new_line & set(d['lines'][0]))}")
+    eq(d["lines"][0]["unit"], "Thùng", "free-text unit as in base")
+    eq(stock_of(p["id"])[1], 8, "factor 1")
+    rep = a.ok("GET", "/reports/sales", params={"from": "2026-01-01", "to": "2026-01-31"})
+    check(not ({"total_tax", "total_with_tax", "vat_summary"} & set(rep)), "sales report without VAT fields")
+    check(not ({"base_qty", "vat_rate", "tax_amount"} & set(rep["rows"][0])), "sales report rows without M3 fields")
+    r = a.post("/documents", doc_body("sale", "2026-01-03", k1, [L(p["id"], 1, 100, vat_rate=10)], c["id"]))
+    check(r.status in (201, 400), f"vat_rate sent to base -> {r.status}")
+    if r.status == 201:
+        check("vat_rate" not in r.json["lines"][0] and r.json["total_amount"] == 100, "vat_rate ignored in base")

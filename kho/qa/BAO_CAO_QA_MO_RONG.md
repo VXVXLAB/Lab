@@ -298,3 +298,148 @@ tác nhạy cảm nhất và hiện không truy vết được. Mong đợi: aud
 ## I. Còn chưa kiểm được (bổ sung)
 Migration 007 trên dữ liệu NFD có sẵn và mật khẩu NFD lưu trước migration; audit của thao tác người dùng ngoài tạo/đổi vai
 trò (khóa tài khoản, đổi mật khẩu) — cùng nguyên nhân M-12.
+
+---
+
+# VÒNG 3 — ĐỢT M3 (C9–C13) + kiểm lại M-11, M-12 (binary 15/11/2026 09:13)
+
+Hai vòng trên giữ nguyên làm lịch sử. Tệp mới: `mr_m3_c9.py` (kiểm kê), `mr_m3_c10.py` (quy đổi đơn vị),
+`mr_m3_c11.py` (thuế GTGT), `mr_m3_c12.py` (mẫu in, logo, HTTPS, nhật ký người dùng), `mr_m3_cross.py` (kết hợp).
+`run_mr.sh` thêm cổng `18396` cho máy chủ HTTPS thứ hai (C13) và truyền `MR_DATABASE_URL`.
+
+## A. Số liệu (`./run_mr.sh` 2 lần, giống nhau)
+
+| Pha | Test | PASS | FAIL | Check | Check lỗi | HTTP 5xx | panic |
+|---|---|---|---|---|---|---|---|
+| Bản mở rộng (11 tính năng bật) | 136 | 132 | 4 | ≈4.811 | 7 | **0** | 0 |
+| Bản chuẩn | 6 | 6 | 0 | 145 | 0 | **0** | 0 |
+
+Theo tính năng: C1 23/23 · C3 22/22 · C4 10/10 · C5 5/5 · C6 6/6 · C7 13/13 · C8 16/16 · **C9 7/8 · C10 4/6 · C11 6/7** ·
+C12 3/3 · C13 1/1 · F 8/8 · G 8/8.
+
+Bộ QA bản chuẩn cũ (45 test) chạy từ bản sao, cổng 18394:
+- bản chuẩn (không `KHO_EDITION`): **45/45 PASS**, 16.765 check, 0 × 5xx;
+- `KHO_EDITION=extended` (mọi tính năng bật): **44/45** — khác biệt duy nhất là **hợp lệ**: `test_REQ047_083_customer_sale_slip_example`
+  (biến thể 2) lập phiếu bán không gửi đơn giá cho khách đã mua K701832 giá 1.000.000 ngày 10/08 ⇒ C6 tự điền "giá bán
+  gần nhất cho khách" 1.000.000 thay vì giá mặc định 1.090.000 (đúng SPEC C6). Không có khác biệt nào khác (thuế mặc định
+  chung = không thuế, đơn vị gốc, không kiểm kê) ⇒ không thấy hồi quy hành vi bản chuẩn.
+
+Test cập nhật vì mọi khóa đều "có sẵn" (Q14): `test_F_defaults_extended_edition` (11 khóa bật, `UNAVAILABLE = []`),
+`test_F_unknown_unavailable_and_garbage_keys` (dùng khóa lạ thay khóa "chưa làm", và tự bật lại mọi tính năng — trước đây
+để lại `min_stock` tắt làm `test_F_switch_off…` đỏ dây chuyền), `test_F_switch_off_hides…` (hết đỏ khi test trước dọn
+dẹp), `test_BASE_admin_can_switch…` (khóa lạ; `finally` tắt lại **cả 11** khóa), `test_BASE_audit_endpoint_admin_only`
+(so `features` của `/auth/login` với `/api/features` hiện hành, không giả định "tất cả tắt") ⇒ các test pha bản chuẩn
+không phụ thuộc thứ tự / tác dụng phụ của nhau.
+
+## B. Kết luận M-11, M-12
+
+| Lỗi | Kết luận | Đã kiểm |
+|---|---|---|
+| M-11 | **Đã sửa** | `/audit?from>to` ⇒ 400; `from = to` ⇒ 200. |
+| M-12 | **Đã sửa** | entity `user`: `created`, `role_changed` (trước/sau `banhang`→`muahang`), `deactivated`, `activated`, `password_reset` (quản trị đặt lại), `password_changed` (người dùng tự đổi, `user_id` = chính họ), `updated`. Không có mật khẩu, không có chuỗi băm `$2a$/$2b$`, không có `password_hash`; các khóa chứa "password" chỉ là cờ boolean. |
+
+## C. Lỗi mới
+
+### M-13 — Thấp — BUG (C9): phiếu kiểm kê nhận im lặng `to_warehouse_id`
+`POST /api/documents {"doc_type":"stocktake","warehouse_id":1,"to_warehouse_id":2,"lines":[{"product_id":…,"qty":12}]}`
+→ `201`, trường bị bỏ qua (phiếu chỉ ảnh hưởng kho 1). Phiếu tồn đầu / chuyển kho gửi trường không thuộc loại phiếu ⇒ 400
+(QUYET_DINH B6 "không âm thầm bỏ qua"); kiểm kê "một kho" nên cũng phải 400.
+
+### M-14 — Trung bình — BUG/USABILITY (C10): hệ số < 1 làm "trôi" tồn — bán lẻ từng đơn vị không hết được một thùng
+Đơn vị gốc `Thùng`, đơn vị `Lon` hệ số 0,041667 (1/24 làm tròn 6 chữ số). Nhập 1 Thùng, bán 24 phiếu mỗi phiếu 1 Lon:
+mỗi phiếu ghi sổ `round(0,041667; 3) = 0,042` Thùng ⇒ sau 23 phiếu đã trừ 0,966, còn 0,034 < 0,042 ⇒ **phiếu thứ 24 bị
+`422 INSUFFICIENT_STOCK`** dù lon cuối cùng vẫn còn trên kệ; tồn kho "kẹt" 0,034 Thùng mãi mãi (bán 24 Lon trong **một**
+dòng thì đúng: 1,000). Tương tự mọi hệ số không biểu diễn hết bằng 3 chữ số thập phân. QUYET_DINH Q2 hứa "không trôi số"
+nhưng chỉ đúng khi hệ số ≥ 1. Đề nghị: cấm hệ số < 1 (yêu cầu đơn vị gốc là đơn vị nhỏ nhất — thường gặp ở Việt Nam:
+Lon/Chai/Cái), hoặc lưu `base_qty` đủ chính xác (hệ số dạng phân số), hoặc ít nhất cảnh báo khi khai báo.
+
+### M-15 — Trung bình/Cao — BUG (C10 + §0): tắt quy đổi rồi lưu lại phiếu (máy khách không gửi id dòng) làm đổi số lượng đã ghi sổ
+Phiếu bán đã ghi sổ 1 `Thùng` (= 24 Lon, hệ số 24). Tắt `unit_conversion`. `PUT /api/documents/{id}` chỉ đổi ghi chú,
+gửi lại đúng các dòng (kể cả `"unit":"Thùng"`) nhưng **không có `id` dòng** (được phép theo API §3.4 — bộ QA bản chuẩn
+và mọi máy khách cũ làm vậy) ⇒ `200`, dòng nhận hệ số **1** ⇒ phiếu chỉ còn xuất 1 Lon; **tồn tăng 23 Lon** (471 → 494),
+thẻ kho, lãi gộp thay đổi — chỉ vì sửa một ghi chú. Gửi kèm `id` thì giữ đúng (đã kiểm). SPEC §0: tắt tính năng "không
+đổi số liệu đã ghi sổ". Đề nghị: khi tắt, dòng không `id` mà mặt hàng + đơn vị trùng một dòng cũ hệ số ≠ 1 ⇒ giữ hệ số
+(hoặc từ chối 400 "phiếu có dòng quy đổi, hãy bật lại tính năng"), như cách giữ thuế suất ở Q8.
+
+### M-16 — Trung bình/Cao — BUG (C11 + §0): tắt thuế rồi lưu lại phiếu (không id dòng) làm mất thuế đã ghi sổ ⇒ đổi công nợ
+Phiếu bán đã ghi sổ 2 × 100, thuế 10% ⇒ tổng thanh toán 220. Tắt `vat`. `PUT` chỉ đổi ghi chú, các dòng không `id`
+(và không `vat_rate`) ⇒ `200`, tổng **200**, phải thu của khách **220 → 200**. Gửi kèm `id` thì giữ thuế (đạt; gửi thuế
+suất khác khi tắt ⇒ 400 đạt). Cùng nguyên nhân với M-15. (Chưa kiểm: khi **bật** thuế, máy khách cũ không gửi `id` cũng
+nhận thuế suất mặc định hiện hành thay vì thuế suất đã lưu — theo chữ API "dòng mới ⇒ mặc định"; nên xem cùng lúc.)
+
+## D. Tính năng M3 — những gì đã tấn công và **đạt**
+
+**C9 kiểm kê** (tính tay): tồn sổ sách cuối ngày gồm cả phiếu cùng ngày ghi sổ **sau** phiếu kiểm (7 → 6), tính lại khi
+ghi sổ, lưu `book_qty`; thừa/thiếu sinh đúng bút toán nhập/xuất, thẻ kho "Kiểm kê thừa" / "Kiểm kê thiếu"; dòng không
+chênh không có bút toán; SL thực tế 0 được; số `KK00001`; bỏ ghi sổ khôi phục tồn, giữ số. Phiếu mua **lùi ngày** sau khi
+kiểm ⇒ `book_changed`, `current_book_qty` 11, `book_changed_lines` 1, điều chỉnh giữ +3. R6: kiểm kê thiếu làm phiếu bán
+sau âm ⇒ 422; bỏ ghi sổ / hạ SL / dời ngày phiếu kiểm thừa mà phiếu bán sau cần ⇒ 422. Kiểm tra dữ liệu: đơn giá, thuế
+suất, đối tác, trùng mã, dòng DV, SL âm/thiếu/chữ, không kho ⇒ 400; ghi sổ phiếu rỗng ⇒ 400. `stocktake-load` đúng tồn
+theo kho/ngày, bỏ DV, tham số sai ⇒ 400/404. Quyền: `banhang` 403, `thukho` lập + ghi sổ, sửa phiếu đã ghi sổ ⇒ 403
+(thiếu `posted.edit`); khóa sổ ⇒ 422 cả tạo/sửa/bỏ ghi sổ; không có trong báo cáo mua/bán/công nợ, có trong NXT; file
+xlsx/docx "BIÊN BẢN KIỂM KÊ KHO" với cột Tồn sổ sách / Thực tế / Chênh lệch là ô số, không có cột giá. Lãi gộp: thừa vào
+theo bình quân (giá vốn bán sau 60), thiếu ra theo bình quân (15), phiếu kiểm không có dòng lãi; hàng chỉ có từ kiểm kê
+thừa ⇒ giá mua mặc định 70. Đơn vị trên dòng (2 Thùng ⇒ thực tế 48 gốc). **Đồng thời**: 5 vòng ghi sổ kiểm kê và phiếu
+bán cùng ngày cùng mã — cả hai luôn ghi được và luôn thỏa đẳng thức tồn cuối ngày = tồn sổ hiện tại + chênh lệch. Tắt
+tính năng: phiếu cũ vẫn tính tồn; tạo / lọc `type=stocktake` ⇒ 400; sửa / ghi sổ phiếu cũ ⇒ 404 FEATURE_OFF; bỏ ghi sổ
+/ xóa được.
+
+**C10 quy đổi**: kiểm tra `PUT units` (hệ số 0/âm/7 chữ số/≥10⁹/chữ/thiếu, trùng đơn vị gốc kể cả hoa thường và khoảng
+trắng, trùng nhau, rỗng, NUL ⇒ 400); `IN_USE` khi bỏ / đổi hệ số đơn vị đã dùng; dòng gõ tay "Hộp" hệ số 1 (lúc tắt)
+không khóa đơn vị Hộp 50 (Q4); đổi đơn vị gốc khi đã có dòng quy đổi ⇒ 400. Dòng: đơn vị không phân biệt hoa thường, lưu
+tên khai báo; đơn vị lạ ⇒ 400; `base_qty` 3 Vỉ × 0,333333 = 1,000, 1 Vỉ = 0,333, 0,4 Gram × 0,001 ⇒ 0 ⇒ 400; biên tồn:
+2 Thùng = 48 Lon ghi được, 2,001 Thùng ⇒ 422 thiếu 0,024 **Lon**; thẻ kho theo đơn vị gốc, đơn giá / hệ số. Giá: mặc
+định × hệ số (1234,56 × 24 = 29.629,44; × 0,333333 = 411,52), giá riêng khách theo gốc × hệ số (21.600 / 5.400), giá bán
+gần nhất cùng đơn vị đúng 25.001, đơn vị khác 6.250,25, gốc 1.041,71; `sale-price` trả giá gốc. Cảnh báo lỗ theo gốc
+(3.500/6 = 583,33 < 600 lỗ; 3.600/6 = 600 không lỗ; `cost_price` 3.600). Báo cáo bán giữ đơn vị + `base_qty`, `total_qty`
+theo gốc (51); lãi gộp 51 × 600. Máy khách cũ: `id` + không `unit` / `unit` khác hoa ⇒ giữ Thùng 24; không `id` ⇒ đơn vị
+gốc. Tắt: `units` 404, đơn vị chữ tự do hệ số 1, dòng cũ giữ hệ số. Nhập Excel `product_units` (đạt, kể cả "2.5" ⇒ lỗi
+theo P6, trùng hoa thường, hệ số 0). Chuyển kho 3 Cuộn = 300 Mét.
+
+**C11 thuế** (tính tay): thuế từng dòng làm tròn nửa xa 0 (15@10% = 2; 25@10% = 3; DV −25@10% = −3; 30@5% = 2;
+300@8% = 24; 0% = 0; KCT = null) ⇒ hàng 545, thuế 28, tổng 573, "Năm trăm bảy mươi ba đồng"; xlsx có cột Thuế suất,
+Tiền thuế, 3 dòng tổng là ô số; docx đủ. Mặc định: mặt hàng 8 / KCT / mặc định chung 10 / gửi tay 5; mặc định chung KCT;
+`ketoan` không đặt được (403); 9 ⇒ 400; thuế suất trên chuyển kho / tồn đầu / kiểm kê ⇒ 400; 7, "abc", −10, 100 ⇒ 400.
+Công nợ theo tổng thanh toán cả hai phía và khi trả hàng (1.100 − 110 = 990; 231 − 116 = 115); Nợ cũ / Tổng nợ 115 / 231;
+hạn mức dùng tổng thanh toán (`document_amount` 116, vượt 1); cảnh báo lỗ và lãi gộp trước thuế (bán 105 so với giá vốn
+100 không lỗ); báo cáo bán có `total_tax`, `total_with_tax`, `vat_summary`; `vat-summary` khớp cộng tay từng thuế suất
+(bán − khách trả), mua vào 154 @8% = 12; `banhang` không thấy phần mua vào (null) và các trường thuế của phiếu mua bị che
+(cả file xuất); `thukho` 403. Bật/tắt/bật thuế: sổ công nợ, tổng hợp công nợ, tuổi nợ, tồn, lãi gộp, báo cáo mua/bán,
+dashboard **không đổi** (so JSON); thuế cũ không tính lại khi bật lại; khi tắt: phiếu cũ vẫn hiện thuế, phiếu mới không
+có trường thuế, lưu lại có `id` giữ thuế, gửi thuế suất khác ⇒ 400, `vat-summary` / `settings/vat` ⇒ 404.
+
+**C12 mẫu in**: lưu/đọc đủ trường; chân trang 300 ký tự tiếng Việt được, 301 ⇒ 400; A3, 0 / 7 ô ký, tên 61 ký tự, khóa
+loại phiếu lạ, kiểu sai, NUL ⇒ 400; `ketoan` PUT ⇒ 403; có audit `print_template`. Logo: PNG thô, multipart, JPG ⇒ 200 và
+tải về đúng từng byte, `nosniff`, `image/*`; ai đăng nhập cũng tải được, ẩn danh 401, `ketoan` tải lên 403; **từ chối**
+PNG > 500 KB, PNG + rác cuối tệp, 4001 × 1, 1 × 4001, PNG khai 30000 × 30000 (dạng bom giải nén — không treo, không 5xx),
+SVG có script (kể cả gửi kiểu image/png), đa định dạng PNG/HTML, GIF, 0 byte, chữ — logo cũ giữ nguyên; 4000 × 1 nhận
+(giới hạn bao gồm); xóa ⇒ 404. File xuất **9 loại** (6 phiếu kho + kiểm kê + phiếu thu + phiếu chi) × xlsx/docx: đúng tên
+ô ký riêng, chân trang đứng trước "Xuất file lúc", ẩn cột ĐVT / Mã hàng; tắt tính năng ⇒ file **giống hệt** khi chưa đặt
+mẫu (so nội dung trừ giờ xuất); xóa mẫu ⇒ giống như chưa từng đặt.
+
+**C13 HTTPS** (chứng thư tự ký tạo bằng openssl, máy chủ riêng cổng 18396): health và đăng nhập qua HTTPS; cookie
+`Secure; HttpOnly`; phiên dùng được; HTTP thường vào cổng HTTPS ⇒ 400 gọn (không treo); TLS ≤ 1.1 bị từ chối (hoặc máy
+khách không hỗ trợ); chỉ `TLS_CERT`, chỉ `TLS_KEY`, chứng thư/khóa không khớp, file không tồn tại, file rác ⇒ tiến trình
+thoát mã ≠ 0 kèm thông báo tiếng Việt "Không bật được HTTPS: …".
+
+**Kết hợp** (tính tay): một phiếu bán có đơn vị Thùng + thuế 10% + DV chiết khấu có thuế + giá riêng khách + hạn mức +
+dòng lỗ ⇒ giá 21.600 / 550 / −1.000; thuế 2.160 / 110 / −100; tổng 23.870; `CREDIT_WARNING` nợ 5.000 + 23.870 = 28.870,
+vượt 870, kèm dòng lỗ (giá vốn 600/Lon); xác nhận cả hai ⇒ ghi sổ; tồn 98; lãi gộp doanh thu 21.700, giá vốn 15.600; lưu
+lại theo `id` không gửi `unit`/`vat_rate` giữ đơn vị và thuế. Nhập tồn đầu Excel → ghi sổ → `stocktake-load` thấy 10 →
+kiểm kê 8 ⇒ tồn 8.
+
+## E. Quyết định đáng xem lại (M3)
+
+| # | Điểm | Ý kiến |
+|---|---|---|
+| Q-15 | Q7 — lỗ / lãi gộp / doanh thu dùng tiền **trước thuế**, giá vốn từ phiếu mua trước thuế | Đúng cho doanh nghiệp khấu trừ; sai cho hộ / DN tính thuế **trực tiếp** (thuế đầu vào là giá vốn). Cần khách xác nhận (bên xây dựng cũng nêu). |
+| Q-16 | Q3 — giá riêng của khách chỉ theo đơn vị gốc | Không thể "Thùng rẻ hơn 24 Lon". Cần khách xác nhận. |
+| Q-17 | Q5 — dòng không phân biệt "KCT" và "không kê khai" | Bảng kê thuế gộp "Không thuế / KCT"; nếu cần lập tờ khai thì thiếu. |
+| Q-18 | Q10 — hàng chỉ có từ kiểm kê thừa (chưa từng nhập) | Giá vốn theo giá mua mặc định, cờ `estimated: true` — hợp lý, nên hiện trên màn hình. |
+| Q-19 | Q12 — logo không vào file xlsx/docx | Đúng chữ spec ("áp cho bản in"); khách có thể mong logo trên file gửi đi. |
+| Q-20 | M-14 / Q2 | Nên quy định đơn vị gốc là đơn vị nhỏ nhất. |
+
+## F. Không kiểm được / giới hạn (M3)
+Bản in trên giao diện (khổ A4/A5, logo trên trang in) — chỉ kiểm được file xuất; nâng cấp CSDL M2 → M3 có dữ liệu sẵn
+(test luôn dùng CSDL mới); TLS 1.0/1.1 phụ thuộc OpenSSL của máy kiểm (có thể chính máy khách từ chối); chứng thư hết hạn;
+hành vi "bật thuế + máy khách không gửi id" (xem M-16); hiệu năng M3 ở quy mô lớn.

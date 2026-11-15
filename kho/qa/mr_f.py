@@ -13,6 +13,7 @@ def _():
         eq(f["features"].get(k), False, f"unavailable OFF: {k}")
     items = {i["key"]: i for i in f["items"]}
     eq(len(f["items"]), 11, "items has 11 entries")
+    eq(UNAVAILABLE, [], "M3: every feature key is available")
     for k in UNAVAILABLE:
         check(items.get(k, {}).get("available") is False and items[k]["enabled"] is False, f"item {k} unavailable")
     for k in AVAILABLE:
@@ -53,15 +54,15 @@ def _():
     eq(a.req("PUT", "/features", raw=b"[]").status, 400, "array body")
     eq(a.put("/features", {"features": {"min\u0000stock": True}}).status, 400, "NUL in key")
     eq(a.put("/features", {"features": "all"}).status, 400, "features not an object")
-    # atomic: one bad key -> nothing changes
-    r = set_features(min_stock=False, vat=True)
-    eq(r.status, 400, "mixed valid+unavailable")
+    # atomic: one bad key -> nothing changes (no key is "unavailable" since M3: use an unknown key)
+    r = set_features(min_stock=False, khong_co_khoa_nay=True)
+    eq(r.status, 400, "mixed valid+unknown key")
     eq(features()["features"]["min_stock"], True, "min_stock unchanged after rejected mixed PUT")
     r = a.put("/features", {"features": {}})
     check(r.status in (200, 400), f"empty features map -> {r.status}")
     check(r.status < 500, "no 5xx")
-    for k in UNAVAILABLE:
-        eq(features()["features"][k], False, f"{k} still off")
+    all_features_on()
+    eq(sorted(k for k, v in features()["features"].items() if v), sorted(ALL_KEYS), "all 11 on again")
 
 
 def _feature_off_404(c, method, path, label, body=None):

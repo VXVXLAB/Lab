@@ -15,8 +15,10 @@ import requests
 import lib
 from lib import *  # noqa: F401,F403
 
-AVAILABLE = ["permissions", "period_lock", "import_excel", "min_stock", "price_list", "credit_limit", "profit_report"]
-UNAVAILABLE = ["stocktake", "unit_conversion", "vat", "print_template"]
+# M3 built: every key is available now (QUYET_DINH Q14)
+AVAILABLE = ["permissions", "period_lock", "import_excel", "min_stock", "price_list", "credit_limit", "profit_report",
+             "stocktake", "unit_conversion", "vat", "print_template"]
+UNAVAILABLE = []
 ALL_KEYS = AVAILABLE + UNAVAILABLE
 PERMS = ["sale.write", "purchase.write", "stock.write", "cash.write", "catalog.write", "posted.edit", "cost.view",
          "debt.view", "cash.view", "report.view"]
