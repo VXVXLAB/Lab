@@ -10,8 +10,9 @@ Bổ sung cho `SPEC.md`. `SPEC.md` (R1–R10) vẫn là gốc; chỗ nào tài l
 - **Tắt = y như bản chuẩn.** Khi một tính năng tắt: giao diện không hiện gì của nó; API của nó trả
   `404 FEATURE_OFF`; mọi hành vi, số liệu, file xuất giống hệt bản chuẩn. **Ba bộ test hiện có (Go, `qa/`, `e2e/`)
   phải đạt nguyên vẹn, không sửa, với mọi tính năng tắt.**
-- Lưu: `settings.features JSONB` (khóa → true/false). Seed lần đầu: biến môi trường `KHO_EDITION=extended` ⇒ bật hết;
-  không đặt ⇒ tắt hết. Sau đó chỉ quản trị đổi. `GET /api/features` (mọi người dùng đã đăng nhập),
+- Lưu: `settings.features JSONB` chỉ chứa các khóa quản trị đã chủ động đặt. Giá trị hiệu lực = giá trị đã lưu nếu có,
+  nếu không thì theo bản cài: `KHO_EDITION=extended` ⇒ bật, không đặt ⇒ tắt. Tính năng chưa xây xong: `available=false`,
+  không bật được. `GET /api/features` (mọi người dùng đã đăng nhập),
   `PUT /api/features` (quản trị; ghi audit; phát SSE `features` để các máy cập nhật menu ngay).
 - Khóa tính năng: `permissions`, `period_lock`, `import_excel`, `min_stock`, `price_list`, `credit_limit`,
   `profit_report`, `stocktake`, `unit_conversion`, `vat`, `print_template`. (C13 HTTPS là cấu hình máy chủ, không phải khóa.)
@@ -41,9 +42,14 @@ Bổ sung cho `SPEC.md`. `SPEC.md` (R1–R10) vẫn là gốc; chỗ nào tài l
   khi còn người dùng mang vai trò mới phải trả `409` nêu tên những người đó, trừ khi gửi kèm `confirm=true`.
 
 ### C4 `period_lock` — khóa sổ
-- `settings.lock_date DATE NULL`. Chứng từ kho và phiếu thu/chi có ngày hạch toán ≤ `lock_date`: không tạo, sửa, ghi sổ,
-  bỏ ghi sổ, xóa; cũng không được đổi ngày của chứng từ từ ngoài kỳ khóa vào trong kỳ khóa hoặc ngược lại ⇒
-  `422 PERIOD_LOCKED` ("Kỳ đến dd/mm/yyyy đã khóa sổ…"). Phiếu tạm trong kỳ khóa: sửa/xóa được nhưng không ghi sổ được.
+- `settings.lock_date DATE NULL`. Với ngày hạch toán ≤ `lock_date` (kỳ đã khóa):
+  - không tạo chứng từ kho hay phiếu thu/chi mới (kể cả phiếu tạm) có ngày trong kỳ khóa;
+  - chứng từ ĐÃ ghi sổ và phiếu thu/chi trong kỳ khóa: không sửa, không bỏ ghi sổ, không xóa; không đổi ngày từ ngoài vào
+    trong kỳ khóa hoặc ngược lại;
+  - phiếu tạm đã có sẵn trong kỳ khóa: sửa, xóa, dời ngày ra ngoài kỳ được, nhưng không ghi sổ được;
+  - khi đang có ngày khóa: không đổi công nợ đầu kỳ của đối tác, số dư đầu của tài khoản tiền, không nhập công nợ đầu kỳ
+    từ Excel (các số này không có ngày nên luôn ảnh hưởng kỳ đã khóa) — phải bỏ khóa trước.
+  Vi phạm ⇒ `422 PERIOD_LOCKED` ("Kỳ đến dd/mm/yyyy đã khóa sổ…").
 - Chỉ quản trị đặt / lùi / bỏ ngày khóa (`PUT /api/period-lock {lock_date, reason}`), có audit. Không cho đặt ngày khóa
   trong tương lai.
 
