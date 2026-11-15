@@ -1,4 +1,4 @@
-import { useAccess, useCan } from '../../auth/AuthContext';
+import { useAccess, useCan, useFeature } from '../../auth/AuthContext';
 import { allowed, type Need } from '../../auth/guard';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -64,17 +64,20 @@ export function ReorderPage() {
   const items = q.data?.items ?? [];
   // Nhớ các mã người dùng BỎ chọn ⇒ dữ liệu tự làm mới (SSE) không làm mất lựa chọn; mã mới thiếu tự được chọn.
   const [unselected, setUnselected] = useState<Set<number>>(() => new Set());
-  const shortIds = useMemo(() => items.filter((i) => i.shortage > 0).map((i) => i.product_id), [items]);
+  // Bản mở rộng (tồn tối thiểu): số cần đặt = "Cần đặt thêm" (đủ giao phiếu tạm và còn mức tối thiểu)
+  const minOn = useFeature('min_stock');
+  const toOrder = (i: DraftDemandItem) => (minOn ? Math.max(i.shortage, i.order_more ?? 0) : i.shortage);
+  const shortIds = useMemo(() => items.filter((i) => toOrder(i) > 0).map((i) => i.product_id), [items, minOn]); // eslint-disable-line react-hooks/exhaustive-deps
   const selected = shortIds.filter((id) => !unselected.has(id));
 
   const createPurchase = () => {
-    const chosen = items.filter((i) => selected.includes(i.product_id) && i.shortage > 0);
+    const chosen = items.filter((i) => selected.includes(i.product_id) && toOrder(i) > 0);
     const drafts = [...new Set(chosen.flatMap((i) => i.drafts.map((d) => d.draft_no)))];
     navigate(paths.newDocument('purchase'), {
       state: {
         prefill: {
-          lines: chosen.map((i) => ({ product_id: i.product_id, qty: i.shortage })),
-          note: `Đặt hàng cho phiếu tạm ${drafts.join(', ')}`,
+          lines: chosen.map((i) => ({ product_id: i.product_id, qty: toOrder(i) })),
+          note: drafts.length ? `Đặt hàng cho phiếu tạm ${drafts.join(', ')}${minOn ? ' và bù tồn tối thiểu' : ''}` : 'Đặt hàng bù tồn tối thiểu',
         },
       },
     });
@@ -93,6 +96,24 @@ export function ReorderPage() {
       align: 'right',
       render: (n: number) => (n > 0 ? <b className="neg">{formatQty(n)}</b> : <span className="muted">đủ hàng</span>),
     },
+    ...(minOn
+      ? [
+          {
+            title: 'Tồn tối thiểu',
+            dataIndex: 'min_stock',
+            width: 104,
+            align: 'right' as const,
+            render: (n: number | null | undefined) => (n === null || n === undefined ? <span className="muted">–</span> : formatQty(n)),
+          },
+          {
+            title: <Tooltip title="Đặt đủ để sau khi giao hết phiếu tạm vẫn còn mức tối thiểu">Cần đặt thêm</Tooltip>,
+            key: 'order_more',
+            width: 110,
+            align: 'right' as const,
+            render: (_: unknown, r: DraftDemandItem) => (toOrder(r) > 0 ? <b className="neg">{formatQty(toOrder(r))}</b> : <span className="muted">–</span>),
+          },
+        ]
+      : []),
     { title: 'Phiếu tạm', key: 'n', width: 90, align: 'right', render: (_, r) => r.drafts.length },
   ];
 
@@ -132,7 +153,7 @@ export function ReorderPage() {
               const k = new Set(keys.map(Number));
               setUnselected(new Set(shortIds.filter((id) => !k.has(id))));
             },
-            getCheckboxProps: (r) => ({ disabled: r.shortage <= 0 }),
+            getCheckboxProps: (r) => ({ disabled: toOrder(r) <= 0 }),
           }}
           expandable={{
             expandedRowRender: (r) => (
@@ -181,6 +202,13 @@ export function ReportsHub() {
         { title: 'Thẻ kho (chi tiết NXT một mã)', desc: 'Từng lần nhập, xuất của một mã: mua của ai, bán cho ai, tồn sau mỗi lần.', to: paths.stockLedger, icon: <FileSearchOutlined /> },
         { title: 'Tổng hợp nhập – xuất – tồn', desc: 'Tồn đầu, nhập, xuất, tồn cuối từng mã trong một kỳ.', to: paths.stockNxt, icon: <AppstoreOutlined /> },
         { title: 'Hàng cần đặt', desc: 'Mã khách đã đặt trên phiếu bán tạm mà tồn không đủ.', to: paths.reorder, icon: <ShoppingOutlined /> },
+        {
+          title: 'Hàng dưới mức tối thiểu',
+          desc: 'Mã có tồn tổng các kho không quá tồn tối thiểu đã đặt cho từng mã.',
+          to: paths.lowStock,
+          icon: <DatabaseOutlined />,
+          need: { feature: 'min_stock' },
+        },
       ],
     },
     {
@@ -189,12 +217,26 @@ export function ReportsHub() {
         { title: 'Chi tiết bán hàng', desc: 'Từng dòng hàng đã bán: khách, mã, số lượng, giá, thành tiền.', to: paths.salesReport, icon: <ShoppingCartOutlined />, need: { all: ['report.view'] } },
         { title: 'Lịch sử bán theo mặt hàng', desc: 'Một mã đã bán cho ai, lúc nào, giá bao nhiêu.', to: paths.salesHistory, icon: <HistoryOutlined />, need: { all: ['report.view'] } },
         { title: 'Chi tiết mua hàng', desc: 'Từng dòng hàng đã nhập mua: nhà cung cấp, giá mua.', to: paths.purchasesReport, icon: <ShopOutlined />, need: { all: ['report.view', 'cost.view'] } },
+        {
+          title: 'Lãi gộp',
+          desc: 'Doanh thu − giá vốn theo phiếu, theo mặt hàng, theo khách; giá vốn bình quân sau mỗi lần nhập.',
+          to: paths.profit,
+          icon: <BarChartOutlined />,
+          need: { feature: 'profit_report', all: ['report.view', 'cost.view'] },
+        },
       ],
     },
     {
       title: 'Công nợ – Quỹ',
       cards: [
         { title: 'Công nợ phải thu', desc: 'Khách hàng còn nợ: đầu kỳ, phát sinh, đã thu, cuối kỳ; bấm để xem sổ chi tiết từng khách.', to: paths.receivable, icon: <SolutionOutlined />, need: { all: ['debt.view'] } },
+        {
+          title: 'Tuổi nợ phải thu',
+          desc: 'Nợ của từng khách chia theo số ngày quá hạn: trong hạn, 1–30, 31–60, 61–90, trên 90 ngày.',
+          to: paths.debtAging,
+          icon: <SolutionOutlined />,
+          need: { feature: 'credit_limit', all: ['debt.view'] },
+        },
         { title: 'Công nợ phải trả', desc: 'Còn nợ nhà cung cấp: đầu kỳ, phát sinh, đã trả, cuối kỳ.', to: paths.payable, icon: <SolutionOutlined />, need: { all: ['debt.view', 'cost.view'] } },
         { title: 'Sổ quỹ / sổ ngân hàng', desc: 'Thu, chi, tồn quỹ tiền mặt và tài khoản ngân hàng theo ngày.', to: paths.cashBook, icon: <WalletOutlined />, need: { all: ['cash.view'] } },
         { title: 'Phiếu thu / phiếu chi', desc: 'Danh sách phiếu thu, phiếu chi (tiền mặt và ngân hàng), tổng tiền theo bộ lọc.', to: paths.receipts, icon: <WalletOutlined />, need: { any: ['cash.view', 'cash.write'] } },

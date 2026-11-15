@@ -33,6 +33,7 @@ import { FeaturesPage } from './pages/extended/FeaturesPage';
 import { PermissionsPage } from './pages/extended/PermissionsPage';
 import { PeriodLockPage } from './pages/extended/PeriodLockPage';
 import { ImportPage } from './pages/extended/ImportPage';
+import { DebtAgingPage, LowStockPage, ProfitPage } from './pages/extended/ExtReports';
 import type { Need } from './auth/guard';
 
 export { paths };
@@ -132,7 +133,7 @@ export const menu: MenuGroup[] = [
       { path: paths.suppliers, label: 'Nhà cung cấp', element: <PartnersPage type="supplier" /> },
       { path: paths.warehouses, label: 'Kho', element: <WarehousesPage /> },
       { path: paths.cashAccounts, label: 'Tài khoản tiền', element: <CashAccountsPage /> },
-      { path: paths.importExcel, label: 'Nhập từ Excel', element: <ImportPage />, need: { feature: 'import_excel', any: ['catalog.write', 'stock.write'] } },
+      { path: paths.importExcel, label: 'Nhập từ Excel', element: <ImportPage />, need: { feature: 'import_excel', any: ['catalog.write', 'stock.write', 'sale.write'] } },
       // quản trị bật/tắt tính năng mở rộng: có ở CẢ bản chuẩn (để bản chuẩn bật được tính năng)
       { path: paths.features, label: 'Tính năng mở rộng', element: <FeaturesPage />, adminOnly: true },
     ],
@@ -164,6 +165,10 @@ export const hiddenScreens: ScreenDef[] = [
   { path: paths.salesReport, label: 'Chi tiết bán hàng', element: <SalesReportPage />, need: { all: ['report.view'] } },
   { path: paths.salesHistory, label: 'Lịch sử bán theo mặt hàng', element: <SalesHistoryPage />, need: { all: ['report.view'] } },
   { path: paths.purchasesReport, label: 'Chi tiết mua hàng', element: <PurchasesReportPage />, need: { all: ['report.view', 'cost.view'] } },
+  // bản mở rộng M2 (mở từ trang Báo cáo / Tổng quan)
+  { path: paths.lowStock, label: 'Hàng dưới mức tối thiểu', element: <LowStockPage />, need: { feature: 'min_stock' } },
+  { path: paths.debtAging, label: 'Tuổi nợ phải thu', element: <DebtAgingPage />, need: { feature: 'credit_limit', all: ['debt.view'] } },
+  { path: paths.profit, label: 'Lãi gộp', element: <ProfitPage />, need: { feature: 'profit_report', all: ['report.view', 'cost.view'] } },
 ];
 
 export function allScreens(): (ScreenDef & { groupKey?: string; groupLabel?: string })[] {

@@ -1,3 +1,5 @@
+import { useFeature } from '../../auth/AuthContext';
+import { PartnerPricesButton } from '../extended/PartnerPrices';
 import { useOpeningDebtVisibility } from '../../auth/guard';
 import { lockedOpeningHint, useLockDate } from '../../lib/periodLock';
 import { useMemo } from 'react';
@@ -44,6 +46,8 @@ export function PartnersPage({ type }: { type: PartnerType }) {
   const rec = ed.record;
   const extraParams = useMemo(() => ({ type }), [type]);
   const debtVis = useOpeningDebtVisibility();
+  // bản mở rộng: bảng giá riêng chỉ cho khách hàng
+  const priceOn = useFeature('price_list') && type === 'customer';
   const openingVisible = type === 'customer' ? debtVis.receivable : debtVis.payable;
 
   const columns: ColumnsType<Partner> = [
@@ -98,8 +102,10 @@ export function PartnersPage({ type }: { type: PartnerType }) {
         describe={(r) => `${r.code} – ${r.name}`}
         columns={columns}
         minWidth={1100}
-        extraActionsWidth={32}
+        extraActionsWidth={priceOn ? 64 : 32}
         extraActions={(r) => (
+          <>
+          {priceOn && <PartnerPricesButton partner={r} />}
           <Tooltip title={type === 'customer' ? 'Xem công nợ phải thu' : 'Xem công nợ phải trả'}>
             <Button
               type="text"
@@ -109,6 +115,7 @@ export function PartnersPage({ type }: { type: PartnerType }) {
               onClick={() => drawers.push({ kind: 'debt', partner: { id: r.id, code: r.code, name: r.name }, side: type === 'customer' ? 'receivable' : 'payable' })}
             />
           </Tooltip>
+          </>
         )}
         onCreate={ed.openCreate}
         onEdit={ed.openEdit}
@@ -150,6 +157,8 @@ export function PartnerFormModal({
   const qc = useQueryClient();
   const debtVis = useOpeningDebtVisibility();
   const lockDate = useLockDate();
+  const creditOn = useFeature('credit_limit');
+  const priceOn = useFeature('price_list');
   return (
       <EntityFormModal<PartnerBody>
         open={open}
@@ -172,6 +181,8 @@ export function PartnerFormModal({
             // không được xem (bản mở rộng) ⇒ null: máy chủ giữ số cũ
             opening_receivable: debtVis.receivable ? ((form.getFieldValue('opening_receivable') as number | null) ?? 0) : null,
             opening_payable: debtVis.payable ? ((form.getFieldValue('opening_payable') as number | null) ?? 0) : null,
+            // bản mở rộng (hạn mức nợ bật): gửi kèm; tắt ⇒ không gửi (máy chủ giữ nguyên)
+            ...(creditOn ? { credit_limit: (form.getFieldValue('credit_limit') as number | null | undefined) ?? null, payment_days: (form.getFieldValue('payment_days') as number | null | undefined) ?? null } : {}),
             active: v.active,
           };
           const saved = await (rec ? partnersApi.update(rec.id, body) : partnersApi.create(body));
@@ -240,6 +251,21 @@ export function PartnerFormModal({
               {getFieldValue('is_customer') && debtVis.receivable && (
                 <Form.Item label="Nợ phải thu đầu kỳ" name="opening_receivable" extra={lockDate ? lockedOpeningHint(lockDate) : 'Số khách còn nợ mình lúc bắt đầu dùng phần mềm'}>
                   <NumberInput style={{ width: 200 }} suffix="đ" disabled={!!lockDate} />
+                </Form.Item>
+              )}
+              {getFieldValue('is_customer') && creditOn && (
+                <>
+                  <Form.Item label="Hạn mức nợ" name="credit_limit" extra="Ghi sổ phiếu bán làm nợ vượt mức này thì phần mềm hỏi lại. Để trống = không giới hạn.">
+                    <NumberInput style={{ width: 200 }} suffix="đ" />
+                  </Form.Item>
+                  <Form.Item label="Số ngày được nợ" name="payment_days" extra="Hạn trả = ngày phiếu + số ngày này (dùng cho báo cáo Tuổi nợ). Để trống = trả ngay.">
+                    <NumberInput kind="qty" style={{ width: 120 }} suffix="ngày" />
+                  </Form.Item>
+                </>
+              )}
+              {getFieldValue('is_customer') && rec && priceOn && (
+                <Form.Item label="Giá theo khách">
+                  <PartnerPricesButton partner={rec} asLink />
                 </Form.Item>
               )}
               {getFieldValue('is_supplier') && debtVis.payable && (

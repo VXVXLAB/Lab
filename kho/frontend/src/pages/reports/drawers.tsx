@@ -5,7 +5,9 @@ import { DocumentView } from './DocumentView';
 import { StockLedgerView } from './StockLedgerView';
 import { TradeReportView } from './TradeReportView';
 import type { ProductPick } from '../../components/ProductSelect';
-import type { DebtSide } from '../../api/types';
+import type { AgingItem, DebtSide } from '../../api/types';
+import type { ProfitParams } from '../../api/extended';
+import { AgingItemsView, ProfitDocsView } from '../extended/ExtReports';
 import { VoucherView } from '../vouchers/VoucherView';
 import { DebtLedgerView, type PartnerRef } from '../vouchers/DebtLedgerView';
 
@@ -14,7 +16,10 @@ export type DrawerEntry =
   | { kind: 'ledger'; product: ProductPick; warehouseId?: number; from?: string; to?: string }
   | { kind: 'trade'; report: 'sales' | 'purchases'; product: ProductPick }
   | { kind: 'voucher'; id: number; title?: string }
-  | { kind: 'debt'; partner: PartnerRef; side: DebtSide; from?: string; to?: string };
+  | { kind: 'debt'; partner: PartnerRef; side: DebtSide; from?: string; to?: string }
+  // bản mở rộng M2
+  | { kind: 'aging'; item: AgingItem; asOf: string }
+  | { kind: 'profit'; title: string; params: ProfitParams };
 
 interface Ctx {
   push: (e: DrawerEntry) => void;
@@ -43,6 +48,10 @@ function titleOf(e: DrawerEntry): string {
       return `Công nợ ${e.side === 'receivable' ? 'phải thu' : 'phải trả'} — ${e.partner.code} ${e.partner.name}`;
     case 'trade':
       return `${e.report === 'sales' ? 'Lịch sử bán' : 'Lịch sử mua'} — ${e.product.code} ${e.product.name}`;
+    case 'aging':
+      return `Khoản còn nợ — ${e.item.partner_code} ${e.item.partner_name}`;
+    case 'profit':
+      return e.title;
   }
 }
 
@@ -101,6 +110,8 @@ export function DrawerStackProvider({ children }: { children: ReactNode }) {
           {e.kind === 'trade' && <TradeReportView kind={e.report} fixedProduct={e.product} inDrawer />}
           {e.kind === 'voucher' && <VoucherView id={e.id} />}
           {e.kind === 'debt' && <DebtLedgerView partner={e.partner} side={e.side} initialFrom={e.from} initialTo={e.to} />}
+          {e.kind === 'aging' && <AgingItemsView item={e.item} asOf={e.asOf} />}
+          {e.kind === 'profit' && <ProfitDocsView params={e.params} />}
         </Drawer>
       ))}
     </DrawerCtx.Provider>

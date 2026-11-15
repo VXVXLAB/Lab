@@ -444,3 +444,15 @@ td.col-code { font-weight: 500; font-variant-numeric: tabular-nums; white-space:
 .import-date { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 .import-summary { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; font-size: 14px; margin-bottom: 4px; }
 .import-progress { margin-top: 8px; max-width: 420px; }
+
+/* ---------- Bản mở rộng (M2) ---------- */
+.row-low td { background: #fff1f0 !important; }
+.min-flag { font-size: 11px; color: #cf1322; line-height: 1.2; }
+.price-src { color: #1677ff; }
+.line-note.link-btn { background: none; border: 0; padding: 0; cursor: pointer; color: #1677ff; text-decoration: underline dotted; font-size: 11px; display: block; margin-left: auto; }
+.credit-line { margin-left: 6px; }
+.credit-over, .credit-over b { color: #cf1322; }
+.est-mark { color: #d46b08; font-size: 11px; font-style: italic; cursor: help; }
+.dlg-figs td { padding: 2px 16px 2px 0; }
+.profit-how { margin-bottom: 8px; }
+.price-add { margin-bottom: 10px; }

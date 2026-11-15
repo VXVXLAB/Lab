@@ -89,9 +89,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (username: string, password: string) => {
-      const r = await api.post<{ user: User }>('/auth/login', { username, password }, { skipAuthRedirect: true });
-      // tính năng đang bật + quyền của người này (lệnh đăng nhập chỉ trả người dùng)
-      const me = await api.get<Me>('/auth/me').catch(() => ({ user: r.user }) as Me);
+      const r = await api.post<Me>('/auth/login', { username, password }, { skipAuthRedirect: true });
+      // lệnh đăng nhập trả luôn tính năng + quyền; máy chủ cũ không trả ⇒ hỏi /auth/me
+      const me = r.permissions && r.features ? r : await api.get<Me>('/auth/me').catch(() => r);
       queryClient.clear();
       storage.set(HAD_SESSION, '1');
       setState({ status: 'authenticated', user: me.user, access: accessOf(me) });

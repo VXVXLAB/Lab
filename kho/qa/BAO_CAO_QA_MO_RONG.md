@@ -189,3 +189,112 @@ báo cáo bán hàng; không có 5xx nào; tên bắt đầu bằng "=" xuất x
 - Đồng thời nhiều máy thật (dùng luồng song song trên một máy); tranh chấp hạn mức không tái hiện được trường hợp lọt
   (Q-05). Ranh giới nửa đêm giờ VN cho "hôm nay" của khóa sổ.
 - Hiệu năng ở quy mô lớn (chỉ đo 20.000 dòng nhập thử: vài giây); M3 (C9–C13) ngoài phạm vi.
+
+---
+
+# VÒNG KIỂM LẠI (sau commit `db49751`, binary build lại 15/11/2026 08:27)
+
+Phần trên là vòng 1, giữ nguyên làm lịch sử. Vòng này kiểm lại M-01…M-10 theo kiểu tấn công, cập nhật test theo quy tắc
+mới (SPEC_MO_RONG C7 viết lại, QUYET_DINH mục P, API §8–§10) và thêm test cho hành vi mới. Mọi con số kỳ vọng tính tay,
+không lấy từ bên xây dựng.
+
+## A. Số liệu (`./run_mr.sh` chạy 2 lần, kết quả giống nhau)
+
+| Pha | Test | PASS | FAIL | Check | Check lỗi | HTTP 5xx | panic |
+|---|---|---|---|---|---|---|---|
+| Bản mở rộng | 110 | 109 | 1 | ≈4.267 | 2 | **0** | 0 |
+| Bản chuẩn | 5 | 5 | 0 | 118 | 0 | **0** | 0 |
+
+Theo tính năng: C1 23/23 · C3 22/22 · C4 10/10 · C5 5/5 · C6 6/6 · C7 13/13 · C8 16/16 · F 8/8 · G 6/7.
+Bộ QA bản chuẩn cũ (45 test, đã sửa khung `lib.run_all` để `Fatal` = FAIL) với binary mới: **45/45, 16.775 check, 0 × 5xx**.
+`run_mr.sh` vẫn thoát 1 vì M-11, M-12 (giữ là test đỏ).
+
+## B. Test đổi theo quy tắc mới (7 chỗ mâu thuẫn)
+
+| Test | Thay đổi |
+|---|---|
+| `mr_c7.py` (4 test) | Kỳ vọng tính lại theo **bình quân liên hoàn**. Kịch bản tháng 1/2025 đổi phiếu trả NCC thành 2 @64 để giá bình quân nguyên (54), tránh phụ thuộc chi tiết làm tròn giá trị xuất mà spec chưa nói. Tính tay: X = 230 / 162 / −54; tổng doanh thu 1.200, giá vốn 478, lãi 722, tỷ lệ 60,17%. Sửa lùi giá phiếu mua 08/01 30→130 ⇒ phiếu 10/01 giá vốn 330. |
+| `mr_extra.py` | "Bình quân cộng dồn" (Q-01) thay bằng ví dụ của spec (mua 100 @10, bán hết, mua 1 @100, bán 1 @120 ⇒ giá vốn 100, lãi 20); kịch bản "kho về 0 rồi mua lại" ⇒ 80 (trước là 65). |
+| `mr_c1_mask.py` | Q-02/P2: sửa / bỏ ghi sổ phiếu mua đã ghi sổ bởi người bị che ⇒ 403; phiếu tạm: dòng gửi lại `id` giữ giá dù gửi 1, 0, null, "999", 5e6. |
+| `mr_c3.py` | Q-06/P6: ô chữ `2.5`, `1.25`, `12.5`, `0.5` ⇒ lỗi dòng (cả cột SL); `1.250` = 1.250. Q-11: cột tiêu đề lặp ⇒ 400 nêu tên cột. |
+| `mr_c4.py` | Q-04/P4: `PUT /period-lock` thiếu `lock_date` ⇒ 400, khóa giữ nguyên. |
+| `mr_f.py` | Q-07: chỉ còn người dùng **đã khóa** mang vai trò mới ⇒ tắt phân quyền 200, không 409. |
+
+## C. Kết luận từng lỗi vòng 1
+
+| Lỗi | Kết luận | Đã kiểm thêm (tấn công) |
+|---|---|---|
+| M-01 | **Đã sửa** | Người không có `debt.view`: thông báo CREDIT_WARNING không còn con số nợ, giá vốn (cả đường ghi sổ, cả đường **sửa phiếu đã ghi sổ tăng tiền**, cả khi gộp dòng lỗ); `banhang` (có `debt.view`) vẫn thấy số nợ, không thấy giá vốn. |
+| M-02 | **Đã sửa** | Xóa đối tác chỉ có nợ **phải trả** đầu kỳ ⇒ 422; số dư 0 hoặc làm tròn về 0 (`"0.004"`) ⇒ xóa được; ngừng dùng (active=false) được; tắt tính năng khóa sổ ⇒ xóa được. |
+| M-03 | **Đã sửa** | ngân hàng → tiền mặt có số dư ⇒ 422; số dư 0 ⇒ đổi được. |
+| M-04 | **Đã sửa** | `replace:false` + `[]` giữ nguyên; `thukho` không xóa được bảng giá (403). |
+| M-05 | **Đã sửa** | 403 trước khi đọc body ở `POST /documents` (sai kiểu), `PUT`/`post`/`check` theo phiếu có sẵn, `check` với `id` phiếu mua. JSON hỏng cú pháp (không đọc được `doc_type`) ⇒ 400, chấp nhận được. Lặp khóa `doc_type` (`"sale"` rồi `"purchase"`) không tạo được phiếu mua. |
+| M-06 | **Đã sửa** | `null`, `"true"`, `1`, `0`, `[]`, `{}` ⇒ 400, `details.field = features.permissions`; `null` + `confirm:true` vẫn 400. |
+| M-07 | **Đã sửa** | `"999.995"` và `"1000.0049"` ⇒ không đổi (200); `"1000.005"` ⇒ 1000,01 ⇒ 422. |
+| M-08 | **Đã sửa** | Ô công thức không có giá trị lưu sẵn ⇒ lỗi dòng; có giá trị lưu sẵn đọc đúng. |
+| M-09 | **Đã sửa** (chỉ phần kiểm được qua API) | NFD qua body JSON (UTF-8 thô và chuỗi thoát `̀`), query string (`lookup`, `q` của hàng/đối tác/chứng từ), ô Excel (mã NFD = mã NFC đã có ⇒ "cập nhật" chứ không tạo mới), ghi chú phiếu và dòng; mã NFC/NFD trùng ⇒ 400; **tên đăng nhập / mật khẩu NFD**: tạo bằng NFD rồi đăng nhập bằng NFC, NFD, lẫn lộn, viết hoa ⇒ đều được; đổi mật khẩu bằng NFD rồi đăng nhập NFC được; NUL + dấu tổ hợp ⇒ 400. **Không kiểm được** migration 007 trên dữ liệu cũ (cần CSDL có sẵn chuỗi NFD) và người dùng có mật khẩu NFD lưu **trước** migration (nay chuỗi gửi lên bị chuẩn hóa NFC ⇒ có thể không đăng nhập được nữa — nên kiểm ở mức Go). |
+| M-10 | **Đã sửa** | 404 `missing_ids` liệt kê đủ các id thiếu. (Ghi chú: id trùng trả 2 lần, `price-info` gộp làm 1 — vô hại.) |
+
+Quyết định vòng 1 đã sửa và kiểm: Q-01 (bình quân liên hoàn, mục D), Q-02 (mục E), Q-03 (nhập hàng hóa bỏ cột Giá mua
+kèm `notes`), Q-04, Q-05 (mục F), Q-06, Q-07, Q-08 (`notes` "Kho KHO1 đã có 1 phiếu tồn đầu kỳ tạm… ngày 25/10/2026…"
+khi cùng ngày; ngày khác không cảnh báo), Q-11, Q-12 (`cost_source` null với `banhang`/`thukho`, cả bản hàng loạt;
+`muahang` vẫn thấy). Q-09, Q-10, Q-13 giữ theo P10–P12 (đồng ý, nêu khi UAT).
+
+## D. C7 bình quân liên hoàn — các tấn công (tất cả đạt)
+
+| Kịch bản (tháng 8/2025) | Tính tay | Kết quả |
+|---|---|---|
+| Cùng ngày: bán 5 ghi sổ **trước**, mua 10 @40 ghi sổ sau (tồn đầu 10 @10) | nhập trước: 500/20 = 25 ⇒ 125 (nếu theo thứ tự ghi sổ: 50) | 125 ✔ |
+| Mua 10 @10; bán 4 (40); rồi ghi sổ phiếu mua **lùi ngày** 10 @30 trước ngày bán | 400/20 = 20 ⇒ 80; bỏ ghi sổ ⇒ lại 40 | ✔ |
+| Mua 2 @10; trả NCC 1 @50 (giá trị không xuống dưới 0 ⇒ 0); mua 1 @30; bán 2 | 30/2 = 15 ⇒ 30 (không chặn 0 ⇒ 0) | 30 ✔ |
+| Mua 10 @10; bán 5 (50); mua 5 @40 (250/10 = 25); khách trả 1 ⇒ nhập lại @25; bán 11 | trả −25, bán 275; cửa sổ báo cáo bắt đầu giữa lịch sử (04–05/08, hay chỉ 05/08) ra cùng số | ✔ |
+| Tồn chỉ từ khách trả (chưa từng mua, giá mua mặc định 70) ⇒ bán 2; mua 3 @100; bán 2 | phiếu trả và lần bán đầu "ước tính" (140); lần bán sau không ước tính | ✔ (lần bán sau = 170 ⇒ hàng khách trả đã vào kho bình quân @70 — hợp lý nhưng spec chưa nói, nên ghi rõ) |
+| Dòng DV cước trên phiếu mua; DV trên phiếu bán | giá vốn hàng = 5 × 20 = 100; DV giá vốn 0 | ✔ |
+| Ba cách nhóm (tháng 8 và toàn CSDL), doanh thu = báo cáo bán hàng `include_returns` | | ✔ |
+| SL lẻ + số lớn (3 @33,33 + 0,5 @1 tỷ; bán 1,25) | 178.571.464 | ✔ |
+
+## E. Q-02 — mọi đường đổi giá đã lưu khi không có `cost.view`
+
+Đạt: `PUT` (kể cả chỉ sửa ghi chú, dời ngày, JSON hỏng) và `unpost` phiếu **mua / trả NCC / tồn đầu đã ghi sổ** ⇒ 403
+(quyền kiểm trước body); vẫn ghi sổ được phiếu tạm, vẫn sửa được phiếu chuyển kho đã ghi sổ; người có quyền xem giá
+vẫn sửa được. Phiếu tạm mua và tồn đầu: dòng gửi lại `id` cùng mặt hàng giữ giá với `null`, bỏ trống, `0`, `1`,
+`"9.999"`, `9e9`, `-5`; thành tiền = SL mới × giá giữ; đảo thứ tự dòng giữ giá theo dòng; đổi mặt hàng trên một `id`
+(hoán đổi id hai dòng) ⇒ dòng mới giá mặc định; `PUT /products` và nhập Excel không đổi được giá mua.
+
+**Còn đường vòng (Q-14, cần controller quyết):** người bị che giá vẫn **gõ giá mới** được trên dòng **mới**: bỏ dòng cũ
+(giá lưu 111) rồi thêm dòng mới giá 1 ⇒ lưu 1; dùng `id` dòng của phiếu khác + giá 1 ⇒ lưu 1; dòng mới phiếu mua
+`4321` ⇒ lưu 4321. Đúng chữ P2 ("dòng mới không có giá ⇒ giá mặc định" — không nói dòng mới **có** giá), nên không ghi
+là lỗi; nhưng câu "mọi cách gửi giá đều giữ giá đang lưu" chỉ đúng với dòng giữ `id`. Nếu muốn chặn hẳn: dòng mới của
+người bị che luôn lấy giá mua mặc định. (Lặp `id` hai lần: dòng thứ hai được giá đang lưu 5555 chứ không phải giá gửi 1 —
+vô hại.)
+
+## F. Q-05 — hạn mức chạy song song (đạt)
+
+3 vòng × 8 lần ghi sổ đồng thời, mỗi phiếu 300 (dòng DV, không có khóa kho), hạn mức 1.000, không xác nhận: mỗi vòng
+**đúng 3 phiếu qua, 5 phiếu `CREDIT_WARNING`**, nợ 900. 10 phiếu của 2 khách với thứ tự mặt hàng ngược nhau ghi sổ
+đồng thời: cả 10 qua, không deadlock, không 5xx.
+
+## G. Nhật ký `/api/audit`, `/auth/login`, lịch sử khóa sổ
+
+Đạt: `ketoan`/`banhang`/`muahang`/`thukho` ⇒ 403, ẩn danh 401 (cả bản chuẩn: admin 200, `ketoan` 403); có dòng cho
+`features` (người, trước/sau, tên khóa), `role_permissions`, `period_lock` (kèm lý do), `import` (đúng **một** dòng mỗi
+lần nhập thật, nhập thử không ghi), `partner_prices`, xác nhận hạn mức (`credit_confirmed` của phiếu, có người và số
+liệu); lọc nhiều `entity`; `limit`/`offset`; mới nhất trước; tham số sai (limit 0 / 1001 / chữ, offset âm, ngày sai, NUL)
+⇒ 400. `GET /period-lock` có `history` mới nhất trước kèm lý do và người (người không phải quản trị cũng thấy — chấp
+nhận được). `POST /auth/login` trả `permissions` + `features` đúng vai trò, không có trường mật khẩu.
+
+## H. Lỗi mới
+
+### M-11 — Thấp — BUG: `/api/audit` nhận `to < from`
+`GET /api/audit?from=2026-02-01&to=2026-01-01` → `200` (danh sách rỗng). Mọi báo cáo khác trả `400` khi `to < from`
+(API §5). Người dùng gõ nhầm sẽ tưởng "không có thay đổi nào".
+
+### M-12 — Trung bình — BUG (SPEC_MO_RONG §0 "mọi thay đổi có audit"): tạo người dùng và đổi vai trò không có nhật ký
+`POST /api/users {"role":"banhang",…}` rồi `PUT /api/users/{id} {"role":"muahang"}` ⇒ cả hai `200`, không có dòng nào
+trong `GET /api/audit` (lọc từ id cuối trước thao tác, mọi `entity`). API §10 tự ghi "thay đổi người dùng chưa ghi nhật
+ký". Với tính năng phân quyền, **nâng quyền một người** (vd. thành `admin`, hay đổi sang vai trò thấy giá vốn) là thao
+tác nhạy cảm nhất và hiện không truy vết được. Mong đợi: audit entity `user` (không ghi mật khẩu/băm).
+
+## I. Còn chưa kiểm được (bổ sung)
+Migration 007 trên dữ liệu NFD có sẵn và mật khẩu NFD lưu trước migration; audit của thao tác người dùng ngoài tạo/đổi vai
+trò (khóa tài khoản, đổi mật khẩu) — cùng nguyên nhân M-12.

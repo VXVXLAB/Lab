@@ -126,11 +126,12 @@ def _():
 
 @test("C3", "test_C3_vietnamese_numbers")
 def _():
-    cases = [("1.500.000", 1500000), ("2,5", 2.5), ("1.200.000,5", 1200000.5), ("2.5", 2.5), ("1.500", 1500),
+    cases = [("1.500.000", 1500000), ("2,5", 2.5), ("1.200.000,5", 1200000.5), ("1.500", 1500), ("1.250", 1250),
              (" 1.500.000 ", 1500000), ("1500000", 1500000), (1500000, 1500000), (2.5, 2.5), ("0", 0),
              ("1.234,567", 1234.57), ("12.345.678,90", 12345678.9), ("\u00a01.000\u00a0", 1000),
              ("1 500 000đ", 1500000), ("1.500.000 đ", 1500000)]  # currency suffix / space grouping: lenient, fine
-    bad = ["150k", "abc", "1.5.0", "1,2,3", "--5", "1e3x", "NaN", "Infinity", "12.34.5", "-5", "-1.000", "1,500,000", "1.000,", "0x10"]
+    bad = ["150k", "abc", "1.5.0", "1,2,3", "--5", "1e3x", "NaN", "Infinity", "12.34.5", "-5", "-1.000", "1,500,000", "1.000,", "0x10",
+           "2.5", "1.25", "12.5", "0.5"]  # P6: one dot + 1-2 digits in a TEXT cell -> row error
     rows, exp = [], {}
     for v, want in cases:
         c = uid("VN")
@@ -156,7 +157,7 @@ def _():
     for v, want in [("2,5", 2.5), ("1.000", 1000), ("0,125", 0.125), ("1,0005", 1.001)]:
         r = imp("opening_stock", ["Mã hàng", "Mã kho", "Số lượng"], [[p["code"], "KHO1", v]], dry=True, date="2026-10-04")
         check(r.status == 200 and import_result(r).get("errors") == [], f"qty {v!r} accepted: {r.short()[:300]}")
-    for v in ["0", "0,0004", "-1", "abc", "1e400"]:
+    for v in ["0", "0,0004", "-1", "abc", "1e400", "2.5", "1.25"]:  # P6 applies to quantities too
         r = imp("opening_stock", ["Mã hàng", "Mã kho", "Số lượng"], [[p["code"], "KHO1", v]], dry=True, date="2026-10-04")
         check(r.status in (200, 400) and (import_result(r).get("errors") or r.status == 400), f"qty {v!r} rejected: {r.short()[:300]}")
 
@@ -212,9 +213,9 @@ def _():
         eq(import_result(r).get("rows"), 0, "header only: 0 rows")
     # duplicated header column
     r = imp("products", ["Mã hàng", "Tên hàng", "ĐVT", "Giá bán", "Giá bán"], [[uid("LAY"), "x", "Cái", 1, 2]], dry=True)
-    check(r.status in (200, 400) and r.status < 500, f"duplicated header -> {r.status}")
-    if r.status == 200 and not import_result(r).get("errors"):
-        print("      note: duplicated 'Giá bán' column accepted silently (which one wins?)")
+    eq(r.status, 400, "duplicated header column -> 400 (P9)")
+    if r.json:
+        check("Giá bán" in r.json["error"]["message"], f"message names the column: {r.json['error']['message']}")
 
 
 @test("C3", "test_C3_duplicates_unknowns_and_rules")

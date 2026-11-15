@@ -285,28 +285,16 @@ def _():
         # restore the draft to 1 line @655553 for the crawl
         a.put(f"/documents/{ad['id']}", {**put_body_from(ad), "lines": [L(M["id"], 1, 655553)]})
         f["dp"] = get_doc(ad["id"])
-        # posted purchase: change qty keeping id
+        # posted purchase (Q-02 / P2): a user without cost.view may neither edit nor unpost it -> 403
         pu = posted("purchase", "2026-03-03", f["k1"], [L(M["id"], 3, 913579)], S["id"])
         tp = get_doc(pu["id"], tk)
         body = put_body_from(tp)
         body["lines"] = [{"id": tp["lines"][0]["id"], "product_id": M["id"], "qty": 4, "unit_price": None}]
-        r = tk.put(f"/documents/{tp['id']}", body)
-        eq(r.status, 200, "masked PUT posted purchase")
+        expect_err(tk.put(f"/documents/{tp['id']}", body), 403, "FORBIDDEN", "masked PUT posted purchase (P2)")
+        expect_err(tk.put(f"/documents/{tp['id']}", put_body_from(tp)), 403, "FORBIDDEN", "masked PUT posted purchase without line ids (P2)")
+        expect_err(tk.post(f"/documents/{tp['id']}/unpost", {"version": tp["version"]}), 403, "FORBIDDEN", "masked unpost posted purchase (P2)")
         ap = get_doc(pu["id"])
-        eq(ap["lines"][0]["unit_price"], 913579, "posted purchase price kept")
-        eq(ap["lines"][0]["amount"], 3654316, "posted amount = 4 x kept price")
-        eq(ap["total_amount"], 3654316, "posted total")
-        # PUT without line ids (old client) -> what happens to the price? spec: new line => default price
-        tp = get_doc(pu["id"], tk)
-        body = put_body_from(tp)  # put_body_from drops line ids
-        r = tk.put(f"/documents/{tp['id']}", body)
-        eq(r.status, 200, "masked PUT posted purchase without line ids")
-        ap = get_doc(pu["id"])
-        if num(ap["lines"][0]["unit_price"]) != 913579:
-            print(f"      note: masked PUT without line ids silently re-priced a POSTED purchase "
-                  f"913579 -> {ap['lines'][0]['unit_price']} (spec: new line => default price)")
-        # cleanup: unpost+delete that extra purchase so it does not disturb other fixtures
-        ap = get_doc(pu["id"])
+        eq((ap["lines"][0]["unit_price"], ap["lines"][0]["qty"], ap["version"]), (913579, 3, pu["version"]), "posted purchase untouched")
         u = a.post(f"/documents/{pu['id']}/unpost", {"version": ap["version"]})
         if u.status == 200:
             a.delete(f"/documents/{pu['id']}")
@@ -315,7 +303,16 @@ def _():
         eq(r.status, 201, "masked POST purchase with explicit price")
         if r.status == 201:
             check(r.json["lines"][0]["unit_price"] is None, "response masks explicit price")
-            print(f"      note: explicit unit_price 1234 from masked user stored as {get_doc(r.json['id'])['lines'][0]['unit_price']}")
+            # P2: once stored, a line re-sent with its id keeps the stored price whatever price is sent
+            stored = get_doc(r.json["id"])["lines"][0]["unit_price"]
+            dd = get_doc(r.json["id"], tk)
+            for v in [1, 0, None, "999", 5e6]:
+                bb = put_body_from(dd)
+                bb["lines"] = [{"id": dd["lines"][0]["id"], "product_id": M["id"], "qty": 1, "unit_price": v}]
+                rr = tk.put(f"/documents/{dd['id']}", bb)
+                eq(rr.status, 200, f"masked PUT draft line id + price {v!r}")
+                eq(get_doc(dd["id"])["lines"][0]["unit_price"], stored, f"stored price kept when sending {v!r}")
+                dd = get_doc(dd["id"], tk)
             a.delete(f"/documents/{r.json['id']}")
     finally:
         restore_matrix()

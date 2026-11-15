@@ -107,7 +107,8 @@ export function docAccess(type: DocType, a: Access, isAdmin: boolean): DocAccess
       hasDebt: base.hasDebt && !costHidden && can('debt.view'),
     },
     canWrite,
-    canEditPosted: canWrite && can('posted.edit'),
+    // không xem được giá vốn ⇒ không sửa / bỏ ghi sổ phiếu mua, trả NCC, tồn đầu đã ghi sổ (máy chủ trả 403)
+    canEditPosted: canWrite && can('posted.edit') && !costHidden,
     costHidden,
   };
 }

@@ -33,6 +33,9 @@ export const paths = {
   importExcel: '/danh-muc/nhap-excel',
   rolePermissions: '/he-thong/phan-quyen',
   periodLock: '/he-thong/khoa-so',
+  lowStock: '/bao-cao/duoi-ton-toi-thieu',
+  debtAging: '/bao-cao/tuoi-no',
+  profit: '/bao-cao/lai-gop',
   company: '/he-thong/thong-tin-cong-ty',
   /** Mở một chứng từ kho (giai đoạn 2). */
   document: (id: number | string) => `/chung-tu/${id}`,

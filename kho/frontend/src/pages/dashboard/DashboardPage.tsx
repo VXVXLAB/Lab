@@ -179,11 +179,11 @@ export function DashboardPage() {
           <Tile label={`Doanh thu tháng ${month}`} value={money(d.revenue_month)} sub="Từ đầu tháng đến hôm nay" to={paths.reports} />
         )}
         <Tile
-          label="Hàng sắp hết"
+          label={d.low_stock_rule === 'min_stock' ? 'Hàng dưới mức tối thiểu' : 'Hàng sắp hết'}
           value={d.low_stock_count}
           sub={
             <>
-              {d.out_of_stock_count} mã hết hàng · tồn ≤ {d.low_stock_threshold}
+              {d.out_of_stock_count} mã hết hàng · {d.low_stock_rule === 'min_stock' ? 'tồn ≤ tồn tối thiểu từng mã' : `tồn ≤ ${d.low_stock_threshold}`}
               {d.draft_shortage_count > 0 && (
                 <>
                   <br />
@@ -193,7 +193,7 @@ export function DashboardPage() {
             </>
           }
           tone={d.out_of_stock_count > 0 ? 'bad' : d.low_stock_count > 0 || d.draft_shortage_count > 0 ? 'warn' : 'good'}
-          to={d.draft_shortage_count > 0 ? paths.reorder : paths.stock}
+          to={d.draft_shortage_count > 0 ? paths.reorder : d.low_stock_rule === 'min_stock' ? paths.lowStock : paths.stock}
         />
         {d.total_receivable !== null && <Tile label="Khách hàng còn nợ (phải thu)" value={money(d.total_receivable)} to={paths.receivable} />}
         {d.total_payable !== null && <Tile label="Còn nợ nhà cung cấp (phải trả)" value={money(d.total_payable)} to={paths.payable} />}

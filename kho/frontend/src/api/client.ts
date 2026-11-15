@@ -12,6 +12,7 @@ export type ErrorCode =
   | 'INSUFFICIENT_STOCK'
   | 'FEATURE_OFF'
   | 'PERIOD_LOCKED'
+  | 'CREDIT_WARNING'
   | 'IMPORT_INVALID'
   | 'INTERNAL'
   | 'NETWORK'
@@ -28,6 +29,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set([
   'INSUFFICIENT_STOCK',
   'FEATURE_OFF',
   'PERIOD_LOCKED',
+  'CREDIT_WARNING',
   'IMPORT_INVALID',
   'INTERNAL',
 ]);
@@ -44,6 +46,7 @@ const FALLBACK_MESSAGE: Record<ErrorCode, string> = {
   INSUFFICIENT_STOCK: 'Không đủ hàng trong kho.',
   FEATURE_OFF: 'Tính năng này chưa được bật (Danh mục › Tính năng mở rộng).',
   PERIOD_LOCKED: 'Kỳ này đã khóa sổ, không sửa được.',
+  CREDIT_WARNING: 'Khách sẽ vượt hạn mức công nợ nếu ghi sổ phiếu này.',
   IMPORT_INVALID: 'File còn lỗi, chưa nhập dòng nào.',
   INTERNAL: 'Máy chủ gặp lỗi. Vui lòng thử lại; nếu vẫn lỗi hãy báo người quản trị.',
   NETWORK: 'Không kết nối được máy chủ. Kiểm tra mạng (hoặc máy chủ đã bật chưa) rồi thử lại.',

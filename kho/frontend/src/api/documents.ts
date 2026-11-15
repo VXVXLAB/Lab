@@ -15,8 +15,9 @@ export const documentsApi = {
   get: (id: number) => api.get<DocumentFull>(`/documents/${id}`),
   create: (body: DocumentBody) => api.post<DocumentFull>('/documents', body),
   update: (id: number, body: DocumentBody) => api.put<DocumentFull>(`/documents/${id}`, body),
-  post: (id: number, version: number, confirmLoss = false) =>
-    api.post<DocumentFull>(`/documents/${id}/post`, { version, confirm_loss: confirmLoss }),
+  /** `confirmCredit` (bản mở rộng, hạn mức nợ): chỉ gửi khi đã xác nhận vượt hạn mức */
+  post: (id: number, version: number, confirmLoss = false, confirmCredit = false) =>
+    api.post<DocumentFull>(`/documents/${id}/post`, { version, confirm_loss: confirmLoss, ...(confirmCredit ? { confirm_credit: true } : {}) }),
   unpost: (id: number, version: number) => api.post<DocumentFull>(`/documents/${id}/unpost`, { version }),
   remove: (id: number, version?: number) => api.del<{ ok: true; id: number }>(`/documents/${id}`, { version }),
   check: (id: number) => api.get<DocumentCheck>(`/documents/${id}/check`),

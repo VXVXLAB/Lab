@@ -25,8 +25,10 @@ import { useDebounced } from '../../lib/useDebounced';
 import { ApiError, errorMessage } from '../../api/client';
 import { documentsApi } from '../../api/documents';
 import { qk } from '../../api/queryKeys';
-import type { DocType, DocumentFull, LossWarning, PriceInfoWh, Shortage, VersionConflictDetails, Warehouse } from '../../api/types';
+import type { CreditWarning, SalePriceItem, DocType, DocumentFull, LossWarning, PriceInfoWh, Shortage, VersionConflictDetails, Warehouse } from '../../api/types';
 import { useAccess, useCurrentUser } from '../../auth/AuthContext';
+import { priceListApi } from '../../api/extended';
+import { partnersApi } from '../../api/catalog';
 import { docAccess } from '../../auth/guard';
 import { isLocked, LockBadge, lockDateWarning, lockedText, lockTooltip, useLockDate } from '../../lib/periodLock';
 import { DateInput } from '../../components/DateInput';
@@ -60,7 +62,7 @@ import { HistoryDrawer } from './HistoryDrawer';
 
 import { useDrawers } from '../reports/drawers';
 import { LineGrid, type Col, type LineHint } from './LineGrid';
-import { PartnerSelect } from './PartnerSelect';
+import { PartnerSelect, type PartnerLite } from './PartnerSelect';
 import { PrintSheet } from './PrintSheet';
 
 const LAST_WH = 'kho.lastWarehouse';
@@ -398,6 +400,87 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   });
   const check = checkBody ? liveCheck.data : undefined;
 
+  // ---------- Bản mở rộng C6: giá theo khách (phiếu bán) ----------
+  const priceOn = access.on('price_list') && type === 'sale';
+  const partnerId = header.partner?.id ?? null;
+  const spIds = useMemo(
+    () => [...new Set(lines.filter((l) => l.product && !l.product.is_service).map((l) => l.product!.id))].sort((x, y) => x - y),
+    [lines],
+  );
+  const spQ = useQuery({
+    queryKey: ['sale-price', partnerId, spIds.join(','), dateStr ?? ''],
+    queryFn: () => priceListApi.salePrice(partnerId!, spIds, dateStr),
+    enabled: priceOn && !!partnerId && spIds.length > 0 && !readOnlyBase,
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+  });
+  const spMap = useMemo(() => {
+    const m = new Map<number, SalePriceItem>();
+    if (spQ.data && spQ.data.partner_id === partnerId) for (const it of spQ.data.items) m.set(it.product_id, it);
+    return m;
+  }, [spQ.data, partnerId]);
+  /** Dòng có giá do phần mềm tự điền (chưa sửa tay): key ⇒ {mã, giá đã điền} — được thay bằng giá theo khách */
+  const autoPrice = useRef(new Map<string, { pid: number; value: number | null }>());
+  useEffect(() => {
+    if (!priceOn || !spMap.size) return;
+    let changed = false;
+    const next = lines.map((l) => {
+      const a = autoPrice.current.get(l.key);
+      if (!a) return l;
+      if (!l.product || l.product.id !== a.pid || l.unit_price !== a.value) {
+        autoPrice.current.delete(l.key); // người dùng đã đổi mã / sửa giá
+        return l;
+      }
+      const sp = spMap.get(a.pid);
+      if (!sp || sp.price === null || sp.price === l.unit_price) return l;
+      changed = true;
+      autoPrice.current.set(l.key, { pid: a.pid, value: sp.price });
+      return { ...l, unit_price: sp.price };
+    });
+    if (changed) setLines(next);
+  }, [spMap, lines, priceOn]);
+  const savePriceForCustomer = async (l: LineDraft) => {
+    if (!header.partner || !l.product || l.unit_price === null) return;
+    try {
+      await priceListApi.upsert(header.partner.id, [{ product_id: l.product.id, price: l.unit_price }]);
+      void qc.invalidateQueries({ queryKey: ['sale-price'] });
+      void qc.invalidateQueries({ queryKey: ['partner-prices', header.partner.id] });
+      message.success(`Đã lưu giá ${formatMoney(l.unit_price)} của ${l.product.code} cho ${header.partner.name}`, 2);
+    } catch (e) {
+      message.error(errorMessage(e));
+    }
+  };
+  const priceTag = (sp: SalePriceItem) =>
+    sp.source === 'customer' ? 'Giá riêng của khách' : sp.source === 'last_sale' ? `Giá lần trước${sp.doc_date ? ` ${formatDate(sp.doc_date).slice(0, 5)}` : ''}` : 'Giá mặc định';
+  /** Đổi khách trên phiếu đã có dòng: hỏi có lấy lại giá theo khách mới không */
+  const onPartnerChanged = (prev: PartnerLite | null, p: PartnerLite | null) => {
+    if (!priceOn || !p || prev?.id === p.id) return;
+    const priced = lines.filter((l) => l.product && !l.product.is_service);
+    autoPrice.current.clear();
+    if (!priced.length) return;
+    modal.confirm({
+      title: 'Lấy lại giá theo khách mới?',
+      content: `Phiếu đã có ${priced.length} dòng hàng. Lấy giá theo khách ${p.name} (giá riêng, giá lần trước, giá mặc định) cho các dòng này?`,
+      okText: 'Lấy giá mới',
+      cancelText: 'Giữ giá đang có',
+      onOk: () => {
+        for (const l of priced) autoPrice.current.set(l.key, { pid: l.product!.id, value: l.unit_price });
+        setLines((ls) => [...ls]); // chạy lại bước điền giá
+      },
+      afterClose: () => whRef.current?.focus(),
+    });
+  };
+
+  // ---------- Bản mở rộng C8: hạn mức nợ (phiếu bán) ----------
+  const creditOn = access.on('credit_limit') && type === 'sale' && debtVisible;
+  const partnerFull = useQuery({
+    queryKey: qk.catalogItem('partner', partnerId ?? 0),
+    queryFn: () => partnersApi.get(partnerId!),
+    enabled: creditOn && !!partnerId,
+    staleTime: 30_000,
+  });
+  const creditLimit = creditOn ? (partnerFull.data?.credit_limit ?? null) : null;
+
   const hints = useMemo(() => {
     const out: Record<string, LineHint> = {};
     if (!cfg) return out;
@@ -412,14 +495,21 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
         const sh = check?.stock_shortages.find((s) => s.product_id === p.id);
         if (sh && editing) h.shortage = { short: sh.shortage, available: sh.available, required: sh.required, date: sh.date, message: sh.message, docDate: dateStr };
       }
-      if (h.error || h.loss !== undefined || h.shortage) out[l.key] = h;
+      if (priceOn && p && !p.is_service && !readOnlyBase) {
+        const sp = spMap.get(p.id);
+        if (sp && sp.price !== null) {
+          if (l.unit_price === sp.price) h.priceTag = priceTag(sp);
+          else if (l.unit_price !== null && access.can('sale.write')) h.onSavePrice = () => void savePriceForCustomer(l);
+        }
+      }
+      if (h.error || h.loss !== undefined || h.shortage || h.priceTag || h.onSavePrice) out[l.key] = h;
     }
     for (const w of check?.loss_lines ?? []) {
       const l = withProduct[w.line_no - 1];
       if (l && out[l.key]?.loss === undefined) out[l.key] = { ...(out[l.key] ?? {}), loss: w.cost_price };
     }
     return out;
-  }, [lines, cfg, editing, lineErrors, piMap, check, dateStr]);
+  }, [lines, cfg, editing, lineErrors, piMap, check, dateStr, spMap, priceOn, readOnlyBase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const liveTotal = lines.reduce((s, l) => s + lineAmount(l), 0);
   const goodsQty = lines.filter((l) => l.product && !l.product.is_service).reduce((s, l) => s + (l.qty ?? 0), 0);
@@ -491,6 +581,51 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     });
   };
 
+  /** Vượt hạn mức nợ (+ bán lỗ nếu có): một hộp xác nhận duy nhất. Không có quyền xem công nợ ⇒ không có con số. */
+  const confirmCredit = (msg: string, det: { credit?: CreditWarning; loss_lines?: LossWarning[] }, onOk: () => void, verb: string) => {
+    const c = det.credit;
+    const figures = c && c.receivable !== null && c.credit_limit !== null && c.total_after !== null && c.over !== null;
+    modal.confirm({
+      title: 'Khách vượt hạn mức công nợ',
+      width: 620,
+      content: (
+        <>
+          {figures && c ? (
+            <table className="dlg-figs">
+              <tbody>
+                <tr><td>Nợ hiện tại</td><td className="num">{formatMoney(c.receivable)}</td></tr>
+                <tr><td>Phiếu này</td><td className="num">{formatMoney(c.document_amount)}</td></tr>
+                <tr><td>Sau khi ghi sổ</td><td className="num"><b>{formatMoney(c.total_after)}</b></td></tr>
+                <tr><td>Hạn mức</td><td className="num">{formatMoney(c.credit_limit)}</td></tr>
+                <tr><td>Vượt</td><td className="num neg"><b>{formatMoney(c.over)}</b></td></tr>
+              </tbody>
+            </table>
+          ) : (
+            <p>{msg}</p>
+          )}
+          {!!det.loss_lines?.length && (
+            <>
+              <div className="dlg-hint" style={{ marginTop: 8 }}>
+                <b>Kèm theo — có dòng bán thấp hơn giá mua:</b>
+              </div>
+              <ul className="dlg-list">
+                {det.loss_lines.map((w, i) => (
+                  <li key={i}>{w.message}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          <div className="dlg-hint">Nếu đồng ý cho khách nợ thêm, bấm “{verb}” (phần mềm ghi lại người xác nhận).</div>
+        </>
+      ),
+      okText: verb,
+      okButtonProps: { danger: true },
+      cancelText: 'Xem lại',
+      autoFocusButton: 'cancel',
+      onOk,
+    });
+  };
+
   const confirmLoss = (items: LossWarning[], onOk: () => void, verb: string) => {
     modal.confirm({
       title: 'Có dòng bán thấp hơn giá mua (bán lỗ)',
@@ -556,7 +691,8 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     });
   };
 
-  const handleError = (e: unknown, ctx: 'save' | 'post' | 'unpost' | 'delete', sent: LineDraft[], retryWithLoss?: () => void) => {
+  /** retry(flags): gửi lại kèm cờ xác nhận (bán lỗ / vượt hạn mức nợ) */
+  const handleError = (e: unknown, ctx: 'save' | 'post' | 'unpost' | 'delete', sent: LineDraft[], retry?: (f: { loss: boolean; credit: boolean }) => void) => {
     if (e instanceof ApiError && e.status === 401) return; // đã về màn đăng nhập; phiếu đang gõ được giữ lại (F-04)
     if (!(e instanceof ApiError)) {
       modal.error({ title: 'Có lỗi', content: errorMessage(e) });
@@ -567,8 +703,14 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
         showConflict(e.details as VersionConflictDetails | null);
         return;
       case 'LOSS_WARNING':
-        if (retryWithLoss) confirmLoss((e.details as LossWarning[] | null) ?? [], retryWithLoss, ctx === 'post' ? 'Vẫn ghi sổ' : 'Vẫn lưu');
+        if (retry) confirmLoss((e.details as LossWarning[] | null) ?? [], () => retry({ loss: true, credit: false }), ctx === 'post' ? 'Vẫn ghi sổ' : 'Vẫn lưu');
         return;
+      case 'CREDIT_WARNING': {
+        // bản mở rộng: vượt hạn mức nợ (có thể kèm dòng bán lỗ) — hỏi MỘT lần, gửi lại mọi cờ máy chủ yêu cầu
+        const det = (e.details ?? {}) as { credit?: CreditWarning; loss_lines?: LossWarning[]; confirm?: string[] };
+        if (retry) confirmCredit(e.message, det, () => retry({ loss: !!det.confirm?.includes('confirm_loss'), credit: true }), ctx === 'post' ? 'Vẫn ghi sổ' : 'Vẫn lưu');
+        return;
+      }
       case 'INSUFFICIENT_STOCK':
         showShortage((e.details as Shortage[] | null) ?? [], ctx === 'delete' ? 'save' : ctx);
         return;
@@ -613,7 +755,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   };
 
   // ---------- lưu ----------
-  const save = async (opts: { confirmLoss?: boolean; quiet?: boolean } = {}): Promise<DocumentFull | null> => {
+  const save = async (opts: { confirmLoss?: boolean; confirmCredit?: boolean; quiet?: boolean } = {}): Promise<DocumentFull | null> => {
     if (!type || !cfg || saving) return null;
     const sent = sentLines(lines);
     setLineErrors({});
@@ -640,7 +782,12 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     setSaving(true);
     try {
       const d = loaded
-        ? await documentsApi.update(loaded.id, { ...body, version: loaded.version, confirm_loss: opts.confirmLoss ?? false })
+        ? await documentsApi.update(loaded.id, {
+            ...body,
+            version: loaded.version,
+            confirm_loss: opts.confirmLoss ?? false,
+            ...(opts.confirmCredit ? { confirm_credit: true } : {}),
+          })
         : await documentsApi.create(body);
       if (header.warehouse_id) storage.set(`${LAST_WH}.${type}`, String(header.warehouse_id));
       const wasNew = !loaded;
@@ -659,14 +806,14 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
       void qc.invalidateQueries({ queryKey: qk.documents });
       return d;
     } catch (e) {
-      handleError(e, 'save', sent, () => void save({ ...opts, confirmLoss: true }));
+      handleError(e, 'save', sent, (f) => void save({ ...opts, confirmLoss: opts.confirmLoss || f.loss, confirmCredit: opts.confirmCredit || f.credit }));
       return null;
     } finally {
       setSaving(false);
     }
   };
 
-  const post = async (confirm = false) => {
+  const post = async (confirm = false, confirmCreditFlag = false) => {
     if (!cfg) return;
     let d = loadedRef.current;
     if (!d || dirtyRef.current) {
@@ -676,13 +823,13 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     if (d.status === 'posted') return;
     setSaving(true);
     try {
-      const r = await documentsApi.post(d.id, d.version, confirm);
+      const r = await documentsApi.post(d.id, d.version, confirm, confirmCreditFlag);
       load(r);
       message.success(`Đã ghi sổ — số phiếu ${r.doc_no}`, 2.5);
       void qc.invalidateQueries({ queryKey: qk.documents });
     } catch (e) {
       // lỗi khi ghi sổ: phiếu vẫn đã lưu tạm ⇒ cập nhật version mới nhất
-      handleError(e, 'post', sentLines(lines), () => void post(true));
+      handleError(e, 'post', sentLines(lines), (f) => void post(confirm || f.loss, confirmCreditFlag || f.credit));
     } finally {
       setSaving(false);
     }
@@ -1162,8 +1309,10 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                   current={header.partner}
                   status={headerErrors.partner_id ? 'error' : undefined}
                   onChange={(p) => {
+                    const prev = header.partner;
                     setHeader((h) => ({ ...h, partner: p }));
                     setHeaderErrors((e) => ({ ...e, partner_id: '' }));
+                    onPartnerChanged(prev, p);
                   }}
                 />,
                 'hf-partner', 'partner',
@@ -1232,6 +1381,9 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
                 >
                   Xem công nợ
                 </Button>
+                {creditLimit !== null && (
+                  <CreditLine limit={creditLimit} receivable={partnerDebt.data.closing - (loaded?.status === 'posted' ? (loaded.total_amount ?? 0) : 0)} slip={liveTotal} />
+                )}
               </span>
             )}
           </div>
@@ -1261,6 +1413,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
           }
           hints={hints}
           focusRequest={focusReq}
+          onPicked={priceOn ? (key, pid, price) => autoPrice.current.set(key, { pid, value: price }) : undefined}
         />
       </div>
 
@@ -1300,7 +1453,11 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
           {readOnly && loaded && !mayEdit && !lockedDoc && (
             <div className="muted">
               Bạn chỉ được xem phiếu này
-              {loaded.status === 'posted' && da?.canWrite ? ' (không có quyền sửa phiếu đã ghi sổ).' : ` (không có quyền lập ${cfg.name.toLowerCase()}).`}
+              {loaded.status === 'posted' && da?.canWrite
+                ? da.costHidden
+                  ? ' (phiếu đã ghi sổ có giá mua — cần quyền xem giá mua mới sửa / bỏ ghi sổ được).'
+                  : ' (không có quyền sửa phiếu đã ghi sổ).'
+                : ` (không có quyền lập ${cfg.name.toLowerCase()}).`}
             </div>
           )}
         </div>
@@ -1380,5 +1537,19 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
         </>
       )}
     </div>
+  );
+}
+
+/** Bản mở rộng C8: "Nợ hiện tại / Hạn mức" trên đầu phiếu bán; đỏ khi phiếu này làm vượt hạn mức. */
+function CreditLine({ limit, receivable, slip }: { limit: number; receivable: number; slip: number }) {
+  const after = receivable + slip;
+  const over = after - limit;
+  return (
+    <Tooltip title={`Nợ sau phiếu này: ${formatMoney(after)} đ`}>
+      <span className={`credit-line${over > 0 ? ' credit-over' : ''}`}>
+        · Nợ hiện tại / Hạn mức: <b>{formatMoney(receivable)}</b> / {formatMoney(limit)} đ
+        {over > 0 && <b> — phiếu này vượt hạn mức {formatMoney(over)} đ</b>}
+      </span>
+    </Tooltip>
   );
 }

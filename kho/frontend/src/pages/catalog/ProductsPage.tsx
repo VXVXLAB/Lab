@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useCan } from '../../auth/AuthContext';
+import { useCan, useFeature } from '../../auth/AuthContext';
 import { AutoComplete, Button, Empty, Form, Input, Segmented, Select, Skeleton, Switch, Table, Tag, Tooltip } from 'antd';
 import { FileSearchOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useDrawers } from '../reports/drawers';
@@ -97,6 +97,7 @@ export function ProductsPage() {
   const qc = useQueryClient();
   const rec = ed.record;
   const costView = useCan('cost.view');
+  const minOn = useFeature('min_stock');
   const [groupId, setGroupId] = useState<number | undefined>(undefined);
   const [kind, setKind] = useState<Kind>('all');
   const groups = useAllGroups();
@@ -136,9 +137,21 @@ export function ProductsPage() {
         if (r.is_service) return <span className="muted">–</span>;
         const n = (r as ProductWithStock).total_stock;
         if (n === undefined) return <span className="muted">…</span>;
-        return <span className={n <= 0 ? 'neg' : undefined}>{formatQty(n)}</span>;
+        const low = minOn && r.min_stock !== null && r.min_stock !== undefined && n <= r.min_stock;
+        return <span className={n <= 0 || low ? 'neg' : undefined}>{formatQty(n)}</span>;
       },
     },
+    ...(minOn
+      ? [
+          {
+            title: 'Tồn tối thiểu',
+            dataIndex: 'min_stock',
+            width: 96,
+            align: 'right' as const,
+            render: (n: number | null | undefined) => (n === null || n === undefined ? <span className="muted">–</span> : formatQty(n)),
+          },
+        ]
+      : []),
     activeColumn<Product>(),
   ];
 
@@ -224,6 +237,8 @@ export function ProductsPage() {
             purchase_price: costView ? (v.purchase_price ?? 0) : null,
             is_service: !!v.is_service,
             active: v.active,
+            // bản mở rộng (tồn tối thiểu bật): gửi kèm; tắt ⇒ không gửi (máy chủ giữ nguyên)
+            ...(minOn ? { min_stock: v.min_stock ?? null } : {}),
           };
           return rec ? productsApi.update(rec.id, body) : productsApi.create(body);
         }}
@@ -270,6 +285,15 @@ export function ProductsPage() {
             <NumberInput style={{ width: 180 }} suffix="đ" />
           </Form.Item>
         )}
+        {minOn && (
+          <Form.Item
+            label="Tồn tối thiểu"
+            name="min_stock"
+            extra="Tính trên tổng các kho. Tồn ≤ mức này là hàng cần đặt thêm. Để trống = không theo dõi."
+          >
+            <NumberInput style={{ width: 180 }} />
+          </Form.Item>
+        )}
         <Form.Item
           label="Là dịch vụ"
           name="is_service"
@@ -296,6 +320,7 @@ function toBody(p: Product, over: Partial<ProductBody> = {}): ProductBody {
     purchase_price: p.purchase_price,
     is_service: p.is_service,
     active: p.active,
+    ...(p.min_stock !== undefined ? { min_stock: p.min_stock } : {}),
     ...over,
   };
 }

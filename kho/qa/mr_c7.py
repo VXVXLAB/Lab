@@ -6,18 +6,16 @@ R25 = {"from": "2025-01-01", "to": "2025-01-31"}  # the hand-computed scenario l
 
 
 def world():
-    """Hand-computed scenario (all in 2025, nobody else uses 2025).
-
-    X: opening 01-01 10@40 (KHO1); purchase 01-05 10@60 (KHO2); purchase 01-15 5@90; purchase-return 01-16 2@70;
-       back-dated purchase 01-08 5@30 (posted last); transfer KHO1->KHO3 (no effect); draft purchase 01-02 100@1 (ignored);
-       purchase with a DV freight line 1@1000 (no effect on X).
-       avg(01-10) = (400+600+150)/25 = 46            -> sale 5  : cost 230
-       avg(01-20) = (1150+450-140)/(25+5-2) = 1460/28 -> sale 3  : cost round(3*1460/28)=round(156.43)=156
-       avg(01-25) = same                               -> return 1: cost -round(52.14) = -52
-    Y: never bought, purchase_price 70 -> sale 2@100: cost 140, estimated
-    Z: purchase 01-03 2@50, purchase_return 01-04 3@50?? impossible (stock) -> instead: purchase 2@50 then return 2@50
-       -> cumulative qty 0 -> estimated, default purchase_price 80 -> sale on 01-30 of 1@100 needs stock: opening KHO4 1@0
-       ... opening counts as input: qty 1, value 0 -> avg 0, NOT estimated. (opening 01-29 1@0)
+    """Hand-computed scenario under the MOVING weighted average (SPEC_MO_RONG C7 rewritten, QUYET_DINH P1).
+    All in January 2025 (nobody else uses it). Same day: inbound first, then outbound.
+    X: 01-01 opening 10@40 (q10 v400) ; 01-05 purchase 10@60 (+DV freight, ignored) -> q20 v1000 avg 50 ;
+       01-08 back-dated purchase 5@30 (posted last) -> q25 v1150 avg 46 ; 01-10 sale 5 -> cost 230, q20 v920 ;
+       01-15 purchase 5@90 -> q25 v1370 ; 01-16 supplier return 2@64 (=128) -> q23 v1242 avg 54 ;
+       01-20 sale 3 -> cost 162, q20 v1080 ; 01-25 customer return 1 -> re-enters at avg 54 -> cost -54.
+       (return price 64 chosen so the average stays an integer: rounding of the removed value cannot matter)
+    Y: only stock source = customer return 2024-12-31 (not an inbound) -> sale 01-22 2@100 cost 2x70=140, estimated.
+    Z: purchase 2@50, supplier return 2@50 -> q0 v0 ; opening 01-29 1@0 (qty was 0 -> avg = 0) ; sale 01-30 -> cost 0.
+    Totals: revenue 1200, cost 230+162+140-54+0 = 478, profit 722, margin 60.17.
     """
     if _w:
         return _w
@@ -33,7 +31,7 @@ def world():
     posted("purchase", "2025-01-05", k2, [L(x, 10, 60), {"product_code": "DV", "description": "Cước xe", "qty": 1, "unit_price": 1000}], S["id"])
     draft("purchase", "2025-01-02", k1, [L(x, 100, 1)], S["id"])
     posted("purchase", "2025-01-15", k2, [L(x, 5, 90)], S["id"])
-    posted("purchase_return", "2025-01-16", k2, [L(x, 2, 70)], S["id"])
+    posted("purchase_return", "2025-01-16", k2, [L(x, 2, 64)], S["id"])
     posted("transfer", "2025-01-06", k1, [L(x, 3)], None, k3)
     # Y stock without any "input" for cost: a customer return (not an input for cost), dated before the 2025 range
     posted("sale_return", "2024-12-31", k4, [L(y, 5, 100)], K2["id"])
@@ -50,10 +48,8 @@ def world():
     posted("purchase", "2025-01-08", k1, [L(x, 5, 30)], S["id"])
     _w.update(X=X, Y=Y, Z=Z, S=S, K1=K1, K2=K2, d1=d1, d2=d2, d3=d3, d4=d4, d5=d5)
     # expected per document: revenue, cost, estimated
-    # d3: Y has no purchase/opening -> estimated at default 70 ; the sale_return of 5 is NOT an input
-    # d5: Z inputs: purchase 2@50 (100), return 2@50 (-100), opening 1@0 -> qty 1, value 0 -> cost 0, not estimated
-    _w["exp_docs"] = {d1["id"]: (700, 230, False), d2["id"]: (300, 156, False), d3["id"]: (200, 140, True),
-                      d4["id"]: (-100, -52, False), d5["id"]: (100, 0, False)}
+    _w["exp_docs"] = {d1["id"]: (700, 230, False), d2["id"]: (300, 162, False), d3["id"]: (200, 140, True),
+                      d4["id"]: (-100, -54, False), d5["id"]: (100, 0, False)}
     return _w
 
 
@@ -75,9 +71,9 @@ def _():
     eq(len(rows), 5, "exactly 5 posted sale/return documents in 2025 (drafts excluded)")
     t = rep["totals"]
     eq(t["revenue"], 1200, "total revenue")
-    eq(t["cost"], 474, "total cost")
-    eq(t["profit"], 726, "total profit")
-    eq(t["margin"], 60.5, "total margin")
+    eq(t["cost"], 478, "total cost")
+    eq(t["profit"], 722, "total profit")
+    eq(t["margin"], 60.17, "total margin")
     eq(t.get("estimated"), True, "totals estimated flag (some line estimated)")
     eq(rep.get("estimated_lines"), 1, "estimated_lines")
 
@@ -94,7 +90,7 @@ def _():
     prod = {it["product_id"]: it for it in reps["product"]["items"]}
     x = prod.get(w["X"]["id"])
     if check(x is not None, "X row"):
-        eq((x["revenue"], x["cost"], x["qty"]), (700, 334, 7), "X: revenue 500+300-100, cost 230+156-52, net qty 7")
+        eq((x["revenue"], x["cost"], x["qty"]), (700, 338, 7), "X: revenue 500+300-100, cost 230+162-54, net qty 7")
     dv = [it for it in reps["product"]["items"] if it.get("product_code") == "DV"]
     if check(len(dv) == 1, "DV row in product grouping"):
         eq((dv[0]["revenue"], dv[0]["cost"]), (200, 0), "service: revenue counted, cost 0")
@@ -103,7 +99,7 @@ def _():
         eq((y["cost"], y["estimated"]), (140, True), "Y estimated")
     cu = {it["partner_id"]: it for it in reps["customer"]["items"]}
     eq(cu.get(w["K1"]["id"], {}).get("revenue"), 900, "customer K1 revenue 700+300-100")
-    eq(cu.get(w["K1"]["id"], {}).get("cost"), 334, "customer K1 cost")
+    eq(cu.get(w["K1"]["id"], {}).get("cost"), 338, "customer K1 cost")
     eq(cu.get(w["K2"]["id"], {}).get("revenue"), 300, "customer K2 revenue")
     sales = admin().ok("GET", "/reports/sales", params={**R25, "include_returns": "true"})
     eq(reps["document"]["totals"]["revenue"], sales["total_amount"], "profit revenue = sales report (include_returns) total")
@@ -111,7 +107,7 @@ def _():
     r = profit(group_by="document", partner_id=w["K2"]["id"], **R25)
     eq(r["totals"]["revenue"], 300, "partner filter")
     r = profit(group_by="product", product_id=w["X"]["id"], **R25)
-    eq((r["totals"]["revenue"], r["totals"]["cost"]), (700, 334), "product filter")
+    eq((r["totals"]["revenue"], r["totals"]["cost"]), (700, 338), "product filter")
 
 
 @test("C7", "test_C7_whole_database_consistency")
@@ -139,7 +135,7 @@ def _():
         if not wb:
             continue
         nums = xlsx_numbers(r.content)
-        for v in (1200, 474, 726):
+        for v in (1200, 478, 722):
             check(any(abs(x - v) < 0.001 for x in nums), f"profit xlsx {g}: total {v} present as number")
         txt = xlsx_text(wb)
         check("ước tính" in txt.lower() or "Ước tính" in txt, f"profit xlsx {g}: estimated marker present")
@@ -161,7 +157,7 @@ def _():
         eq(r.status, 200, "edit back-dated purchase price 30 -> 130")
         rep = profit(group_by="document", **R25)
         rows = {it["document_id"]: it for it in rep["items"]}
-        # avg(01-10) = (400+600+650)/25 = 66 -> 330
+        # moving avg at 01-10 = (400+600+650)/25 = 66 -> 5 x 66 = 330
         eq(rows[w["d1"]["id"]]["cost"], 330, "d1 cost recomputed after editing the back-dated purchase")
         r = a.put(f"/documents/{d['id']}", put_body_from(get_doc(d["id"]), lines=[L(w["X"]["id"], 5, 30)]))
         eq(r.status, 200, "restore")
@@ -177,9 +173,9 @@ def _():
     posted("purchase", "2025-03-01", k1, [L(p["id"], 3, "33.33")], s["id"])          # amount round(99.99)=100
     posted("purchase", "2025-03-02", k1, [L(p["id"], "0.5", "1000000000")], s["id"])  # amount 500.000.000
     d = posted("sale", "2025-03-03", k1, [L(p["id"], "1.25", "400000000")], c["id"], confirm_loss=True)
-    # avg = (100 + 500000000) / 3.5 = 142857171.428571... ; cost = round(1.25 * avg) = round(178571464.2857) = 178571464
+    # moving avg = (100 + 500000000) / 3.5 = 142857171.428571... ; cost = round(1.25 * avg) = round(178571464.2857) = 178571464
     rep = profit(group_by="document", **{"from": "2025-03-01", "to": "2025-03-31"})
     row = {it["document_id"]: it for it in rep["items"]}.get(d["id"])
     if check(row is not None, "row present"):
         eq(row["revenue"], 500000000, "revenue 1.25 x 400.000.000")
-        eq(row["cost"], 178571464, "cost uses line amounts (rounded) and an unrounded average (O6)")
+        eq(row["cost"], 178571464, "cost uses line amounts (rounded) and an unrounded average (P1)")

@@ -77,10 +77,10 @@ export interface RolePermissions {
 export interface PeriodLock {
   lock_date: string | null;
   /** Lịch sử (nếu máy chủ trả) */
-  history?: { at: string; user_name?: string; lock_date: string | null; old_lock_date?: string | null; reason?: string }[];
+  history?: { at: string; user_id?: number; user_name?: string; old_lock_date: string | null; new_lock_date: string | null; reason?: string }[];
 }
 
-export type ImportKind = 'products' | 'partners' | 'opening_stock' | 'opening_debt';
+export type ImportKind = 'products' | 'partners' | 'opening_stock' | 'opening_debt' | 'partner_prices';
 export interface ImportResult {
   kind: ImportKind;
   dry_run: boolean;
@@ -139,6 +139,8 @@ export interface Product {
   purchase_price: number | null; // null: bị che (không có quyền "Xem giá mua")
   is_service: boolean;
   active: boolean;
+  /** Bản mở rộng (min_stock bật): tồn tối thiểu trên tổng các kho; null = không đặt */
+  min_stock?: number | null;
 }
 
 /** GET /products/lookup?optional=1 */
@@ -157,6 +159,7 @@ export interface ProductBody {
   purchase_price: number | null;
   is_service: boolean;
   active: boolean;
+  min_stock?: number | null;
 }
 
 export interface ProductListParams extends ListParams {
@@ -201,6 +204,9 @@ export interface Partner {
   opening_receivable: number | null;
   opening_payable: number | null;
   active: boolean;
+  /** Bản mở rộng (credit_limit bật): hạn mức nợ (null = không hạn mức), số ngày được nợ */
+  credit_limit?: number | null;
+  payment_days?: number | null;
 }
 export type PartnerBody = Omit<Partner, 'id'>;
 export type PartnerType = 'customer' | 'supplier';
@@ -309,6 +315,8 @@ export interface Dashboard {
   low_stock_count: number;
   out_of_stock_count: number;
   low_stock_threshold: number;
+  /** Bản mở rộng: "min_stock" ⇒ sắp hết = tồn ≤ tồn tối thiểu của từng mã */
+  low_stock_rule?: 'min_stock';
   cash_balance: number | null;
   bank_balance: number | null;
   draft_shortage_count: number;
@@ -446,6 +454,8 @@ export interface DocumentBody {
   lines: DocumentLineBody[];
   version?: number;
   confirm_loss?: boolean;
+  /** Bản mở rộng: đã xác nhận vượt hạn mức nợ */
+  confirm_credit?: boolean;
 }
 
 export interface DocumentListParams {
@@ -584,6 +594,9 @@ export interface DraftDemandItem {
   total_stock: number;
   shortage: number;
   drafts: { document_id: number; draft_no: string; doc_date: string; partner_id: number | null; partner_name: string | null; qty: number }[];
+  /** Bản mở rộng (min_stock bật) */
+  min_stock?: number | null;
+  order_more?: number;
 }
 
 // ---------- Giai đoạn 4: thu chi, công nợ, sổ quỹ ----------
@@ -739,4 +752,116 @@ export interface CashBook {
   total_receipt: number;
   total_payment: number;
   closing: number;
+}
+
+// ---------- Bản mở rộng M2 ----------
+export interface LowStockItem {
+  product_id: number;
+  code: string;
+  name: string;
+  unit: string;
+  group_name: string | null;
+  min_stock: number;
+  total_stock: number;
+  need: number;
+}
+
+export type SalePriceSource = 'customer' | 'last_sale' | 'default';
+export interface SalePriceItem {
+  product_id: number;
+  price: number | null;
+  source: SalePriceSource;
+  source_name: string;
+  default_price: number | null;
+  document_id: number | null;
+  doc_no: string | null;
+  doc_date: string | null;
+  note: string | null;
+}
+
+export interface PartnerPrice {
+  product_id: number;
+  product_code: string;
+  product_name: string;
+  unit: string;
+  price: number;
+  default_price: number;
+  note: string | null;
+  updated_by_name: string;
+  updated_at: string;
+}
+
+export interface CreditWarning {
+  partner_id: number;
+  partner_name: string;
+  receivable: number | null;
+  document_amount: number;
+  total_after: number | null;
+  credit_limit: number | null;
+  over: number | null;
+}
+
+export type AgingBucket = 'in_term' | 'd1_30' | 'd31_60' | 'd61_90' | 'over_90';
+export interface AgingOpenItem {
+  date: string;
+  due_date: string;
+  ref_no: string;
+  ref_type: string;
+  document_id: number | null;
+  voucher_id: number | null;
+  amount: number;
+  remaining: number;
+  days_overdue: number;
+  bucket: AgingBucket;
+}
+export interface AgingAmounts {
+  in_term: number;
+  d1_30: number;
+  d31_60: number;
+  d61_90: number;
+  over_90: number;
+  opening: number;
+  prepaid: number;
+  total: number;
+}
+export interface AgingItem extends AgingAmounts {
+  partner_id: number;
+  partner_code: string;
+  partner_name: string;
+  payment_days: number | null;
+  items: AgingOpenItem[];
+}
+export interface DebtAging {
+  as_of: string;
+  items: AgingItem[];
+  totals: AgingAmounts;
+}
+
+export type ProfitGroup = 'document' | 'product' | 'customer';
+export interface ProfitRow {
+  revenue: number;
+  cost: number;
+  profit: number;
+  margin: number | null;
+  estimated: boolean;
+  document_id?: number;
+  doc_no?: string;
+  doc_date?: string;
+  doc_type?: DocType;
+  partner_id?: number | null;
+  partner_code?: string | null;
+  partner_name?: string | null;
+  product_id?: number;
+  product_code?: string;
+  product_name?: string;
+  unit?: string;
+  qty?: number;
+}
+export interface ProfitReport {
+  from: string;
+  to: string;
+  group_by: ProfitGroup;
+  items: ProfitRow[];
+  totals: { revenue: number; cost: number; profit: number; margin: number | null; estimated: boolean };
+  estimated_lines: number;
 }

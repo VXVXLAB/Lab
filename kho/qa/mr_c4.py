@@ -92,9 +92,8 @@ def _():
         r = a.put("/period-lock", {"lock_date": "2024-06-30", "reason": "x" * 100000})
         check(r.status in (200, 400), f"huge reason -> {r.status}")
         r = a.put("/period-lock", {"reason": "no date"})
-        check(r.status in (200, 400), f"missing lock_date -> {r.status}")
-        if r.status == 200:
-            print(f"      note: PUT /period-lock without lock_date accepted -> lock now {a.ok('GET', '/period-lock')['lock_date']}")
+        eq(r.status, 400, "missing lock_date field -> 400 (P4)")
+        eq(a.ok("GET", "/period-lock")["lock_date"], "2024-06-30", "lock unchanged after PUT without lock_date")
         r = set_lock("1999-12-31")
         check(r.status in (200, 400), f"lock before 2000 -> {r.status}")
     finally:

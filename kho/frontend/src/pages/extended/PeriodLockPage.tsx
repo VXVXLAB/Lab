@@ -100,7 +100,7 @@ export function PeriodLockPage() {
       </div>
       {err && <Alert style={{ marginTop: 10, maxWidth: 640 }} type="error" showIcon message={err} />}
       <h3 style={{ marginTop: 24 }}>Lịch sử khóa sổ</h3>
-      {q.data?.history ? (
+      {q.data?.history?.length ? (
         <Table
           size="small"
           rowKey={(_, i) => String(i)}
@@ -109,12 +109,21 @@ export function PeriodLockPage() {
           columns={[
             { title: 'Lúc', dataIndex: 'at', width: 150, render: (v: string) => formatDateTime(v) },
             { title: 'Người làm', dataIndex: 'user_name', width: 200 },
-            { title: 'Khóa đến', dataIndex: 'lock_date', width: 120, render: (v: string | null) => (v ? formatDate(v) : 'Bỏ khóa') },
-            { title: 'Lý do', dataIndex: 'reason' },
+            {
+              title: 'Thay đổi',
+              key: 'chg',
+              width: 260,
+              render: (_, h) => (
+                <>
+                  {h.old_lock_date ? formatDate(h.old_lock_date) : 'Chưa khóa'} → <b>{h.new_lock_date ? formatDate(h.new_lock_date) : 'Bỏ khóa'}</b>
+                </>
+              ),
+            },
+            { title: 'Lý do', dataIndex: 'reason', render: (r?: string) => r || <span className="muted">–</span> },
           ]}
         />
       ) : (
-        <div className="muted">Mỗi lần khóa / lùi / bỏ khóa đều được ghi lại kèm người làm và lý do (nhật ký hệ thống).</div>
+        <div className="muted">Chưa có lần khóa sổ nào.</div>
       )}
     </div>
   );

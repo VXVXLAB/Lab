@@ -21,6 +21,12 @@ const KINDS: { key: ImportKind; label: string; what: string; cols: string }[] = 
   { key: 'partners', label: 'Khách hàng, nhà cung cấp', what: 'Thêm đối tác mới, sửa thông tin đối tác đã có (theo mã).', cols: 'Mã đối tác, Tên đối tác, Là KH, Là NCC, Địa chỉ, Điện thoại, MST' },
   { key: 'opening_stock', label: 'Tồn đầu kỳ', what: 'Tạo phiếu Tồn đầu kỳ TẠM (mỗi kho một phiếu) để bạn xem lại rồi ghi sổ.', cols: 'Mã hàng, Mã kho, Số lượng, Đơn giá' },
   { key: 'opening_debt', label: 'Công nợ đầu kỳ', what: 'Đặt số phải thu / phải trả đầu kỳ của từng đối tác (thay số cũ).', cols: 'Mã đối tác, Phải thu, Phải trả' },
+  {
+    key: 'partner_prices',
+    label: 'Bảng giá riêng',
+    what: 'Thêm / sửa giá riêng của từng khách cho từng mã (theo mã khách + mã hàng). Giá riêng đã có mà không nằm trong file thì giữ nguyên.',
+    cols: 'Mã khách hàng, Mã hàng, Giá, Ghi chú',
+  },
 ];
 
 type Phase = { s: 'idle' } | { s: 'checking'; pct: number } | { s: 'checked'; r: ImportResult } | { s: 'importing'; pct: number; r: ImportResult } | { s: 'done'; r: ImportResult };
@@ -32,7 +38,13 @@ export function ImportPage() {
   const a = useAccess();
   const lockDate = useLockDate();
   const kinds = KINDS.filter((k) =>
-    k.key === 'opening_debt' ? a.isAdmin : k.key === 'opening_stock' ? a.isAdmin || a.can('stock.write') : a.isAdmin || a.can('catalog.write'),
+    k.key === 'opening_debt'
+      ? a.isAdmin
+      : k.key === 'opening_stock'
+        ? a.isAdmin || a.can('stock.write')
+        : k.key === 'partner_prices'
+          ? a.on('price_list') && (a.isAdmin || a.can('sale.write'))
+          : a.isAdmin || a.can('catalog.write'),
   );
   const [kind, setKind] = useState<ImportKind>(kinds[0]?.key ?? 'products');
   const [date, setDate] = useState<Dayjs | null>(todayVn());

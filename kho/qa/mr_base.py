@@ -110,3 +110,19 @@ def _():
         set_features(min_stock=False)
     check("min_stock" not in a.ok("GET", f"/products/{p['id']}"), "field hidden again")
     eq(features()["features"]["min_stock"], False, "off again")
+
+
+@test("F", "test_BASE_audit_endpoint_admin_only")
+def _():
+    """P8: GET /api/audit exists in the base edition too (admin only, read-only)."""
+    a = admin()
+    mk_product(sale=1)
+    r = a.get("/audit", limit=5)
+    eq(r.status, 200, "admin GET /audit in base")
+    if r.status == 200:
+        check(len(r.json["items"]) >= 1 and r.json["items"][0].get("entity"), "rows present")
+    expect_err(user("ketoan").get("/audit"), 403, "FORBIDDEN", "ketoan GET /audit in base")
+    eq(Client(None).get("/audit").status, 401, "anon")
+    j = requests.post(lib.BASE + "/auth/login", json={"username": "admin", "password": "admin123"}).json()
+    eq(sorted(j.get("permissions") or []), sorted(PERMS), "login permissions in base = all 10")
+    check(all(v is False for v in (j.get("features") or {"x": True}).values()), "login features all false in base")

@@ -199,11 +199,7 @@ def _():
         a.put(f"/users/{u['id']}", {"active": False})
     try:
         r = set_features(permissions=False)
-        # spec: "khi còn người dùng mang vai trò mới" -> inactive users still carry the role; both answers accepted,
-        # behaviour noted in the report (409 lists inactive users too).
-        check(r.status in (200, 409), f"permissions off with only inactive new-role users -> {r.status}")
-        if r.status == 409:
-            print("      note: inactive new-role users still block switching permissions off (409)")
+        eq(r.status, 200, "only INACTIVE new-role users -> no 409 (API §10, P9)")
     finally:
         all_features_on()
         for u in active_new:

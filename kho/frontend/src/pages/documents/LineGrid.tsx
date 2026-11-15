@@ -17,6 +17,10 @@ export interface LineHint {
   /** Bán lỗ: giá vốn so sánh */
   /** Bán lỗ: giá mua (null: có lỗ nhưng giá mua bị che với người không có quyền xem giá mua) */
   loss?: number | null;
+  /** Bản mở rộng C6: nguồn giá đang dùng ("Giá riêng của khách"…) */
+  priceTag?: string;
+  /** Bản mở rộng C6: giá đã sửa khác giá theo khách ⇒ "Lưu giá này cho khách" */
+  onSavePrice?: () => void;
   /** Lỗi máy chủ trả về cho dòng này */
   error?: string;
 }
@@ -35,6 +39,8 @@ interface Props {
   onShowLedger?: (p: ProductLite) => void;
   onShowHistory?: (p: ProductLite) => void;
   hints: Record<string, LineHint>;
+  /** Bản mở rộng C6: báo vừa chọn mã cho dòng (giá đang là giá tự điền) */
+  onPicked?: (lineKey: string, productId: number, price: number | null) => void;
   /** Yêu cầu đặt con trỏ từ ngoài (vd. sau lỗi máy chủ) */
   focusRequest?: { key: string; col: Col; n: number } | null;
 }
@@ -44,7 +50,7 @@ interface Props {
  * Bàn phím: Enter đi Mã → SL → Đơn giá → dòng sau (dịch vụ: Mã → Diễn giải → Đơn giá);
  * ↑↓ đổi dòng cùng cột; Ctrl+Delete xóa dòng; Ctrl+Insert chèn dòng phía trên.
  */
-export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInfo, showNote, onToggleNote, onShowLedger, onShowHistory, hints, focusRequest }: Props) {
+export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInfo, showNote, onToggleNote, onShowLedger, onShowHistory, hints, focusRequest, onPicked }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<{ key: string; col: Col } | null>(null);
 
@@ -113,6 +119,7 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
       qty: l.qty ?? 1,
       unit_price: price,
     });
+    if (!p.is_service && l.product?.id !== p.id) onPicked?.(l.key, p.id, price);
     focus(l.key, p.is_service ? 'desc' : 'qty');
   };
 
@@ -357,6 +364,12 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                     ) : cfg.lossCheck && pi && pi.cost_source !== 'none' && pi.cost_price !== null && !readOnly ? (
                       <div className="line-note muted">giá mua {formatMoney(pi.cost_price)}</div>
                     ) : null}
+                    {h.priceTag && <div className="line-note price-src">{h.priceTag}</div>}
+                    {h.onSavePrice && !readOnly && (
+                      <button type="button" className="line-note link-btn" tabIndex={-1} onClick={h.onSavePrice}>
+                        Lưu giá này cho khách
+                      </button>
+                    )}
                   </td>
                 )}
                 {cfg.hasPrice && (

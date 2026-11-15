@@ -7,7 +7,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { PageHeader } from '../../components/PageHeader';
 
 /** Các tính năng đã làm xong (đợt M1). Máy chủ mới trả `available`; máy chủ cũ chưa có thì dùng danh sách này. */
-const READY: FeatureKey[] = ['permissions', 'period_lock', 'import_excel'];
+const READY: FeatureKey[] = ['permissions', 'period_lock', 'import_excel', 'min_stock', 'price_list', 'credit_limit', 'profit_report'];
 
 /** Giải thích bằng lời thường (khi máy chủ chưa gửi `description`). */
 const ABOUT: Record<FeatureKey, { what: string; on: string; off: string }> = {
@@ -26,10 +26,26 @@ const ABOUT: Record<FeatureKey, { what: string; on: string; off: string }> = {
     on: 'Thêm màn Danh mục › Nhập từ Excel.',
     off: 'Ẩn màn nhập Excel. Dữ liệu đã nhập vẫn giữ nguyên.',
   },
-  min_stock: { what: 'Đặt mức tồn tối thiểu riêng cho từng mã hàng; "Hàng cần đặt" dùng mức này.', on: '', off: '' },
-  price_list: { what: 'Bảng giá riêng theo khách hàng, tự điền khi lập phiếu bán.', on: '', off: '' },
-  credit_limit: { what: 'Hạn mức nợ cho từng khách và báo cáo tuổi nợ.', on: '', off: '' },
-  profit_report: { what: 'Báo cáo lãi gộp theo phiếu, theo mặt hàng, theo khách.', on: '', off: '' },
+  min_stock: {
+    what: 'Đặt tồn tối thiểu cho từng mã hàng. Mã có tồn (tổng các kho) không quá mức này được báo "dưới mức tối thiểu"; Hàng cần đặt tính luôn số cần đặt thêm để còn đủ mức.',
+    on: 'Thêm ô "Tồn tối thiểu" trong Danh mục › Hàng hóa, báo cáo "Hàng dưới mức tối thiểu"; ô "Hàng sắp hết" ở Tổng quan dùng mức của từng mã.',
+    off: 'Trở lại cách cũ: hàng sắp hết = tồn ≤ 5. Mức tối thiểu đã đặt vẫn được nhớ.',
+  },
+  price_list: {
+    what: 'Mỗi khách có bảng giá riêng. Lập phiếu bán, giá tự điền theo thứ tự: giá riêng của khách → giá bán lần trước cho khách đó → giá bán mặc định; dưới ô giá ghi rõ lấy từ đâu.',
+    on: 'Thêm "Bảng giá riêng" ở Danh mục › Khách hàng, nút "Lưu giá này cho khách" trên phiếu bán, loại "Bảng giá riêng" ở Nhập từ Excel.',
+    off: 'Phiếu bán lại tự điền giá bán mặc định như bản chuẩn. Bảng giá đã lập vẫn được giữ.',
+  },
+  credit_limit: {
+    what: 'Đặt hạn mức nợ và số ngày được nợ cho từng khách. Ghi sổ phiếu bán làm khách nợ vượt hạn mức thì phần mềm hỏi lại (không chặn hẳn). Có báo cáo Tuổi nợ phải thu.',
+    on: 'Thêm ô "Hạn mức nợ", "Số ngày được nợ" ở hồ sơ khách, dòng "Nợ hiện tại / Hạn mức" trên phiếu bán, báo cáo Tuổi nợ phải thu.',
+    off: 'Không còn hỏi khi vượt hạn mức; hạn mức đã đặt vẫn được nhớ.',
+  },
+  profit_report: {
+    what: 'Báo cáo lãi gộp theo phiếu, theo mặt hàng, theo khách. Giá vốn tính bình quân gia quyền sau mỗi lần nhập, chung các kho.',
+    on: 'Thêm báo cáo "Lãi gộp" ở trang Báo cáo (người có quyền xem giá mua và xem báo cáo).',
+    off: 'Ẩn báo cáo Lãi gộp.',
+  },
   stocktake: { what: 'Phiếu kiểm kê: đếm thực tế, tự tính chênh lệch và điều chỉnh tồn.', on: '', off: '' },
   unit_conversion: { what: 'Mua theo thùng, bán theo cái: quy đổi đơn vị tính.', on: '', off: '' },
   vat: { what: 'Thuế GTGT trên phiếu bán, phiếu mua.', on: '', off: '' },

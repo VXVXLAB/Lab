@@ -1,3 +1,5 @@
+import { useFeature } from '../../auth/AuthContext';
+import { minStockApi } from '../../api/extended';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -41,6 +43,11 @@ export function StockSummaryPage() {
   const d = query.data;
   const whs = d?.warehouses ?? [];
   const to = toApiDate(asOf);
+  // Bản mở rộng (tồn tối thiểu): đánh dấu mã có tồn hiện tại ≤ tồn tối thiểu (chỉ khi xem tồn đến hôm nay)
+  const minOn = useFeature('min_stock');
+  const isToday = to === toApiDate(todayVn());
+  const lowQ = useQuery({ queryKey: qk.report('low-stock', {}), queryFn: () => minStockApi.lowStock(), enabled: minOn && isToday });
+  const lowMap = useMemo(() => new Map((minOn && isToday ? (lowQ.data?.items ?? []) : []).map((x) => [x.product_id, x.min_stock])), [minOn, isToday, lowQ.data]);
 
   const openLedger = (r: StockSummaryItem, wh?: number) => drawers.push({ kind: 'ledger', product: pick(r), warehouseId: wh, to });
   const qtyCell = (r: StockSummaryItem, n: number, wh?: number) => (
@@ -69,7 +76,22 @@ export function StockSummaryPage() {
       align: 'right' as const,
       render: (_: unknown, r: StockSummaryItem) => qtyCell(r, r.by_warehouse[String(w.id)] ?? 0, w.id),
     })),
-    { title: 'Tổng tồn', key: 'total', width: 96, align: 'right', render: (_, r) => <b>{qtyCell(r, r.total)}</b> },
+    {
+      title: 'Tổng tồn',
+      key: 'total',
+      width: lowMap.size ? 130 : 96,
+      align: 'right',
+      render: (_, r) => (
+        <>
+          <b>{qtyCell(r, r.total)}</b>
+          {lowMap.has(r.product_id) && (
+            <Tooltip title={`Tồn ≤ tồn tối thiểu ${formatQty(lowMap.get(r.product_id))} — cần đặt thêm`}>
+              <div className="min-flag">≤ tối thiểu {formatQty(lowMap.get(r.product_id))}</div>
+            </Tooltip>
+          )}
+        </>
+      ),
+    },
   ];
   const summary = d
     ? [
@@ -124,6 +146,7 @@ export function StockSummaryPage() {
           summary={summary}
           minWidth={560 + whs.length * 84 + 96}
           onOpen={(r) => openLedger(r)}
+          rowClassName={lowMap.size ? (r) => (lowMap.has(r.product_id) ? 'row-low' : '') : undefined}
           emptyText={dq || groupId || warehouseId ? 'Không có mã nào khớp điều kiện lọc.' : 'Chưa có hàng nào có số tồn. Nhập tồn đầu kỳ (Kho › Tồn đầu kỳ) hoặc ghi sổ phiếu nhập mua để có số tồn.'}
         />
       </div>

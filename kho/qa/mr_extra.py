@@ -242,13 +242,12 @@ def _():
     s, c = mk_partner(supp=True), mk_partner(cust=True)
     posted("purchase", "2025-06-01", k1, [L(p["id"], 2, 50)], s["id"])
     d1 = posted("sale", "2025-06-01", k1, [L(p["id"], 1, 100)], c["id"])
-    posted("purchase_return", "2025-06-02", k1, [L(p["id"], 1, 50)], s["id"])  # qty 1 left (cum. qty 1, value 50)
-    posted("purchase", "2025-06-03", k1, [L(p["id"], 1, 80)], s["id"])  # cum qty 2, value 130 -> 65
+    posted("purchase_return", "2025-06-02", k1, [L(p["id"], 1, 50)], s["id"])  # 06-01: q2 v100, sale 1 -> q1 v50; return -> q0 v0
+    posted("purchase", "2025-06-03", k1, [L(p["id"], 1, 80)], s["id"])  # qty was 0 -> avg = 80
     d2 = posted("sale", "2025-06-03", k1, [L(p["id"], 1, 100)], c["id"])
     rows = {it["document_id"]: it for it in profit(group_by="document", **{"from": "2025-06-01", "to": "2025-06-30"})["items"]}
     eq((rows.get(d1["id"], {}).get("cost"), rows.get(d1["id"], {}).get("estimated")), (50, False), "same-day purchase counts")
-    # inputs up to 06-03: 2@50 (100) - return 1@50 (50) + 1@80 (80) -> qty 2, value 130 -> avg 65
-    eq(rows.get(d2["id"], {}).get("cost"), 65, "avg after a supplier return and a re-purchase")
+    eq(rows.get(d2["id"], {}).get("cost"), 80, "stock emptied by a supplier return, re-bought @80 -> cost 80")
 
 
 @test("C8", "test_C8_credit_confirmation_history_masked_for_user_without_debt_view")
@@ -309,20 +308,16 @@ def _():
         clear_lock()
 
 
-@test("C7", "test_C7_cumulative_average_ignores_stock_on_hand_documented")
+@test("C7", "test_C7_spec_example_moving_average")
 def _():
-    """Spec C7: average over ALL purchases + opening up to the sale date, regardless of what was sold in between.
-    Bought 100 @10 (2025-07-01), sold all 100 (07-02), bought 1 @100 (07-03), sold 1 @120 (07-04).
-    Spec value: avg = (1000+100)/101 = 10.89 -> cost 11, profit 109 although the unit really cost 100 (true profit 20).
-    The test asserts the SPEC value (so it passes) and prints the gap for the report."""
+    """SPEC_MO_RONG C7 worked example: buy 100 @10, sell all, buy 1 @100, sell 1 @120 -> last cost 100, profit 20."""
     k1 = wh("KHO1")
     p = mk_product(sale=120, purchase=10)
     s, c = mk_partner(supp=True), mk_partner(cust=True)
     posted("purchase", "2025-07-01", k1, [L(p["id"], 100, 10)], s["id"])
-    posted("sale", "2025-07-02", k1, [L(p["id"], 100, 12)], c["id"])
+    d0 = posted("sale", "2025-07-02", k1, [L(p["id"], 100, 12)], c["id"])
     posted("purchase", "2025-07-03", k1, [L(p["id"], 1, 100)], s["id"])
     d = posted("sale", "2025-07-04", k1, [L(p["id"], 1, 120)], c["id"])
-    row = {it["document_id"]: it for it in profit(group_by="document", **{"from": "2025-07-01", "to": "2025-07-31"})["items"]}.get(d["id"])
-    if check(row is not None, "row"):
-        eq(row["cost"], 11, "spec rule: cumulative average 1100/101 -> cost 11")
-        print(f"      note: last unit bought at 100 is costed at {row['cost']} -> profit {row['profit']} (moving average would give cost 100, profit 20)")
+    rows = {it["document_id"]: it for it in profit(group_by="document", **{"from": "2025-07-01", "to": "2025-07-31"})["items"]}
+    eq((rows.get(d0["id"], {}).get("cost"), rows.get(d0["id"], {}).get("profit")), (1000, 200), "first sale 100 @10")
+    eq((rows.get(d["id"], {}).get("cost"), rows.get(d["id"], {}).get("profit")), (100, 20), "spec example: cost 100, profit 20")
