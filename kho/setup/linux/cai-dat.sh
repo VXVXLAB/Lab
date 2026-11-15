@@ -7,6 +7,7 @@
 #     -> chưa có tên miền:                sudo TEN_MIEN=IP ./cai-dat.sh   (HTTPS chứng thư tự ký, trình duyệt sẽ cảnh báo)
 # Chạy lại trên máy đã cài = nâng cấp (sao lưu trước, giữ nguyên dữ liệu).
 set -euo pipefail
+trap 'echo; echo "LỖI: cài đặt dừng ở dòng $LINENO (lệnh: $BASH_COMMAND). Chụp màn hình này gửi người hỗ trợ."' ERR
 [ "$(id -u)" = 0 ] || { echo "Hãy chạy bằng sudo."; exit 1; }
 GOI="$(cd "$(dirname "$0")" && pwd)"
 DIR=/opt/kho; ENVF=$DIR/kho.env; CONG=8080; TEN_MIEN="${TEN_MIEN:-}"
@@ -33,10 +34,13 @@ fi
 echo "== CÀI MỚI vào $DIR"
 MK=""; while [ ${#MK} -lt 6 ]; do read -r -s -p 'Đặt mật khẩu tài khoản quản trị "admin" (ít nhất 6 ký tự): ' MK; echo; done
 echo "== 1/5 Cài PostgreSQL"
-command -v psql >/dev/null || { apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql curl; }
+command -v psql >/dev/null || { apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql; }
+command -v curl >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl
+# Chạy lại sau một lần cài dở: role/CSDL có thể đã có.
+su postgres -c "psql -Atqc \"SELECT 1 FROM pg_roles WHERE rolname='kho'\"" | grep -q 1 && { echo "LỖI: đã có role kho từ lần cài trước nhưng thiếu $ENVF. Xóa bằng: sudo -u postgres dropdb --if-exists kho; sudo -u postgres dropuser kho  rồi chạy lại."; exit 1; } || true
 systemctl enable --now postgresql
 echo "== 2/5 Tạo cơ sở dữ liệu"
-PW=$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 24)
+PW=$(head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | cut -c1-24)   # không dùng 'tr </dev/urandom | head': pipefail làm script thoát im lặng
 su postgres -c "psql -v ON_ERROR_STOP=1 -qc \"CREATE ROLE kho LOGIN PASSWORD '$PW'\""
 su postgres -c "psql -v ON_ERROR_STOP=1 -qc \"CREATE DATABASE kho OWNER kho ENCODING 'UTF8' TEMPLATE template0\""
 echo "== 3/5 Chép chương trình và cấu hình"
