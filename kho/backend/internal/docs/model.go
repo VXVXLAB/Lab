@@ -19,6 +19,7 @@ const (
 	TypePurchaseReturn = "purchase_return"
 	TypeTransfer       = "transfer"
 	TypeOpening        = "opening"
+	TypeStocktake      = "stocktake" // bản mở rộng C9
 
 	StatusDraft  = "draft"
 	StatusPosted = "posted"
@@ -32,6 +33,7 @@ var TypeNames = map[string]string{
 	TypePurchaseReturn: "Phiếu xuất trả hàng nhà cung cấp",
 	TypeTransfer:       "Phiếu chuyển kho nội bộ",
 	TypeOpening:        "Phiếu nhập tồn đầu kỳ",
+	TypeStocktake:      "Phiếu kiểm kê",
 }
 
 // NumberPrefix là tiền tố số chứng từ chính thức theo loại.
@@ -42,6 +44,7 @@ var NumberPrefix = map[string]string{
 	TypePurchaseReturn: "XK",
 	TypeTransfer:       "CK",
 	TypeOpening:        "TDK",
+	TypeStocktake:      "KK",
 }
 
 // needsCustomer / needsSupplier / allowsService.
@@ -70,6 +73,50 @@ type Line struct {
 	UnitPrice   *decimal.Decimal `json:"unit_price"`
 	Amount      decimal.Decimal  `json:"amount"`
 	Note        string           `json:"note"`
+	// Bản mở rộng (chỉ có trong JSON khi tính năng bật hoặc dữ liệu có giá trị khác mặc định):
+	*LineUnit  // C10 quy đổi đơn vị
+	*LineVAT   // C11 thuế GTGT
+	*LineCount // C9 kiểm kê
+
+	factor   decimal.Decimal  // hệ số quy đổi đã lưu (1 nếu không quy đổi)
+	baseQty  decimal.Decimal  // SL quy về đơn vị gốc
+	vatRate  *decimal.Decimal // thuế suất đã lưu
+	tax      decimal.Decimal  // tiền thuế dòng
+	bookQty  *decimal.Decimal // tồn sổ sách đã lưu khi ghi sổ (kiểm kê)
+	baseUnit string           // đơn vị gốc của mặt hàng
+}
+
+// LineUnit: SL / đơn giá của dòng theo đơn vị đã chọn; 1 đơn vị đó = factor đơn vị gốc.
+type LineUnit struct {
+	Factor   decimal.Decimal `json:"factor"`
+	BaseQty  decimal.Decimal `json:"base_qty"`
+	BaseUnit string          `json:"base_unit"`
+}
+
+// LineVAT là thuế GTGT của dòng (vat_rate null = không thuế).
+type LineVAT struct {
+	VatRate       *decimal.Decimal `json:"vat_rate"`
+	TaxAmount     decimal.Decimal  `json:"tax_amount"`
+	AmountWithTax decimal.Decimal  `json:"amount_with_tax"`
+}
+
+// LineCount là số liệu kiểm kê của dòng (đơn vị gốc).
+type LineCount struct {
+	// BookQty: tồn sổ sách cuối ngày phiếu tại kho — phiếu tạm: tính lúc xem; đã ghi sổ: số đã dùng khi ghi sổ.
+	BookQty    decimal.Decimal `json:"book_qty"`
+	CountedQty decimal.Decimal `json:"counted_qty"`
+	DiffQty    decimal.Decimal `json:"diff_qty"` // thực tế − sổ sách (> 0 thừa, < 0 thiếu)
+	// Phiếu đã ghi sổ: tồn sổ sách tính lại theo sổ hiện tại (không gồm chính phiếu này); BookChanged = khác BookQty
+	// (có chứng từ lùi ngày sửa lịch sử sau khi kiểm kê — điều chỉnh của phiếu giữ nguyên như lúc ghi sổ).
+	CurrentBookQty *decimal.Decimal `json:"current_book_qty"`
+	BookChanged    bool             `json:"book_changed"`
+}
+
+// DocVAT là tổng tiền của phiếu có thuế: tiền hàng, tiền thuế, tổng thanh toán (= total_amount) bằng chữ.
+type DocVAT struct {
+	GoodsAmount   decimal.Decimal `json:"goods_amount"`
+	TaxAmount     decimal.Decimal `json:"tax_amount"`
+	AmountInWords string          `json:"amount_in_words"`
 }
 
 // Warning là cảnh báo trên chứng từ.
@@ -122,6 +169,11 @@ type Document struct {
 	Warnings        []Warning        `json:"warnings"`
 	OldDebt         *decimal.Decimal `json:"old_debt"`
 	TotalDebt       *decimal.Decimal `json:"total_debt"`
+	*DocVAT                          // C11: chỉ khi có thuế / tính năng vat bật (phiếu mua, bán, trả hàng)
+	// BookChangedLines (C9, phiếu kiểm kê đã ghi sổ): số dòng có tồn sổ sách hiện tại khác lúc ghi sổ.
+	BookChangedLines *int `json:"book_changed_lines,omitempty"`
+
+	taxAmount decimal.Decimal
 }
 
 // Summary là một dòng trong danh sách chứng từ.
@@ -162,6 +214,8 @@ type LineInput struct {
 	Qty         *decimal.Decimal `json:"qty"`
 	UnitPrice   *decimal.Decimal `json:"unit_price"`
 	Note        string           `json:"note"`
+	// VatRate (C11): không gửi ⇒ dòng có id giữ thuế suất đang lưu, dòng mới lấy mặc định; null ⇒ không thuế.
+	VatRate util.OptDec `json:"vat_rate"`
 }
 
 // Input là dữ liệu tạo/sửa chứng từ.

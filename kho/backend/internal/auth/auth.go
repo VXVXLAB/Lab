@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/text/unicode/norm"
 
 	"kho/internal/apperr"
 	"kho/internal/ext"
@@ -57,7 +58,9 @@ func (s *Service) Login(ctx context.Context, username, password string) (*User, 
 	}
 	var hash string
 	var u User
-	err := s.Pool.QueryRow(ctx, `SELECT `+userCols+`, password_hash FROM users WHERE lower(username)=lower($1)`, username).
+	// Tên đăng nhập so ở dạng NFC (tên lưu trước khi máy chủ chuẩn hóa NFC có thể là NFD).
+	err := s.Pool.QueryRow(ctx, `SELECT `+userCols+`, password_hash FROM users WHERE normalize(lower(username), NFC) = normalize(lower($1), NFC)
+		ORDER BY (username = $1) DESC, id LIMIT 1`, username).
 		Scan(&u.ID, &u.Username, &u.FullName, &u.Role, &u.Active, &u.CreatedAt, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", apperr.Unauthorized("Sai tên đăng nhập hoặc mật khẩu")
@@ -65,7 +68,8 @@ func (s *Service) Login(ctx context.Context, username, password string) (*User, 
 	if err != nil {
 		return nil, "", err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+	ok, rehash := matchPassword(hash, password)
+	if !ok {
 		return nil, "", apperr.Unauthorized("Sai tên đăng nhập hoặc mật khẩu")
 	}
 	if !u.Active {
@@ -76,6 +80,12 @@ func (s *Service) Login(ctx context.Context, username, password string) (*User, 
 		return nil, "", err
 	}
 	token := hex.EncodeToString(buf)
+	if rehash {
+		// Mật khẩu lưu trước khi chuẩn hóa NFC (băm từ dạng khác): băm lại theo dạng NFC.
+		if h, err := s.hash(password); err == nil {
+			_, _ = s.Pool.Exec(ctx, `UPDATE users SET password_hash=$2 WHERE id=$1`, u.ID, h)
+		}
+	}
 	if _, err := s.Pool.Exec(ctx, `INSERT INTO sessions(token,user_id,expires_at) VALUES ($1,$2,$3)`, token, u.ID, time.Now().Add(SessionTTL)); err != nil {
 		return nil, "", err
 	}
@@ -115,6 +125,8 @@ type UserInput struct {
 	FullName string `json:"full_name"`
 	Role     string `json:"role"`
 	Active   *bool  `json:"active"`
+	// ActorID: người thực hiện (ghi nhật ký); không nhận từ JSON.
+	ActorID int64 `json:"-"`
 }
 
 // ListUsers liệt kê người dùng.
@@ -132,7 +144,24 @@ func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
 	})
 }
 
+// matchPassword so mật khẩu với bản băm: dạng NFC trước, rồi đúng các byte gửi lên, rồi dạng NFD (mật khẩu đặt trước khi
+// máy chủ chuẩn hóa NFC). rehash = khớp nhưng không phải ở dạng NFC ⇒ nên băm lại theo NFC.
+func matchPassword(hash, pw string) (ok, rehash bool) {
+	nfc := norm.NFC.String(pw)
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(nfc)) == nil {
+		return true, false
+	}
+	for _, alt := range []string{pw, norm.NFD.String(pw)} {
+		if alt != nfc && bcrypt.CompareHashAndPassword([]byte(hash), []byte(alt)) == nil {
+			return true, true
+		}
+	}
+	return false, false
+}
+
+// hash băm mật khẩu ở dạng NFC.
 func (s *Service) hash(pw string) (string, error) {
+	pw = norm.NFC.String(pw)
 	cost := s.BcryptCost
 	if cost == 0 {
 		cost = bcrypt.DefaultCost
@@ -178,6 +207,9 @@ func (s *Service) CreateUser(ctx context.Context, in UserInput) (*User, error) {
 		}
 		return nil, err
 	}
+	if err := s.audit(ctx, in.ActorID, u.ID, "created", nil, userAudit(u)); err != nil {
+		return nil, err
+	}
 	return u, nil
 }
 
@@ -190,6 +222,7 @@ func (s *Service) UpdateUser(ctx context.Context, id int64, in UserInput) (*User
 	if err != nil {
 		return nil, err
 	}
+	before := userAudit(cur)
 	if strings.TrimSpace(in.FullName) != "" {
 		cur.FullName = strings.TrimSpace(in.FullName)
 	}
@@ -240,6 +273,24 @@ func (s *Service) UpdateUser(ctx context.Context, id int64, in UserInput) (*User
 	if !u.Active {
 		_, _ = s.Pool.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, id)
 	}
+	after := userAudit(u)
+	action := "updated"
+	switch {
+	case before["active"] == true && !u.Active:
+		action = "deactivated"
+	case before["active"] == false && u.Active:
+		action = "activated"
+	case before["role"] != u.Role:
+		action = "role_changed"
+	case in.Password != "":
+		action = "password_reset"
+	}
+	if in.Password != "" {
+		after["password_reset"] = true
+	}
+	if err := s.audit(ctx, in.ActorID, u.ID, action, before, after); err != nil {
+		return nil, err
+	}
 	return u, nil
 }
 
@@ -255,7 +306,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID int64, currentToken
 	if err := s.Pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, userID).Scan(&hash); err != nil {
 		return err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(oldPassword)) != nil {
+	if ok, _ := matchPassword(hash, oldPassword); !ok {
 		return apperr.ValidationField("old_password", "Mật khẩu hiện tại không đúng")
 	}
 	h, err := s.hash(newPassword)
@@ -265,6 +316,23 @@ func (s *Service) ChangePassword(ctx context.Context, userID int64, currentToken
 	if _, err := s.Pool.Exec(ctx, `UPDATE users SET password_hash=$2 WHERE id=$1`, userID, h); err != nil {
 		return err
 	}
-	_, err = s.Pool.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1 AND token<>$2`, userID, currentToken)
+	if _, err = s.Pool.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1 AND token<>$2`, userID, currentToken); err != nil {
+		return err
+	}
+	return s.audit(ctx, userID, userID, "password_changed", nil, map[string]any{"password_changed": true})
+}
+
+// audit ghi nhật ký người dùng (entity "user"); không bao giờ ghi mật khẩu hay bản băm.
+func (s *Service) audit(ctx context.Context, actorID, userID int64, action string, before, after any) error {
+	var actor any
+	if actorID != 0 {
+		actor = actorID
+	}
+	_, err := s.Pool.Exec(ctx, `INSERT INTO audit_log(user_id,entity,entity_id,action,before,after) VALUES ($1,'user',$2,$3,$4,$5)`,
+		actor, userID, action, before, after)
 	return err
+}
+
+func userAudit(u *User) map[string]any {
+	return map[string]any{"username": u.Username, "full_name": u.FullName, "role": u.Role, "active": u.Active}
 }

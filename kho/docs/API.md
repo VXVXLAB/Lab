@@ -791,4 +791,4 @@ nhập mới chỉ được áp dụng khi **có gửi** và tính năng bật (
               "before": {"lock_date": null}, "after": {"lock_date": "2024-06-30", "reason": "Chốt sổ"}}],
    "total": 37, "limit": 100, "offset": 0}
   ```
-  Các `entity` thường gặp: `features`, `role_permissions`, `period_lock`, `import`, `document`, `voucher`, `product`, `partner`, `product_group`, `warehouse`, `cash_account`, `partner_prices`, `settings` (thay đổi người dùng chưa ghi nhật ký).
+  Các `entity` thường gặp: `features`, `role_permissions`, `period_lock`, `import`, `document`, `voucher`, `product`, `partner`, `product_group`, `warehouse`, `cash_account`, `partner_prices`, `settings`, `user` (action `created`, `role_changed`, `deactivated`, `activated`, `password_reset`, `password_changed`, `updated`; before/after có username, full_name, role, active — không bao giờ có mật khẩu). `to` < `from` ⇒ 400.

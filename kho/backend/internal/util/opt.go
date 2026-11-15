@@ -101,3 +101,66 @@ func (o *OptDate) UnmarshalJSON(b []byte) error {
 	o.Set = true
 	return o.Val.UnmarshalJSON(b)
 }
+
+// OptStr là trường chuỗi tùy chọn (như OptDec): Set=false ⇒ không gửi; Val=nil ⇒ gửi null.
+type OptStr struct {
+	Set bool
+	Val *string
+}
+
+// UnmarshalJSON đọc chuỗi / số / null (số được đổi thành chuỗi, vd. thuế suất 10 ⇒ "10").
+func (o *OptStr) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	t := bytes.TrimSpace(b)
+	if bytes.Equal(t, []byte("null")) {
+		o.Val = nil
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(t, &s); err != nil {
+		var n json.Number
+		if err2 := json.Unmarshal(t, &n); err2 != nil {
+			return fmt.Errorf("phải là chuỗi")
+		}
+		s = n.String()
+	}
+	o.Val = &s
+	return nil
+}
+
+// NullStr là chuỗi có thể NULL (đọc từ CSDL, ghi JSON null/chuỗi).
+type NullStr struct {
+	S     string
+	Valid bool
+}
+
+// Scan đọc từ CSDL.
+func (n *NullStr) Scan(src any) error {
+	switch v := src.(type) {
+	case nil:
+		n.Valid = false
+	case string:
+		n.S, n.Valid = v, true
+	case []byte:
+		n.S, n.Valid = string(v), true
+	default:
+		return fmt.Errorf("không đọc được chuỗi %T", src)
+	}
+	return nil
+}
+
+// Value ghi vào CSDL.
+func (n NullStr) Value() (driver.Value, error) {
+	if !n.Valid {
+		return nil, nil
+	}
+	return n.S, nil
+}
+
+// MarshalJSON ghi null hoặc chuỗi.
+func (n NullStr) MarshalJSON() ([]byte, error) {
+	if !n.Valid {
+		return []byte("null"), nil
+	}
+	return json.Marshal(n.S)
+}

@@ -83,7 +83,12 @@ func hasJSONNul(b []byte) bool {
 	}
 }
 
-func decode(r *http.Request, v any) error {
+func decode(r *http.Request, v any) error { return decodeBody(r, v, true) }
+
+// decodeRaw như decode nhưng KHÔNG chuẩn hóa NFC (đăng nhập / đổi mật khẩu: so mật khẩu đúng các byte gửi lên).
+func decodeRaw(r *http.Request, v any) error { return decodeBody(r, v, false) }
+
+func decodeBody(r *http.Request, v any, nfc bool) error {
 	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxBody))
 	if err != nil {
 		var mbe *http.MaxBytesError
@@ -95,7 +100,9 @@ func decode(r *http.Request, v any) error {
 	if hasJSONNul(raw) {
 		return errNUL("")
 	}
-	raw = nfcJSON(raw)
+	if nfc {
+		raw = nfcJSON(raw)
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	if err := dec.Decode(v); err != nil {

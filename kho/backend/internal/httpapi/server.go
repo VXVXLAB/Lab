@@ -208,7 +208,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := decode(r, &in); err != nil {
+	if err := decodeRaw(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -258,7 +258,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		OldPassword string `json:"old_password"`
 		NewPassword string `json:"new_password"`
 	}
-	if err := decode(r, &in); err != nil {
+	if err := decodeRaw(r, &in); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -312,6 +312,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	in.ActorID = userOf(r).ID
 	u, err := s.Auth.CreateUser(r.Context(), in)
 	if err != nil {
 		writeErr(w, r, err)
@@ -336,6 +337,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	in.ActorID = userOf(r).ID
 	u, err := s.Auth.UpdateUser(r.Context(), id, in)
 	if err != nil {
 		writeErr(w, r, err)

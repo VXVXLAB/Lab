@@ -43,6 +43,10 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, apperr.ValidationField("limit", "limit phải từ 1 đến 1000"))
 		return
 	}
+	if from != nil && to != nil && to.Before(from.Time) {
+		writeErr(w, r, apperr.ValidationField("to", "Ngày kết thúc phải sau ngày bắt đầu"))
+		return
+	}
 	if offset < 0 {
 		writeErr(w, r, apperr.ValidationField("offset", "offset không được âm"))
 		return

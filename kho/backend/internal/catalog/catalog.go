@@ -16,6 +16,7 @@ import (
 	"kho/internal/ext"
 	"kho/internal/stock"
 	"kho/internal/util"
+	"kho/internal/vat"
 )
 
 // Service xử lý danh mục.
@@ -274,6 +275,10 @@ type Product struct {
 	Active        bool            `json:"active"`
 	// MinStock (bản mở rộng C5): chỉ có trong JSON khi tính năng min_stock bật (lớp HTTP gán; nil ⇒ không có trường).
 	MinStock *decimal.NullDecimal `json:"min_stock,omitempty"`
+	// VatRate (C11): mã thuế suất mặc định ("KCT", "0", "5", "8", "10"; null = theo mặc định chung) — chỉ khi vat bật.
+	VatRate *util.NullStr `json:"vat_rate,omitempty"`
+	// Units (C10): đơn vị quy đổi — chỉ ở GET một mặt hàng / tra mã khi unit_conversion bật.
+	Units *[]ProductUnit `json:"units,omitempty" db:"-"`
 }
 
 // ProductInput là dữ liệu tạo/sửa mặt hàng.
@@ -288,9 +293,11 @@ type ProductInput struct {
 	Active        *bool            `json:"active"`
 	// MinStock (C5): chỉ áp dụng khi gửi lên (lớp HTTP bỏ qua khi tính năng tắt); null ⇒ bỏ tồn tối thiểu.
 	MinStock util.OptDec `json:"min_stock"`
+	// VatRate (C11): chỉ áp dụng khi gửi lên và tính năng vat bật; null ⇒ theo mặc định chung.
+	VatRate util.OptStr `json:"vat_rate"`
 }
 
-const productSelect = `SELECT p.id,p.code,p.name,p.unit,p.group_id,g.code,g.name,p.sale_price,p.purchase_price,p.is_service,p.active,p.min_stock
+const productSelect = `SELECT p.id,p.code,p.name,p.unit,p.group_id,g.code,g.name,p.sale_price,p.purchase_price,p.is_service,p.active,p.min_stock,p.vat_rate
 	FROM products p LEFT JOIN product_groups g ON g.id=p.group_id`
 
 // ProductFilter là bộ lọc danh sách mặt hàng.
@@ -397,6 +404,9 @@ func (s *Service) SaveProduct(ctx context.Context, userID, id int64, in ProductI
 	if in.MinStock.Val != nil && in.MinStock.Val.IsNegative() {
 		return nil, apperr.ValidationField("min_stock", "Tồn tối thiểu không được âm")
 	}
+	if err := vat.CheckCode("vat_rate", in.VatRate.Val); err != nil {
+		return nil, err
+	}
 	var minStock *decimal.Decimal
 	if in.MinStock.Val != nil {
 		v := in.MinStock.Val.Round(3)
@@ -413,9 +423,9 @@ func (s *Service) SaveProduct(ctx context.Context, userID, id int64, in ProductI
 		var before *Product
 		var newID int64
 		if id == 0 {
-			err := tx.QueryRow(ctx, `INSERT INTO products(code,name,unit,group_id,sale_price,purchase_price,is_service,active,search_key,min_stock)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-				in.Code, in.Name, in.Unit, in.GroupID, sale, purchase, in.IsService, activeOr(in.Active), key, minStock).Scan(&newID)
+			err := tx.QueryRow(ctx, `INSERT INTO products(code,name,unit,group_id,sale_price,purchase_price,is_service,active,search_key,min_stock,vat_rate)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+				in.Code, in.Name, in.Unit, in.GroupID, sale, purchase, in.IsService, activeOr(in.Active), key, minStock, in.VatRate.Val).Scan(&newID)
 			if err != nil {
 				return dupErr(err)
 			}
@@ -428,6 +438,16 @@ func (s *Service) SaveProduct(ctx context.Context, userID, id int64, in ProductI
 			if strings.EqualFold(b.Code, "DV") && (!strings.EqualFold(in.Code, "DV") || !in.IsService) {
 				return apperr.Validation("Không được đổi mã hoặc bỏ tính chất dịch vụ của mã DV")
 			}
+			if !strings.EqualFold(b.Unit, in.Unit) {
+				// Đổi đơn vị gốc khi đã có dòng chứng từ dùng hệ số khác 1 (C10) ⇒ SL quy đổi mất nghĩa.
+				var conv bool
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM document_lines WHERE product_id=$1 AND unit_factor <> 1)`, id).Scan(&conv); err != nil {
+					return err
+				}
+				if conv {
+					return apperr.ValidationField("unit", "Mặt hàng đã có chứng từ dùng đơn vị quy đổi, không đổi được đơn vị gốc")
+				}
+			}
 			if b.IsService != in.IsService {
 				var used bool
 				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM document_lines WHERE product_id=$1)`, id).Scan(&used); err != nil {
@@ -438,8 +458,10 @@ func (s *Service) SaveProduct(ctx context.Context, userID, id int64, in ProductI
 				}
 			}
 			_, err = tx.Exec(ctx, `UPDATE products SET code=$2,name=$3,unit=$4,group_id=$5,sale_price=$6,purchase_price=$7,is_service=$8,active=$9,search_key=$10,
-				min_stock = CASE WHEN $11 THEN $12::numeric ELSE min_stock END WHERE id=$1`,
-				id, in.Code, in.Name, in.Unit, in.GroupID, sale, purchase, in.IsService, activeOr(in.Active), key, in.MinStock.Set, minStock)
+				min_stock = CASE WHEN $11 THEN $12::numeric ELSE min_stock END,
+				vat_rate = CASE WHEN $13 THEN $14::text ELSE vat_rate END WHERE id=$1`,
+				id, in.Code, in.Name, in.Unit, in.GroupID, sale, purchase, in.IsService, activeOr(in.Active), key, in.MinStock.Set, minStock,
+				in.VatRate.Set, in.VatRate.Val)
 			if err != nil {
 				return dupErr(err)
 			}
