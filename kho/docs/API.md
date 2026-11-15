@@ -821,6 +821,12 @@ biệt ⇒ hành vi bản chuẩn (dòng không id = dòng mới). "Khóa có m�
 | Người bị che giá: dòng không id cùng mặt hàng với dòng bỏ có đơn giá, gửi `"unit_price": null` | `400 LINE_IDS_REQUIRED`. |
 | Người bị che giá: như trên nhưng **không có** khóa `unit_price` / gửi một số | Dòng mới: giá mua mặc định / giá đã gõ (Q-02, Q-14). |
 
+**Id hợp lệ (QA M-19 / M-20):** id của dòng gửi lên chỉ hợp lệ khi (a) thuộc chính phiếu, (b) là lần xuất hiện **đầu
+tiên** của id đó trong body, (c) mặt hàng của dòng gửi lên (theo `product_id` hoặc mã / bí danh) trùng mặt hàng của dòng
+đang lưu. Id khác bị bỏ qua: dòng được xử lý như dòng không id (dòng mới, lấy mặc định), dòng đang lưu coi như không được
+nhắc tới (áp hàng "bỏ dòng đặc biệt" ở bảng trên). Giữ trường không gửi chỉ qua id hợp lệ hoặc ghép theo vị trí. Áp cho
+mọi loại phiếu (kể cả phiếu thường — đổi mặt hàng của một dòng có id nay là dòng mới, id mới).
+
 `LINE_IDS_REQUIRED` trả trước khi ghi gì: phiếu và `version` không đổi. Giao diện gộp xung đột hiện tại (dòng cũ mang id,
 dòng mới mang khóa `unit` / `vat_rate` tường minh) luôn được nhận.
 

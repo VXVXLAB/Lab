@@ -366,6 +366,33 @@ func lineIDsRequired() error {
 		map[string]any{"field": "lines"})
 }
 
+// NormalizeLineIDs (QA M-19 / M-20): id của dòng gửi lên chỉ HỢP LỆ khi (a) thuộc chính phiếu, (b) là lần xuất hiện
+// đầu tiên của id đó trong body, (c) mặt hàng của dòng gửi lên (product_id hoặc mã / bí danh) trùng mặt hàng của dòng đang
+// lưu. Id khác bị BỎ (đặt 0): dòng được xử lý đúng như dòng không id, dòng đang lưu coi như KHÔNG được nhắc tới — không bao
+// giờ thừa hưởng gì từ dòng đang lưu qua một id không hợp lệ. Mọi chỗ dùng id dòng (ghép, giữ trường không gửi, kiểm tra
+// "bỏ dòng đặc biệt", giữ giá bị che, lưu dòng) đều chạy sau hàm này.
+func NormalizeLineIDs(old *Document, lines []LineInput) {
+	byID := map[int64]*Line{}
+	if old != nil {
+		for i := range old.Lines {
+			byID[old.Lines[i].ID] = &old.Lines[i]
+		}
+	}
+	seen := map[int64]bool{}
+	for i := range lines {
+		id := lines[i].ID
+		if id == 0 {
+			continue
+		}
+		ol, ok := byID[id]
+		if !ok || seen[id] || !sameProduct(lines[i], *ol) {
+			lines[i].ID = 0
+			continue
+		}
+		seen[id] = true
+	}
+}
+
 // MatchLineIDs áp quy tắc id dòng khi sửa một phiếu đang có (QA M-15 … M-18; API §11, bảng quyết định):
 //  1. dòng có id hợp lệ: không đổi gì ở đây (trường không gửi được giữ khi kiểm tra dòng);
 //  2. mọi dòng không id, phiếu có dòng "đặc biệt" (hệ số ≠ 1, thuế suất; hoặc giá bị che với người sửa bị che giá), cùng
@@ -379,7 +406,11 @@ func lineIDsRequired() error {
 //
 // Lỗi luôn trả trước khi ghi gì (phiếu và version không đổi). Phiếu không có dòng đặc biệt ⇒ hành vi bản chuẩn.
 func MatchLineIDs(old *Document, lines []LineInput, maskedPrices bool) error {
-	if old == nil || len(old.Lines) == 0 {
+	if old == nil {
+		return nil
+	}
+	NormalizeLineIDs(old, lines)
+	if len(old.Lines) == 0 {
 		return nil
 	}
 	risky := false
