@@ -89,9 +89,17 @@ Tắt: ngưỡng chung ≤ 5 như cũ.
   Tổng các cột = số nợ trong sổ công nợ cùng ngày (bắt buộc khớp, có test).
 
 ### C7 `profit_report` — lãi gộp
-- Giá vốn một dòng bán = **giá nhập bình quân gia quyền** của mã đó tính trên toàn bộ lượng nhập mua và tồn đầu kỳ đã ghi
-  sổ đến hết ngày bán (4 kho gộp chung); chưa có lượng nhập nào ⇒ dùng giá mua mặc định, đánh dấu "ước tính".
-  Khách trả hàng: giảm doanh thu và giảm giá vốn theo cùng cách. Dịch vụ: giá vốn 0. (Quy tắc cần khách xác nhận.)
+- Giá vốn = **bình quân gia quyền liên hoàn** (sau mỗi lần nhập), tính chung 4 kho, tính lại mỗi lần xem báo cáo:
+  duyệt các dòng sổ kho đã ghi sổ của từng mã theo ngày; trong cùng một ngày xử lý **nhập trước, xuất sau** (nhất quán
+  với quy tắc tồn cuối ngày R6). Giữ (số lượng tồn, giá trị tồn):
+  - nhập mua / tồn đầu kỳ: cộng số lượng và giá trị (SL × đơn giá nhập); nếu trước đó tồn ≤ 0 thì giá bình quân = đơn giá nhập;
+  - bán: giá vốn dòng bán = SL × giá bình quân hiện tại; trừ số lượng và giá trị tương ứng;
+  - khách trả hàng: nhập lại theo giá bình quân hiện tại (giảm doanh thu và giảm giá vốn đúng bằng số đó);
+  - trả hàng NCC: trừ số lượng và trừ giá trị theo đơn giá trên phiếu trả (giá trị tồn không xuống dưới 0);
+  - chuyển kho: bỏ qua; kiểm kê thừa nhập theo giá bình quân hiện tại, thiếu xuất theo giá bình quân hiện tại.
+  Chưa từng có lượng nhập trước khi bán ⇒ dùng giá mua mặc định, đánh dấu "ước tính". Dịch vụ: giá vốn 0.
+  Ví dụ kiểm: mua 100 @10, bán hết, mua 1 @100, bán 1 @120 ⇒ giá vốn dòng cuối 100, lãi 20.
+  (Phương pháp tính giá vốn cần khách xác nhận. Cảnh báo bán lỗ R4 không đổi: vẫn so với giá nhập gần nhất.)
 - Báo cáo theo phiếu / theo mặt hàng / theo khách: doanh thu, giá vốn, lãi gộp, tỷ lệ; ba cách nhóm phải cùng tổng.
   Cần `cost.view`.
 
