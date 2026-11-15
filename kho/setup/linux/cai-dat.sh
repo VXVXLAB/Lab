@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# CÀI ĐẶT / NÂNG CẤP Phần mềm Quản lý kho trên Ubuntu / Debian (có systemd). Chạy:  sudo ./cai-dat.sh
+# CÀI ĐẶT / NÂNG CẤP Phần mềm Quản lý kho trên Ubuntu / Debian (có systemd).
+#   Máy trong mạng nội bộ văn phòng:      sudo ./cai-dat.sh
+#   Máy chủ thuê có IP Internet (VPS):    sudo TEN_MIEN=kho.congty.vn ./cai-dat.sh
+#     -> phần mềm chỉ nghe nội bộ máy (127.0.0.1), Caddy đứng trước lo HTTPS (chứng thư Let's Encrypt tự cấp, tự gia hạn),
+#        tường lửa chỉ mở 22, 80, 443. Tên miền phải trỏ sẵn (bản ghi A) về IP máy chủ TRƯỚC khi chạy.
+#     -> chưa có tên miền:                sudo TEN_MIEN=IP ./cai-dat.sh   (HTTPS chứng thư tự ký, trình duyệt sẽ cảnh báo)
 # Chạy lại trên máy đã cài = nâng cấp (sao lưu trước, giữ nguyên dữ liệu).
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "Hãy chạy bằng sudo."; exit 1; }
 GOI="$(cd "$(dirname "$0")" && pwd)"
-DIR=/opt/kho; ENVF=$DIR/kho.env; CONG=8080
+DIR=/opt/kho; ENVF=$DIR/kho.env; CONG=8080; TEN_MIEN="${TEN_MIEN:-}"
+NGHE=":$CONG"; [ -n "$TEN_MIEN" ] && NGHE="127.0.0.1:$CONG"
 [ -x "$GOI/app/khoserver" ] || { echo "Bộ cài thiếu app/khoserver"; exit 1; }
 
 chep() {
@@ -39,9 +45,10 @@ chep
 cat > $ENVF <<CFG
 # Cấu hình Phần mềm Quản lý kho. Sửa xong: sudo systemctl restart kho
 DATABASE_URL=postgres://kho:$PW@127.0.0.1:5432/kho
-LISTEN_ADDR=:$CONG
+LISTEN_ADDR=$NGHE
 ADMIN_PASSWORD=$MK
 CFG
+[ -n "$TEN_MIEN" ] && echo "COOKIE_SECURE=true" >> $ENVF
 chown -R kho:kho $DIR; chmod 600 $ENVF
 echo "== 4/5 Tự chạy khi bật máy + sao lưu hằng ngày"
 cat > /etc/systemd/system/kho.service <<UNIT
@@ -67,6 +74,35 @@ systemctl daemon-reload; systemctl enable --now kho
 echo "== 5/5 Kiểm tra"
 cho_web || { echo "LỖI: phần mềm chưa lên. Xem: journalctl -u kho -n 50"; exit 1; }
 sed -i '/^ADMIN_PASSWORD=/d' $ENVF
+if [ -n "$TEN_MIEN" ]; then
+  echo "== HTTPS: cài Caddy đứng trước phần mềm"
+  command -v caddy >/dev/null || { apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq caddy; }
+  if [ "$TEN_MIEN" = "IP" ]; then
+    DC=":443"; TLS="tls internal"; URL="https://$(hostname -I | awk '{print $1}')"
+  else
+    DC="$TEN_MIEN"; TLS=""; URL="https://$TEN_MIEN"
+  fi
+  cat > /etc/caddy/Caddyfile <<CADDY
+# Phan mem Quan ly kho - HTTPS phia truoc, khoserver chi nghe 127.0.0.1:$CONG
+$DC {
+	$TLS
+	encode gzip
+	reverse_proxy 127.0.0.1:$CONG {
+		flush_interval -1
+	}
+}
+CADDY
+  systemctl enable caddy >/dev/null 2>&1; systemctl restart caddy
+  if command -v ufw >/dev/null; then
+    ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw --force enable >/dev/null
+  fi
+  echo; echo "==================== CÀI ĐẶT XONG ===================="
+  echo "Mở phần mềm tại:  $URL   (đăng nhập: admin / mật khẩu vừa đặt)"
+  echo "Cổng $CONG KHÔNG mở ra Internet; chỉ 22 (SSH), 80, 443 được mở."
+  echo "Sao lưu tự động vào $DIR/sao-luu lúc 12:15 và 18:30 — hãy chép thêm ra ngoài máy chủ này."
+  echo "NÊN LÀM NGAY: đổi mật khẩu root, dùng khóa SSH thay mật khẩu, bật tự cập nhật bảo mật (unattended-upgrades)."
+  exit 0
+fi
 command -v ufw >/dev/null && ufw status | grep -q "Status: active" && ufw allow $CONG/tcp >/dev/null || true
 echo; echo "==================== CÀI ĐẶT XONG ===================="
 for ip in $(hostname -I); do echo "Các máy kế toán mở:  http://$ip:$CONG"; done
