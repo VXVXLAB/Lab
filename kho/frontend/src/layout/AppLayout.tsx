@@ -4,7 +4,8 @@ import { App, Button, Dropdown, Layout, Menu, Tooltip, type MenuProps } from 'an
 import { DownOutlined, KeyOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import { ChangePasswordModal } from '../auth/ChangePasswordModal';
 import { DrawerStackProvider } from '../pages/reports/drawers';
-import { useAuth, useCurrentUser } from '../auth/AuthContext';
+import { useAccess, useAuth, useCurrentUser } from '../auth/AuthContext';
+import { allowed, type Need } from '../auth/guard';
 import { useLiveStatus } from '../lib/events';
 import { ROLE_LABEL } from '../lib/labels';
 import { storage } from '../lib/storage';
@@ -39,6 +40,7 @@ export function AppLayout() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(() => storage.get(COLLAPSE_KEY) === '1');
   const isAdmin = user.role === 'admin';
+  const access = useAccess();
   const [pwOpen, setPwOpen] = useState(false);
 
   const screens = useMemo(() => allScreens(), []);
@@ -61,8 +63,11 @@ export function AppLayout() {
     document.title = current ? `${current.label} – Quản lý Kho` : 'Quản lý Kho – Bán hàng';
   }, [current]);
 
+  // ẩn mục không đủ quyền / tính năng chưa bật (bản mở rộng); nhóm không còn mục nào thì ẩn luôn
+  const visible = (it: { adminOnly?: boolean; need?: Need }) => (!it.adminOnly || isAdmin) && allowed(it.need, access, isAdmin);
   const items: MenuProps['items'] = menu
     .filter((g) => !g.adminOnly || isAdmin)
+    .filter((g) => (g.screen ? visible(g.screen) : (g.items ?? []).some(visible)))
     .map((g) =>
       g.screen
         ? { key: g.screen.path, icon: g.icon, label: <Link to={g.screen.path}>{g.label}</Link> }
@@ -70,9 +75,7 @@ export function AppLayout() {
             key: g.key,
             icon: g.icon,
             label: g.label,
-            children: (g.items ?? [])
-              .filter((it) => !it.adminOnly || isAdmin)
-              .map((it) => ({ key: it.path, label: <Link to={it.path}>{it.label}</Link> })),
+            children: (g.items ?? []).filter(visible).map((it) => ({ key: it.path, label: <Link to={it.path}>{it.label}</Link> })),
           },
     );
 

@@ -12,6 +12,9 @@ export const DOC_TYPE_LABEL: Record<DocType, string> = {
 export const ROLE_LABEL: Record<Role, string> = {
   admin: 'Quản trị',
   ketoan: 'Kế toán',
+  banhang: 'Bán hàng',
+  muahang: 'Mua hàng',
+  thukho: 'Thủ kho',
 };
 
 export const CASH_KIND_LABEL: Record<CashAccountKind, string> = {

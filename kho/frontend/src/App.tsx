@@ -6,6 +6,7 @@ import viVN from 'antd/locale/vi_VN';
 import { ApiError } from './api/client';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { LoginPage } from './auth/LoginPage';
+import { GuardedScreen } from './auth/guard';
 import { AppLayout } from './layout/AppLayout';
 import { EventsProvider } from './lib/events';
 import { allScreens } from './routes';
@@ -62,7 +63,18 @@ const children: RouteObject[] = [
     (s): RouteObject =>
       s.path === '/'
         ? { index: true, element: s.element }
-        : { path: s.path, element: s.adminOnly ? <AdminOnly>{s.element}</AdminOnly> : s.element },
+        : {
+            path: s.path,
+            element: s.adminOnly ? (
+              <AdminOnly>
+                <GuardedScreen need={s.need}>{s.element}</GuardedScreen>
+              </AdminOnly>
+            ) : s.need ? (
+              <GuardedScreen need={s.need}>{s.element}</GuardedScreen>
+            ) : (
+              s.element
+            ),
+          },
   ),
   { path: '/dang-nhap', element: <Navigate to="/" replace /> },
   { path: '*', element: <NotFound /> },

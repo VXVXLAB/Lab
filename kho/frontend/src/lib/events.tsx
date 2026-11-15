@@ -7,6 +7,7 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api/client';
 import { qk } from '../api/queryKeys';
 import type { ServerEvent } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
 
 export type LiveStatus = 'connecting' | 'open' | 'reconnecting';
 
@@ -22,7 +23,7 @@ const EventsContext = createContext<EventsContextValue | null>(null);
 function isServerEvent(x: unknown): x is ServerEvent {
   if (!x || typeof x !== 'object') return false;
   const t = (x as { type?: unknown }).type;
-  return t === 'document.changed' || t === 'voucher.changed' || t === 'catalog.changed';
+  return t === 'document.changed' || t === 'voucher.changed' || t === 'catalog.changed' || t === 'features';
 }
 
 /** Ánh xạ sự kiện ⇒ những cache cần làm mới. */
@@ -30,6 +31,10 @@ export function invalidateFor(qc: QueryClient, e: ServerEvent): void {
   const inv = (f: readonly unknown[] | { predicate: (q: { queryKey: readonly unknown[] }) => boolean }) =>
     void qc.invalidateQueries(Array.isArray(f) ? { queryKey: f } : (f as { predicate: (q: { queryKey: readonly unknown[] }) => boolean }));
   switch (e.type) {
+    case 'features':
+      // quản trị đổi tính năng / ma trận quyền / ngày khóa sổ: số liệu được che khác đi ⇒ làm mới tất cả
+      void qc.invalidateQueries();
+      break;
     case 'catalog.changed':
       inv(qk.catalog(e.entity));
       if (e.entity === 'product') {
@@ -75,6 +80,9 @@ export function EventsProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [status, setStatus] = useState<LiveStatus>('connecting');
   const listeners = useRef(new Set<Listener>());
+  const { refresh } = useAuth();
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -103,6 +111,7 @@ export function EventsProvider({ children }: { children: ReactNode }) {
           return;
         }
         if (!isServerEvent(data)) return;
+        if (data.type === 'features') void refreshRef.current(); // menu, quyền, khóa sổ của máy này đổi ngay
         invalidateFor(qc, data);
         listeners.current.forEach((fn) => fn(data));
       };

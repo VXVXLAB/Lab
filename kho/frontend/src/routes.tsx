@@ -29,6 +29,11 @@ import { GuidePage } from './pages/GuidePage';
 import { StockLedgerPage, StockNxtPage, StockSummaryPage } from './pages/reports/StockPages';
 import { PurchasesReportPage, ReorderPage, ReportsHub, SalesHistoryPage, SalesReportPage } from './pages/reports/OtherReportPages';
 import { CompanySettingsPage } from './pages/catalog/CompanySettingsPage';
+import { FeaturesPage } from './pages/extended/FeaturesPage';
+import { PermissionsPage } from './pages/extended/PermissionsPage';
+import { PeriodLockPage } from './pages/extended/PeriodLockPage';
+import { ImportPage } from './pages/extended/ImportPage';
+import type { Need } from './auth/guard';
 
 export { paths };
 
@@ -37,6 +42,8 @@ export interface ScreenDef {
   label: string;
   element: ReactNode;
   adminOnly?: boolean;
+  /** Bản mở rộng: tính năng phải bật / quyền cần có (không có ⇒ ẩn khỏi menu, mở thẳng thì báo không có quyền) */
+  need?: Need;
 }
 
 export interface MenuGroup {
@@ -94,8 +101,8 @@ export const menu: MenuGroup[] = [
     label: 'Công nợ',
     icon: <SolutionOutlined />,
     items: [
-      { path: paths.receivable, label: 'Phải thu khách hàng', element: <DebtSummaryPage key="r" side="receivable" /> },
-      { path: paths.payable, label: 'Phải trả nhà cung cấp', element: <DebtSummaryPage key="p" side="payable" /> },
+      { path: paths.receivable, label: 'Phải thu khách hàng', element: <DebtSummaryPage key="r" side="receivable" />, need: { all: ['debt.view'] } },
+      { path: paths.payable, label: 'Phải trả nhà cung cấp', element: <DebtSummaryPage key="p" side="payable" />, need: { all: ['debt.view', 'cost.view'] } },
     ],
   },
   {
@@ -103,9 +110,9 @@ export const menu: MenuGroup[] = [
     label: 'Quỹ & Ngân hàng',
     icon: <BankOutlined />,
     items: [
-      { path: paths.receipts, label: 'Thu tiền', element: <VoucherListPage key="r" type="receipt" /> },
-      { path: paths.payments, label: 'Chi tiền', element: <VoucherListPage key="p" type="payment" /> },
-      { path: paths.cashBook, label: 'Sổ quỹ / Sổ ngân hàng', element: <CashBookPage /> },
+      { path: paths.receipts, label: 'Thu tiền', element: <VoucherListPage key="r" type="receipt" />, need: { any: ['cash.view', 'cash.write'] } },
+      { path: paths.payments, label: 'Chi tiền', element: <VoucherListPage key="p" type="payment" />, need: { any: ['cash.view', 'cash.write'] } },
+      { path: paths.cashBook, label: 'Sổ quỹ / Sổ ngân hàng', element: <CashBookPage />, need: { all: ['cash.view'] } },
     ],
   },
   {
@@ -125,6 +132,9 @@ export const menu: MenuGroup[] = [
       { path: paths.suppliers, label: 'Nhà cung cấp', element: <PartnersPage type="supplier" /> },
       { path: paths.warehouses, label: 'Kho', element: <WarehousesPage /> },
       { path: paths.cashAccounts, label: 'Tài khoản tiền', element: <CashAccountsPage /> },
+      { path: paths.importExcel, label: 'Nhập từ Excel', element: <ImportPage />, need: { feature: 'import_excel', any: ['catalog.write', 'stock.write'] } },
+      // quản trị bật/tắt tính năng mở rộng: có ở CẢ bản chuẩn (để bản chuẩn bật được tính năng)
+      { path: paths.features, label: 'Tính năng mở rộng', element: <FeaturesPage />, adminOnly: true },
     ],
   },
   {
@@ -135,6 +145,8 @@ export const menu: MenuGroup[] = [
     items: [
       { path: paths.users, label: 'Người dùng', element: <UsersPage />, adminOnly: true },
       { path: paths.company, label: 'Thông tin công ty', element: <CompanySettingsPage />, adminOnly: true },
+      { path: paths.rolePermissions, label: 'Phân quyền', element: <PermissionsPage />, adminOnly: true, need: { feature: 'permissions' } },
+      { path: paths.periodLock, label: 'Khóa sổ', element: <PeriodLockPage />, adminOnly: true, need: { feature: 'period_lock' } },
     ],
   },
   {
@@ -149,9 +161,9 @@ export const menu: MenuGroup[] = [
 export const hiddenScreens: ScreenDef[] = [
   { path: '/chung-tu/:id', label: 'Chứng từ', element: <DocumentRoute /> },
   { path: '/phieu-thu-chi/:id', label: 'Phiếu thu chi', element: <VoucherRoute /> },
-  { path: paths.salesReport, label: 'Chi tiết bán hàng', element: <SalesReportPage /> },
-  { path: paths.salesHistory, label: 'Lịch sử bán theo mặt hàng', element: <SalesHistoryPage /> },
-  { path: paths.purchasesReport, label: 'Chi tiết mua hàng', element: <PurchasesReportPage /> },
+  { path: paths.salesReport, label: 'Chi tiết bán hàng', element: <SalesReportPage />, need: { all: ['report.view'] } },
+  { path: paths.salesHistory, label: 'Lịch sử bán theo mặt hàng', element: <SalesHistoryPage />, need: { all: ['report.view'] } },
+  { path: paths.purchasesReport, label: 'Chi tiết mua hàng', element: <PurchasesReportPage />, need: { all: ['report.view', 'cost.view'] } },
 ];
 
 export function allScreens(): (ScreenDef & { groupKey?: string; groupLabel?: string })[] {

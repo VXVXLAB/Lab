@@ -28,6 +28,11 @@ export const paths = {
   warehouses: '/danh-muc/kho',
   cashAccounts: '/danh-muc/tai-khoan-tien',
   users: '/he-thong/nguoi-dung',
+  /** Bản mở rộng */
+  features: '/danh-muc/tinh-nang-mo-rong',
+  importExcel: '/danh-muc/nhap-excel',
+  rolePermissions: '/he-thong/phan-quyen',
+  periodLock: '/he-thong/khoa-so',
   company: '/he-thong/thong-tin-cong-ty',
   /** Mở một chứng từ kho (giai đoạn 2). */
   document: (id: number | string) => `/chung-tu/${id}`,

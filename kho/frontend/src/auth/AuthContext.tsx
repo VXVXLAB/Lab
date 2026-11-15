@@ -4,19 +4,48 @@ import { api, ApiError, setUnauthorizedHandler } from '../api/client';
 import { storage } from '../lib/storage';
 import { unsavedStore } from '../lib/unsavedStore';
 
+import type { FeatureKey, Me, Permission, User } from '../api/types';
+
 const HAD_SESSION = 'kho.hadSession';
-import type { User } from '../api/types';
+
+/** Mọi quyền (bản chuẩn / tính năng phân quyền tắt: ai cũng đủ quyền như hiện nay). */
+export const ALL_PERMISSIONS: Permission[] = [
+  'sale.write',
+  'purchase.write',
+  'stock.write',
+  'cash.write',
+  'catalog.write',
+  'posted.edit',
+  'cost.view',
+  'debt.view',
+  'cash.view',
+  'report.view',
+];
+
+/** Tính năng mở rộng đang bật + quyền của người dùng (từ /auth/me). */
+export interface Access {
+  features: Partial<Record<FeatureKey, boolean>>;
+  permissions: ReadonlySet<Permission>;
+}
+
+const accessOf = (me: Me): Access => ({
+  features: me.features ?? {},
+  permissions: new Set(me.permissions ?? ALL_PERMISSIONS),
+});
 
 type AuthState =
   | { status: 'loading' }
   | { status: 'anonymous'; reason?: 'expired' | 'logout' }
-  | { status: 'authenticated'; user: User };
+  | { status: 'authenticated'; user: User; access: Access };
 
 interface AuthContextValue {
   state: AuthState;
   user: User | null;
+  access: Access | null;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Đọc lại /auth/me (sự kiện "features": quản trị đổi tính năng, ma trận quyền, ngày khóa sổ). */
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -35,8 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return undefined;
     }
     api
-      .get<{ user: User }>('/auth/me')
-      .then((r) => !cancelled && setState({ status: 'authenticated', user: r.user }))
+      .get<Me>('/auth/me')
+      .then((r) => !cancelled && setState({ status: 'authenticated', user: r.user, access: accessOf(r) }))
       .catch(() => {
         if (cancelled) return;
         storage.set(HAD_SESSION, '0');
@@ -61,9 +90,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (username: string, password: string) => {
       const r = await api.post<{ user: User }>('/auth/login', { username, password }, { skipAuthRedirect: true });
+      // tính năng đang bật + quyền của người này (lệnh đăng nhập chỉ trả người dùng)
+      const me = await api.get<Me>('/auth/me').catch(() => ({ user: r.user }) as Me);
       queryClient.clear();
       storage.set(HAD_SESSION, '1');
-      setState({ status: 'authenticated', user: r.user });
+      setState({ status: 'authenticated', user: me.user, access: accessOf(me) });
     },
     [queryClient],
   );
@@ -81,9 +112,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ status: 'anonymous', reason: 'logout' });
   }, [queryClient, state]);
 
+  const refresh = useCallback(async () => {
+    try {
+      const me = await api.get<Me>('/auth/me');
+      setState((s) => (s.status === 'authenticated' && s.user.id === me.user.id ? { status: 'authenticated', user: me.user, access: accessOf(me) } : s));
+    } catch {
+      /* 401 đã được xử lý chung; lỗi mạng: giữ nguyên */
+    }
+  }, []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ state, user: state.status === 'authenticated' ? state.user : null, login, logout }),
-    [state, login, logout],
+    () => ({
+      state,
+      user: state.status === 'authenticated' ? state.user : null,
+      access: state.status === 'authenticated' ? state.access : null,
+      login,
+      logout,
+      refresh,
+    }),
+    [state, login, logout, refresh],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -99,4 +146,29 @@ export function useCurrentUser(): User {
   const { user } = useAuth();
   if (!user) throw new Error('Chưa đăng nhập');
   return user;
+}
+
+const NO_ACCESS: Access = { features: {}, permissions: new Set(ALL_PERMISSIONS) };
+
+/** Tính năng mở rộng + quyền của người đang đăng nhập. */
+export function useAccess(): Access & { can: (p: Permission) => boolean; on: (f: FeatureKey) => boolean; isAdmin: boolean } {
+  const { access, user } = useAuth();
+  const a = access ?? NO_ACCESS;
+  return {
+    ...a,
+    can: (p) => a.permissions.has(p),
+    on: (f) => !!a.features[f],
+    isAdmin: user?.role === 'admin',
+  };
+}
+
+/** Tính năng mở rộng `key` đang bật? (bản chuẩn: luôn false) */
+export function useFeature(key: FeatureKey): boolean {
+  return !!useAuth().access?.features[key];
+}
+
+/** Người dùng có quyền `p`? (tính năng phân quyền tắt: luôn true) */
+export function useCan(p: Permission): boolean {
+  const a = useAuth().access;
+  return a ? a.permissions.has(p) : true;
 }

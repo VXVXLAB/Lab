@@ -10,6 +10,9 @@ export type ErrorCode =
   | 'LOSS_WARNING'
   | 'IN_USE'
   | 'INSUFFICIENT_STOCK'
+  | 'FEATURE_OFF'
+  | 'PERIOD_LOCKED'
+  | 'IMPORT_INVALID'
   | 'INTERNAL'
   | 'NETWORK'
   | 'UNKNOWN';
@@ -23,6 +26,9 @@ const KNOWN_CODES: ReadonlySet<string> = new Set([
   'LOSS_WARNING',
   'IN_USE',
   'INSUFFICIENT_STOCK',
+  'FEATURE_OFF',
+  'PERIOD_LOCKED',
+  'IMPORT_INVALID',
   'INTERNAL',
 ]);
 
@@ -36,6 +42,9 @@ const FALLBACK_MESSAGE: Record<ErrorCode, string> = {
   LOSS_WARNING: 'Có dòng bán thấp hơn giá mua.',
   IN_USE: 'Dữ liệu đã được sử dụng, không xóa được.',
   INSUFFICIENT_STOCK: 'Không đủ hàng trong kho.',
+  FEATURE_OFF: 'Tính năng này chưa được bật (Danh mục › Tính năng mở rộng).',
+  PERIOD_LOCKED: 'Kỳ này đã khóa sổ, không sửa được.',
+  IMPORT_INVALID: 'File còn lỗi, chưa nhập dòng nào.',
   INTERNAL: 'Máy chủ gặp lỗi. Vui lòng thử lại; nếu vẫn lỗi hãy báo người quản trị.',
   NETWORK: 'Không kết nối được máy chủ. Kiểm tra mạng (hoặc máy chủ đã bật chưa) rồi thử lại.',
   UNKNOWN: 'Có lỗi xảy ra. Vui lòng thử lại.',
@@ -163,7 +172,35 @@ async function request<T>(method: string, path: string, opts: RequestOptions = {
   return (await res.json()) as T;
 }
 
+/**
+ * Gửi file (multipart) — dùng XMLHttpRequest để báo tiến độ tải lên (file lớn).
+ * Lỗi trả về như mọi lệnh khác (ApiError, 401 ⇒ về màn đăng nhập).
+ */
+function upload<T>(path: string, form: FormData, query?: QueryParams, onProgress?: (pct: number) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', buildUrl(path, query));
+    xhr.withCredentials = true;
+    xhr.responseType = 'text';
+    if (onProgress) xhr.upload.onprogress = (ev) => ev.lengthComputable && onProgress(Math.round((ev.loaded / ev.total) * 100));
+    xhr.onerror = () => reject(new ApiError(0, 'NETWORK', FALLBACK_MESSAGE.NETWORK, null));
+    xhr.onload = () => {
+      const res = new Response(xhr.responseText || null, { status: xhr.status, headers: { 'Content-Type': 'application/json' } });
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve((xhr.responseText ? JSON.parse(xhr.responseText) : undefined) as T);
+        return;
+      }
+      void toApiError(res).then((err) => {
+        if (err.status === 401) unauthorizedHandler?.();
+        reject(err);
+      });
+    };
+    xhr.send(form);
+  });
+}
+
 export const api = {
+  upload,
   get: <T>(path: string, query?: QueryParams, signal?: AbortSignal) =>
     request<T>('GET', path, { query, signal }),
   post: <T>(path: string, body?: unknown, opts?: Omit<RequestOptions, 'body'>) =>

@@ -16,7 +16,81 @@ export interface ListParams {
 }
 
 // ---------- Xác thực ----------
-export type Role = 'admin' | 'ketoan';
+/** Vai trò; ba vai trò sau chỉ có khi bật tính năng Phân quyền (bản mở rộng). */
+export type Role = 'admin' | 'ketoan' | 'banhang' | 'muahang' | 'thukho';
+
+// ---------- Bản mở rộng ----------
+export type FeatureKey =
+  | 'permissions'
+  | 'period_lock'
+  | 'import_excel'
+  | 'min_stock'
+  | 'price_list'
+  | 'credit_limit'
+  | 'profit_report'
+  | 'stocktake'
+  | 'unit_conversion'
+  | 'vat'
+  | 'print_template';
+
+export type Permission =
+  | 'sale.write'
+  | 'purchase.write'
+  | 'stock.write'
+  | 'cash.write'
+  | 'catalog.write'
+  | 'posted.edit'
+  | 'cost.view'
+  | 'debt.view'
+  | 'cash.view'
+  | 'report.view';
+
+/** GET /auth/me */
+export interface Me {
+  user: User;
+  /** Bản chuẩn / máy chủ cũ: không có ⇒ coi như mọi tính năng tắt, đủ quyền. */
+  features?: Partial<Record<FeatureKey, boolean>>;
+  permissions?: Permission[];
+}
+
+/** Một dòng của GET /features (dạng mới); dạng cũ chỉ có key, name. */
+export interface FeatureItem {
+  key: FeatureKey;
+  name: string;
+  description?: string;
+  /** false ⇒ chưa làm xong (đợt sau): hiện "Sắp có", không bật được */
+  available?: boolean;
+  enabled?: boolean;
+}
+export interface FeaturesResponse {
+  features: Partial<Record<FeatureKey, boolean>>;
+  keys?: FeatureItem[];
+  items?: FeatureItem[];
+}
+
+export interface RolePermissions {
+  matrix: Partial<Record<Role, Permission[]>>;
+  permissions: { key: Permission; name: string }[];
+  roles: { key: Role; name: string }[];
+}
+
+export interface PeriodLock {
+  lock_date: string | null;
+  /** Lịch sử (nếu máy chủ trả) */
+  history?: { at: string; user_name?: string; lock_date: string | null; old_lock_date?: string | null; reason?: string }[];
+}
+
+export type ImportKind = 'products' | 'partners' | 'opening_stock' | 'opening_debt';
+export interface ImportResult {
+  kind: ImportKind;
+  dry_run: boolean;
+  rows: number;
+  creates: number;
+  updates: number;
+  errors: { row: number; column: string; message: string }[];
+  notes?: string[];
+  documents?: { id: number; draft_no: string; warehouse_id: number; warehouse_code: string; lines: number }[];
+}
 
 export interface User {
   id: number;
@@ -286,7 +360,12 @@ export interface CatalogChangedEvent extends ServerEventBase {
   entity: CatalogEntity;
 }
 
-export type ServerEvent = DocumentChangedEvent | VoucherChangedEvent | CatalogChangedEvent;
+export interface FeaturesChangedEvent {
+  type: 'features';
+  action: string;
+}
+
+export type ServerEvent = DocumentChangedEvent | VoucherChangedEvent | CatalogChangedEvent | FeaturesChangedEvent;
 
 // ---------- Chứng từ kho: chi tiết ----------
 export interface DocumentLine {
