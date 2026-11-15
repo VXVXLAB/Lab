@@ -7,6 +7,11 @@
 //	ADMIN_PASSWORD (mật khẩu admin khi seed lần đầu, mặc định admin123)
 //	STATIC_DIR     (thư mục giao diện đã build, mặc định ../frontend/dist)
 //	COOKIE_SECURE  (true nếu chạy sau HTTPS)
+//	LOG_FILE       (ghi log ra file này thay vì màn hình; dùng khi chạy nền)
+//
+// Bản cài đặt: nếu cạnh file chạy có file kho.env (mỗi dòng KHÓA=giá trị, dòng bắt đầu bằng # là ghi chú) thì các
+// giá trị trong đó được nạp trước (biến môi trường thật vẫn được ưu tiên); nếu cạnh file chạy có thư mục giao-dien
+// thì đó là STATIC_DIR mặc định.
 package main
 
 import (
@@ -16,6 +21,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,13 +37,65 @@ func env(k, def string) string {
 	return def
 }
 
+// exeDir trả thư mục chứa file chạy ("" nếu không xác định được).
+func exeDir() string {
+	p, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	}
+	return filepath.Dir(p)
+}
+
+// loadEnvFile nạp KHÓA=giá trị từ file; không ghi đè biến môi trường đã có. Không có file thì bỏ qua.
+func loadEnvFile(path string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	b = []byte(strings.TrimPrefix(string(b), "\ufeff")) // BOM do Notepad/PowerShell thêm
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		k = strings.TrimSpace(k)
+		if !ok || k == "" {
+			continue
+		}
+		if _, set := os.LookupEnv(k); !set {
+			_ = os.Setenv(k, strings.TrimSpace(v))
+		}
+	}
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	dir := exeDir()
+	if dir != "" {
+		loadEnvFile(filepath.Join(dir, "kho.env"))
+	}
+	if lf := os.Getenv("LOG_FILE"); lf != "" {
+		if f, err := os.OpenFile(lf, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+			log.SetOutput(f)
+			defer f.Close()
+		}
+	}
+	defaultStatic := "../frontend/dist"
+	if dir != "" {
+		if fi, err := os.Stat(filepath.Join(dir, "giao-dien", "index.html")); err == nil && !fi.IsDir() {
+			defaultStatic = filepath.Join(dir, "giao-dien")
+		}
+	}
+
 	dbURL := env("DATABASE_URL", "postgres://kho:kho@127.0.0.1:5432/kho_dev")
 	addr := env("LISTEN_ADDR", ":8080")
-	static := env("STATIC_DIR", "../frontend/dist")
+	static := env("STATIC_DIR", defaultStatic)
 
 	pool, err := db.Connect(ctx, dbURL, db.Options{})
 	if err != nil {

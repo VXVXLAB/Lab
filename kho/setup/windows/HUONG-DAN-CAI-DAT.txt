@@ -1,0 +1,58 @@
+PHẦN MỀM QUẢN LÝ KHO - BÁN HÀNG - CÔNG NỢ - THU CHI
+HƯỚNG DẪN CÀI ĐẶT TRÊN WINDOWS
+
+CẦN GÌ
+- Một máy tính Windows 10/11 hoặc Windows Server, 64-bit, làm "máy chủ". Máy này phải bật thì các máy khác mới dùng được.
+- Ổ C: còn trống ít nhất 2 GB. Có Internet lúc cài (để tải PostgreSQL ~300 MB).
+  Máy không có Internet: ở máy khác tải file
+     https://get.enterprisedb.com/postgresql/postgresql-16.6-1-windows-x64-binaries.zip
+  rồi đặt file đó cạnh CAI-DAT.bat.
+- Các máy kế toán KHÔNG cài gì, chỉ cần Chrome hoặc Edge và cùng mạng nội bộ với máy chủ.
+
+CÀI ĐẶT (khoảng 5-10 phút)
+1. Giải nén TOÀN BỘ file zip ra một thư mục (ví dụ D:\KhoSetup). Không chạy thẳng trong file zip.
+2. Bấm đúp CAI-DAT.bat. Windows hỏi quyền quản trị -> chọn Yes.
+   (Nếu Windows báo "Windows protected your PC": bấm More info -> Run anyway.)
+3. Nhập mật khẩu cho tài khoản quản trị "admin" khi được hỏi. GHI LẠI mật khẩu này.
+4. Đợi đến khi hiện "CÀI ĐẶT XONG". Màn hình sẽ ghi địa chỉ để mở phần mềm, ví dụ:
+      Trên máy này:          http://localhost:8080
+      Các máy kế toán mở:    http://192.168.1.10:8080
+5. Mở địa chỉ đó bằng Chrome/Edge, đăng nhập admin, làm theo màn hình "Bắt đầu sử dụng":
+   thông tin công ty -> tạo tài khoản cho từng kế toán -> danh mục -> tồn đầu kỳ -> công nợ đầu kỳ.
+
+SAU KHI CÀI - 3 VIỆC NÊN LÀM NGAY
+a) SAO LƯU RA NGOÀI MÁY: mở C:\KhoApp\kho.env bằng Notepad (quyền quản trị), sửa dòng
+      SAO_LUU_THU_MUC_2=E:\SaoLuuKho        (ổ USB, ổ mạng NAS, hoặc thư mục OneDrive/Google Drive)
+   Phần mềm tự sao lưu lúc 12:15 và 18:30 mỗi ngày vào C:\KhoApp\sao-luu và chép thêm sang thư mục này.
+   Không có bản sao ngoài máy thì hỏng ổ cứng là mất toàn bộ sổ sách.
+b) Đặt IP tĩnh cho máy chủ (để địa chỉ các máy kế toán mở không đổi).
+c) Cài đặt Windows để máy chủ không tự ngủ (Settings > System > Power > Sleep: Never).
+
+CÁC MÁY KẾ TOÁN KHÔNG VÀO ĐƯỢC?
+- Kiểm tra cùng mạng, gõ đúng địa chỉ http://<IP máy chủ>:8080 (http, không phải https).
+- Trên máy chủ: Settings > Network > đổi kiểu mạng sang "Private" (bộ cài chỉ mở tường lửa cho mạng Private/Domain).
+- Phần mềm diệt virus có tường lửa riêng: cho phép cổng 8080.
+
+NÂNG CẤP PHIÊN BẢN MỚI
+Giải nén bộ cài mới, bấm đúp CAI-DAT.bat trên máy chủ. Bộ cài tự nhận ra máy đã cài, sao lưu, thay chương trình,
+giữ nguyên dữ liệu. Các máy kế toán bấm Ctrl+F5 một lần.
+
+KHÔI PHỤC DỮ LIỆU TỪ BẢN SAO LƯU
+Mở PowerShell bằng "Run as administrator", gõ:
+   powershell -ExecutionPolicy Bypass -File C:\KhoApp\khoi-phuc.ps1 C:\KhoApp\sao-luu\kho-NGÀY-GIỜ.dump
+Lệnh hỏi xác nhận (gõ CO), tự sao lưu hiện trạng trước, rồi XÓA dữ liệu hiện có và nạp lại từ file.
+Chuyển sang máy chủ mới: cài mới trên máy mới, chép file .dump sang, chạy lệnh khôi phục trên.
+
+GỠ BỎ
+Bấm đúp GO-BO.bat. Dữ liệu (C:\KhoApp\du-lieu) và bản sao lưu (C:\KhoApp\sao-luu) được giữ lại.
+
+NƠI CẦN BIẾT
+C:\KhoApp\kho.env        cấu hình (có mật khẩu CSDL - chỉ quản trị máy đọc được)
+C:\KhoApp\kho.log        nhật ký chạy của phần mềm
+C:\KhoApp\sao-luu.log    nhật ký sao lưu (xem có dòng LỖI / CẢNH BÁO không)
+C:\KhoApp\sao-luu\       các bản sao lưu, giữ 30 ngày
+Khởi động lại phần mềm (PowerShell quản trị):  Stop-ScheduledTask KhoServer; Start-ScheduledTask KhoServer
+Sao lưu ngay bằng tay:  powershell -ExecutionPolicy Bypass -File C:\KhoApp\sao-luu.ps1
+
+AN TOÀN
+Phần mềm dùng cho mạng nội bộ văn phòng, chưa có HTTPS. KHÔNG mở cổng 8080 ra Internet.

@@ -7,6 +7,20 @@ trong văn phòng (gọi là máy chủ). Các máy kế toán không cài gì: 
 > Hướng dẫn dưới đây em đã chạy thật trên Linux. Trên Windows các bước tương tự nhưng **em chưa chạy thử trên
 > Windows thật** — cần làm thử một lần trên máy của anh trước khi giao khách.
 
+## 0. Cách nhanh nhất: dùng bộ cài
+
+Đóng gói: `cd kho/setup && ./dong-goi.sh` → ra `setup/out/KhoSetup-windows-x64.zip` và `KhoSetup-linux-x64.tar.gz`.
+
+- **Windows 10/11, Windows Server (64-bit):** giải nén, bấm đúp `CAI-DAT.bat`, đặt mật khẩu admin, đợi "CÀI ĐẶT XONG".
+  Bộ cài tự: tải và dựng PostgreSQL riêng (cổng 5433, chỉ nghe nội bộ máy), tạo CSDL với mật khẩu ngẫu nhiên, chép
+  chương trình vào `C:\KhoApp`, tự chạy khi bật máy, sao lưu 12:15 và 18:30 hằng ngày, mở tường lửa cổng 8080 cho
+  mạng nội bộ. Chạy lại `CAI-DAT.bat` = nâng cấp. Chi tiết: `HUONG-DAN-CAI-DAT.txt` trong bộ cài
+  (nguồn: `setup/windows/`). **Các lệnh Windows chưa được chạy thử trên Windows thật.**
+- **Ubuntu/Debian:** giải nén, `sudo ./cai-dat.sh` (nguồn: `setup/linux/`). Phần chương trình và sao lưu trong gói đã
+  chạy thử; phần systemd/apt chưa chạy thử trọn vẹn.
+
+Các mục dưới đây là cài tay, dùng khi cần hiểu hoặc tùy biến.
+
 ## 1. Cần có
 - PostgreSQL 16.
 - Để build: Go 1.24 và Node.js 20+ (chỉ máy build cần; máy chủ chỉ cần file đã build).
