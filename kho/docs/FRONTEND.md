@@ -325,3 +325,26 @@ chủ ý: quản trị thấy thêm **Danh mục › Tính năng mở rộng** �
   ngày khi chọn ngày trong kỳ khóa, nút Sửa/Ghi sổ/Bỏ ghi sổ/Lưu/Xóa mờ kèm chú thích; 422 `PERIOD_LOCKED` ⇒ hộp "Kỳ này đã
   khóa sổ" + lỗi ở ô ngày. Ô nợ đầu kỳ / số dư đầu kỳ bị khóa khi đang khóa sổ (máy chủ không cho đổi).
 - Mã lỗi mới trong `api/client.ts`: `FEATURE_OFF`, `PERIOD_LOCKED`, `IMPORT_INVALID` (câu dự phòng tiếng Việt).
+
+## Bản mở rộng — đợt M2 (C5, C6, C8, C7) và việc tiếp M1
+
+- **Việc tiếp M1**: đăng nhập dùng luôn `permissions`/`features` trong phản hồi `/auth/login` (máy chủ cũ không có ⇒ gọi
+  `/auth/me`); Khóa sổ hiện bảng lịch sử (`history`: người, lúc, ngày cũ → ngày mới, lý do); người không có `cost.view` không
+  thấy Sửa phiếu / Bỏ ghi sổ ở phiếu mua, trả NCC, tồn đầu đã ghi sổ (`docAccess.canEditPosted`), có dòng giải thích.
+- Trường mới (`min_stock`, `credit_limit`, `payment_days`) chỉ gửi khi tính năng bật (không gửi ⇒ máy chủ giữ; `null` ⇒ xóa).
+- **C5** (`min_stock`): ô + cột "Tồn tối thiểu" (Hàng hóa); Tồn kho tô `row-low` các mã trong `/reports/low-stock` (chỉ khi
+  xem đến hôm nay); ô Tổng quan theo `low_stock_rule`; màn `LowStockPage` (`/bao-cao/duoi-ton-toi-thieu`); Hàng cần đặt có cột
+  Tồn tối thiểu / Cần đặt thêm, số đặt = max(thiếu, `order_more`).
+- **C6** (`price_list`): `PartnerPrices.tsx` — bảng giá riêng (sửa tại chỗ, lưu khi rời ô; thêm bằng ô tìm mặt hàng; bỏ), mở
+  từ nút nhãn giá ở danh sách khách và "Bảng giá riêng…" trong hồ sơ khách; loại nhập Excel `partner_prices`. Phiếu bán:
+  `/products/sale-price` (một lần gọi cho mọi mã của phiếu); dòng vừa chọn mã (LineGrid `onPicked`) được đánh dấu "giá tự điền"
+  và thay bằng giá theo khách khi có — sửa tay thì thôi; dưới ô giá: nguồn giá hoặc "Lưu giá này cho khách" (`sale.write`,
+  `tabIndex=-1` để không chen vào chuỗi Enter). Đổi khách khi đã có dòng ⇒ hỏi lấy lại giá. Luồng Enter / F7 không đổi.
+- **C8** (`credit_limit`): ô Hạn mức nợ / Số ngày được nợ (khách); đầu phiếu bán "Nợ hiện tại / Hạn mức" (chỉ khi xem được
+  công nợ), đỏ khi vượt; 409 `CREDIT_WARNING` ⇒ `confirmCredit` (một hộp, kèm dòng bán lỗ nếu có), gửi lại mọi cờ trong
+  `details.confirm` (`confirm_credit` chỉ gửi khi đã xác nhận). Không có quyền xem công nợ ⇒ chỉ câu báo, không số.
+  `DebtAgingPage` (`/bao-cao/tuoi-no`) + ngăn kéo `aging` (khoản còn mở ⇒ chứng từ / phiếu thu chi).
+- **C7** (`profit_report`): `ProfitPage` (`/bao-cao/lai-gop`, cần `report.view` + `cost.view`): ba nhóm (Segmented), khoảng
+  ngày, dòng Cộng, dấu "ước tính" có chú thích, giải thích cách tính giá vốn; theo mặt hàng / theo khách ⇒ ngăn kéo `profit`
+  (lãi từng phiếu) ⇒ chứng từ. Xuất Excel bằng `format=xlsx` của máy chủ.
+- Thẻ mới ở trang Báo cáo dùng `need.feature` ⇒ bản chuẩn không thấy.

@@ -153,3 +153,28 @@ Cần sửa lại kỳ cũ: quản trị **đổi ngày khóa** về trước, h
 3. Xem kết quả: bao nhiêu dòng, thêm mới bao nhiêu, cập nhật bao nhiêu. Có lỗi thì bảng lỗi ghi rõ **dòng, cột, lỗi gì** (lọc được theo cột) — sửa trong Excel, lưu, bấm **Kiểm tra lại**. Hết lỗi thì bấm **Nhập N dòng**: phần mềm nhập tất cả, hoặc không nhập dòng nào nếu có trục trặc.
 
 Mặt hàng, đối tác đã có (trùng mã) thì được cập nhật các ô có dữ liệu, ô để trống giữ nguyên. Tồn đầu kỳ: chọn **ngày tồn đầu kỳ** trước khi chọn file; phần mềm tạo mỗi kho một **phiếu Tồn đầu kỳ TẠM** và hiện đường dẫn tới từng phiếu — mở, xem lại rồi bấm **Ghi sổ (F9)**. Công nợ đầu kỳ (chỉ quản trị) thay số cũ của các đối tác có trong file.
+
+### Tồn tối thiểu từng mã
+
+Trong **Danh mục › Hàng hóa**, mở mặt hàng, điền **Tồn tối thiểu** (tính trên tổng các kho; để trống = không theo dõi). Từ đó:
+
+- **Tồn kho** tô đỏ mã có tồn không quá mức tối thiểu; ô trên **Tổng quan** đổi thành "Hàng dưới mức tối thiểu".
+- **Báo cáo › Hàng dưới mức tối thiểu** liệt kê các mã đó (tồn tính cả phiếu đã ghi sổ có ngày sau hôm nay).
+- **Mua hàng › Hàng cần đặt** thêm cột **Tồn tối thiểu** và **Cần đặt thêm** = số cần nhập để sau khi giao hết phiếu bán tạm vẫn còn đủ mức tối thiểu. Bấm **Lập phiếu nhập** là phiếu nhập được điền sẵn đúng số Cần đặt thêm.
+
+### Giá theo khách
+
+- **Danh mục › Khách hàng**: bấm biểu tượng nhãn giá ở cuối dòng khách (hoặc "Bảng giá riêng…" trong hồ sơ khách) để thêm, sửa, bỏ giá riêng từng mã. Nhập nhiều mã một lúc: **Nhập từ Excel › Bảng giá riêng**.
+- Lập phiếu bán, gõ mã hàng: giá tự điền theo thứ tự **giá riêng của khách → giá bán lần trước cho khách này → giá bán mặc định**; dưới ô giá ghi rõ lấy từ đâu ("Giá riêng của khách", "Giá lần trước 12/10", "Giá mặc định"). Vẫn sửa giá được như thường; sửa xong, nếu muốn lần sau tự điền giá này thì bấm **Lưu giá này cho khách** ngay dưới ô giá.
+- Đổi khách trên phiếu đã có dòng hàng: phần mềm hỏi có **lấy giá theo khách mới** cho các dòng không.
+
+### Hạn mức nợ và tuổi nợ
+
+- Hồ sơ khách có thêm **Hạn mức nợ** (để trống = không giới hạn) và **Số ngày được nợ**.
+- Trên phiếu bán, cạnh "Khách đang nợ" có **Nợ hiện tại / Hạn mức**; chữ đỏ nếu phiếu này làm vượt hạn mức.
+- Ghi sổ phiếu làm khách nợ vượt hạn mức: phần mềm hỏi lại (một hộp duy nhất, gồm cả cảnh báo bán lỗ nếu có). Đồng ý thì bấm **Vẫn ghi sổ** — phần mềm ghi lại ai đã xác nhận. Người không được xem công nợ chỉ thấy câu báo, không thấy số nợ.
+- **Báo cáo › Tuổi nợ phải thu**: số khách còn nợ chia theo số ngày quá hạn (trong hạn, 1–30, 31–60, 61–90, trên 90 ngày), cột Đầu kỳ (nợ đầu kỳ khai báo) và Trả trước (khách trả dư). Tiền thu và hàng trả lại trừ vào khoản nợ cũ nhất trước. Tổng nợ khớp sổ công nợ cùng ngày. Bấm một khách để xem từng khoản còn nợ, bấm tiếp để mở chứng từ.
+
+### Lãi gộp
+
+**Báo cáo › Lãi gộp** (cần quyền xem giá mua và xem báo cáo): doanh thu, giá vốn, lãi gộp, tỷ lệ theo **phiếu**, theo **mặt hàng** hoặc theo **khách** (ba cách cùng tổng). Giá vốn tính **bình quân gia quyền sau mỗi lần nhập**, chung các kho; khách trả hàng nhập lại theo giá bình quân lúc đó. Bán khi mã chưa từng được nhập thì giá vốn tạm lấy giá mua khai báo, có chữ "ước tính". Sửa hoặc nhập lùi ngày phiếu mua sẽ làm thay đổi lãi các kỳ sau đó.
