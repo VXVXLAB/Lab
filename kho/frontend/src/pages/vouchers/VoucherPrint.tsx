@@ -3,14 +3,15 @@ import type { Voucher } from '../../api/types';
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format';
 import { moneyInWords } from '../../lib/numberWords';
 import { VOUCHER_TITLE } from './voucherText';
-import { signersOf, usePrintTemplate } from '../../lib/printTemplate';
+import { signersOf, usePrintTemplate, type ActiveTemplate } from '../../lib/printTemplate';
 import { PrintFooter, PrintLogo } from '../../components/PrintExtras';
 
 /** Bản in phiếu thu / phiếu chi (khổ A5), có dòng "Bằng chữ". In từ dữ liệu đã lưu. */
-export function VoucherPrint({ v }: { v: Voucher }) {
+export function VoucherPrint({ v, tplOverride }: { v: Voucher; tplOverride?: ActiveTemplate | null }) {
   const co = useSettings().data;
   const receipt = v.voucher_type === 'receipt';
-  const tpl = usePrintTemplate();
+  const tplSaved = usePrintTemplate();
+  const tpl = tplOverride !== undefined ? tplOverride : tplSaved;
   const signers = signersOf(
     tpl,
     v.voucher_type,

@@ -78,21 +78,32 @@ export function DebtAgingPage() {
   const params: AgingParams = useMemo(() => ({ as_of: toApiDate(asOf), q: dq || undefined }), [asOf, dq]);
   const query = useQuery({ queryKey: qk.report('debt-aging', params), queryFn: () => extReportsApi.debtAging(params) });
   const d = query.data;
+  // vừa màn 1366: cột hẹp, Khách hàng và Tổng nợ cố định hai bên khi phải cuộn ngang trong bảng
   const columns: ColumnsType<AgingItem> = [
-    { title: 'Mã', dataIndex: 'partner_code', width: 110, className: 'col-code', ellipsis: true },
-    { title: 'Khách hàng', dataIndex: 'partner_name', ellipsis: true },
-    { title: 'Được nợ', dataIndex: 'payment_days', width: 76, align: 'right', render: (n: number | null) => `${n ?? 0} ngày` },
+    {
+      title: 'Khách hàng',
+      key: 'p',
+      width: 190,
+      fixed: 'left',
+      ellipsis: true,
+      render: (_, r) => (
+        <Tooltip title={`${r.partner_code} — được nợ ${r.payment_days ?? 0} ngày`}>
+          <span>{r.partner_name}</span>
+        </Tooltip>
+      ),
+    },
     ...AGING_COLS.map((c) => ({
       title: c.tip ? <Tooltip title={c.tip}>{c.title}</Tooltip> : c.title,
       dataIndex: c.key,
-      width: c.key === 'total' ? 124 : 112,
+      width: c.key === 'total' ? 112 : 100,
       align: 'right' as const,
+      ...(c.key === 'total' ? { fixed: 'right' as const } : {}),
       render: (n: number) =>
         c.key === 'total' ? <b className={n < 0 ? 'neg' : undefined}>{formatMoney(n)}</b> : c.key === 'd61_90' || c.key === 'over_90' ? <span className={n ? 'neg' : undefined}>{money(n)}</span> : money(n),
     })),
   ];
   const t = d?.totals;
-  const summary = t ? [<b key="c">Cộng</b>, <span key="n" className="muted">{d.items.length} khách</span>, null, ...AGING_COLS.map((c) => <b key={c.key}>{formatMoney(t[c.key])}</b>)] : null;
+  const summary = t ? [<b key="c">Cộng · {d.items.length} khách</b>, ...AGING_COLS.map((c) => <b key={c.key}>{formatMoney(t[c.key])}</b>)] : null;
   return (
     <div className="list-page">
       <PageHeader
@@ -116,7 +127,7 @@ export function DebtAgingPage() {
           loading={query.isLoading}
           error={query.error}
           summary={summary}
-          minWidth={1240}
+          minWidth={990}
           onOpen={(r) => drawers.push({ kind: 'aging', item: r, asOf: d?.as_of ?? toApiDate(asOf) ?? '' })}
           emptyText="Không có khách hàng nào còn nợ đến ngày này."
         />

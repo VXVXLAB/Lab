@@ -300,7 +300,7 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
           <col style={{ width: 40 }} />
           <col style={{ width: 150 }} />
           <col />
-          <col style={{ width: 64 }} />
+          <col style={{ width: ext?.units ? 84 : 64 }} />
           {st && <col style={{ width: 110 }} />}
           <col style={{ width: 100 }} />
           {st && <col style={{ width: 110 }} />}
@@ -533,7 +533,7 @@ export function LineGrid({ cfg, lines, onChange, readOnly, warehouseId, priceInf
                 )}
                 {showVat && (
                   <td>
-                    {readOnly ? (
+                    {readOnly || !l.product ? (
                       <span className="ro">{l.product ? (l.vat_rate === null || l.vat_rate === undefined ? 'KCT' : `${l.vat_rate}%`) : ''}</span>
                     ) : (
                       <select

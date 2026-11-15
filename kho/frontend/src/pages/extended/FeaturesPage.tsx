@@ -7,7 +7,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { PageHeader } from '../../components/PageHeader';
 
 /** Các tính năng đã làm xong (đợt M1). Máy chủ mới trả `available`; máy chủ cũ chưa có thì dùng danh sách này. */
-const READY: FeatureKey[] = ['permissions', 'period_lock', 'import_excel', 'min_stock', 'price_list', 'credit_limit', 'profit_report'];
+const READY: FeatureKey[] = ['permissions', 'period_lock', 'import_excel', 'min_stock', 'price_list', 'credit_limit', 'profit_report', 'stocktake', 'unit_conversion', 'vat', 'print_template'];
 
 /** Giải thích bằng lời thường (khi máy chủ chưa gửi `description`). */
 const ABOUT: Record<FeatureKey, { what: string; on: string; off: string }> = {
@@ -46,10 +46,26 @@ const ABOUT: Record<FeatureKey, { what: string; on: string; off: string }> = {
     on: 'Thêm báo cáo "Lãi gộp" ở trang Báo cáo (người có quyền xem giá mua và xem báo cáo).',
     off: 'Ẩn báo cáo Lãi gộp.',
   },
-  stocktake: { what: 'Phiếu kiểm kê: đếm thực tế, tự tính chênh lệch và điều chỉnh tồn.', on: '', off: '' },
-  unit_conversion: { what: 'Mua theo thùng, bán theo cái: quy đổi đơn vị tính.', on: '', off: '' },
-  vat: { what: 'Thuế GTGT trên phiếu bán, phiếu mua.', on: '', off: '' },
-  print_template: { what: 'Tự chỉnh mẫu in phiếu (logo, chữ ký, ghi chú cuối phiếu).', on: '', off: '' },
+  stocktake: {
+    what: 'Phiếu kiểm kê kho: nạp các mã đang có tồn, gõ số đếm được, phần mềm tính chênh lệch thừa / thiếu; ghi sổ thì tồn kho được điều chỉnh đúng bằng chênh lệch. In biên bản kiểm kê.',
+    on: 'Thêm menu Kho › Kiểm kê. Thẻ kho ghi "Kiểm kê thừa / thiếu".',
+    off: 'Ẩn menu Kiểm kê; phiếu kiểm kê đã ghi sổ vẫn tính trong tồn kho.',
+  },
+  unit_conversion: {
+    what: 'Một mặt hàng có thêm đơn vị khác đơn vị gốc (vd. 1 Thùng = 24 Lon): nhập, bán theo thùng, tồn kho vẫn tính theo đơn vị gốc.',
+    on: 'Thêm "Đơn vị quy đổi" trong hồ sơ mặt hàng; ô ĐVT trên phiếu thành ô chọn với mã có đơn vị quy đổi.',
+    off: 'ĐVT trên phiếu lại là đơn vị gốc như bản chuẩn; phiếu cũ theo thùng vẫn giữ nguyên số.',
+  },
+  vat: {
+    what: 'Thuế GTGT trên phiếu mua / bán / trả hàng: cột Thuế từng dòng, chân phiếu có Cộng tiền hàng, Tiền thuế, Tổng thanh toán; công nợ tính theo tổng thanh toán. Có Bảng kê thuế GTGT.',
+    on: 'Thêm cột Thuế trên phiếu, "Thuế suất mặc định" trong hồ sơ mặt hàng và Thông tin công ty, Bảng kê thuế GTGT ở trang Báo cáo.',
+    off: 'Phiếu mới không có thuế; phiếu đã có thuế giữ nguyên số (công nợ không đổi).',
+  },
+  print_template: {
+    what: 'Tự chỉnh mẫu in: logo, khổ giấy mặc định, dòng chân trang, ẩn cột Mã hàng / ĐVT, tên các ô ký cho từng loại phiếu.',
+    on: 'Thêm Hệ thống › Mẫu in (có xem trước).',
+    off: 'Bản in và file xuất trở lại như bản chuẩn.',
+  },
 };
 
 const qkFeatures = ['features'] as const;

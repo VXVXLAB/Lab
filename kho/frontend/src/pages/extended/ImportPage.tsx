@@ -6,8 +6,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { Dayjs } from 'dayjs';
 import { ApiError, errorMessage } from '../../api/client';
 import { importApi } from '../../api/extended';
-import type { ImportKind, ImportResult } from '../../api/types';
-import { useAccess } from '../../auth/AuthContext';
+import type { ImportKind, ImportResult, Permission } from '../../api/types';
+import { useAccess, type Access } from '../../auth/AuthContext';
 import { DateInput } from '../../components/DateInput';
 import { PageHeader } from '../../components/PageHeader';
 import { download } from '../../lib/download';
@@ -27,7 +27,29 @@ const KINDS: { key: ImportKind; label: string; what: string; cols: string }[] = 
     what: 'Thêm / sửa giá riêng của từng khách cho từng mã (theo mã khách + mã hàng). Giá riêng đã có mà không nằm trong file thì giữ nguyên.',
     cols: 'Mã khách hàng, Mã hàng, Giá, Ghi chú',
   },
+  {
+    key: 'product_units',
+    label: 'Đơn vị quy đổi',
+    what: 'Khai báo đơn vị quy đổi cho mặt hàng (vd. 1 Thùng = 24 Lon).',
+    cols: 'Mã hàng, Đơn vị, Hệ số',
+  },
 ];
+
+/** Loại dữ liệu người dùng được nhập (dùng cả để ẩn mục menu khi không có loại nào). */
+export function importKinds(a: Access, isAdmin: boolean): typeof KINDS {
+  const can = (p: Permission) => isAdmin || a.permissions.has(p);
+  return KINDS.filter((k) =>
+    k.key === 'opening_debt'
+      ? isAdmin
+      : k.key === 'opening_stock'
+        ? can('stock.write')
+        : k.key === 'partner_prices'
+          ? !!a.features.price_list && can('sale.write')
+          : k.key === 'product_units'
+            ? !!a.features.unit_conversion && can('catalog.write')
+            : can('catalog.write'),
+  );
+}
 
 type Phase = { s: 'idle' } | { s: 'checking'; pct: number } | { s: 'checked'; r: ImportResult } | { s: 'importing'; pct: number; r: ImportResult } | { s: 'done'; r: ImportResult };
 
@@ -37,15 +59,7 @@ export function ImportPage() {
   const qc = useQueryClient();
   const a = useAccess();
   const lockDate = useLockDate();
-  const kinds = KINDS.filter((k) =>
-    k.key === 'opening_debt'
-      ? a.isAdmin
-      : k.key === 'opening_stock'
-        ? a.isAdmin || a.can('stock.write')
-        : k.key === 'partner_prices'
-          ? a.on('price_list') && (a.isAdmin || a.can('sale.write'))
-          : a.isAdmin || a.can('catalog.write'),
-  );
+  const kinds = importKinds(a, a.isAdmin);
   const [kind, setKind] = useState<ImportKind>(kinds[0]?.key ?? 'products');
   const [date, setDate] = useState<Dayjs | null>(todayVn());
   const [file, setFile] = useState<File | null>(null);

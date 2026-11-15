@@ -24,17 +24,18 @@ def _():
     p = a.ok("POST", "/products", {"code": uid("UC"), "name": "Bia", "unit": "Lon", "sale_price": 10})
     pid = p["id"]
     for items, label in [([{"unit": "Thùng", "factor": 0}], "factor 0"), ([{"unit": "Thùng", "factor": -24}], "negative"),
-                         ([{"unit": "Thùng", "factor": 1.0000001}], "7 decimals"), ([{"unit": "Thùng", "factor": 1e9}], ">= 1e9"),
+                         ([{"unit": "Thùng", "factor": 1.0000001}], "7 decimals"), ([{"unit": "Vỉ", "factor": 0.5}], "factor < 1 (Q18)"),
+                         ([{"unit": "Vỉ", "factor": 0.999999}], "factor 0.999999 (Q18)"), ([{"unit": "Thùng", "factor": 1e9}], ">= 1e9"),
                          ([{"unit": "lon", "factor": 2}], "same as base unit (case)"), ([{"unit": " Lon ", "factor": 2}], "base unit with spaces"),
                          ([{"unit": "Thùng", "factor": 24}, {"unit": "THÙNG", "factor": 12}], "duplicate (case)"),
                          ([{"unit": "", "factor": 2}], "empty name"), ([{"unit": "A\u0000", "factor": 2}], "NUL"),
                          ([{"unit": "Thùng", "factor": "abc"}], "text factor"), ([{"unit": "Thùng"}], "missing factor")]:
         r = units(pid, items)
         check(r.status == 400, f"units {label}: expected 400, got {r.short()[:200]}")
-    r = units(pid, [{"unit": "Thùng", "factor": 24}, {"unit": "Lốc", "factor": 6}, {"unit": "Gram", "factor": 0.001}])
+    r = units(pid, [{"unit": "Thùng", "factor": 24}, {"unit": "Lốc", "factor": 6}, {"unit": "Két", "factor": 20.5}])
     eq(r.status, 200, "valid units")
     g = a.ok("GET", f"/products/{pid}")
-    eq(sorted((u["unit"], u["factor"]) for u in g.get("units", [])), [("Gram", 0.001), ("Lốc", 6), ("Thùng", 24)], "product JSON has units")
+    eq(sorted((u["unit"], u["factor"]) for u in g.get("units", [])), [("Két", 20.5), ("Lốc", 6), ("Thùng", 24)], "product JSON has units")
     eq(len(a.ok("GET", "/products/lookup", params={"code": p["code"]}).get("units") or []), 3, "lookup has units")
     expect_err(user("banhang").put(f"/products/{pid}/units", {"items": []}), 403, "FORBIDDEN", "banhang edits units")
     eq(user("banhang").get(f"/products/{pid}/units").status, 200, "everyone reads units")
@@ -45,9 +46,9 @@ def _():
     check(any(x["unit"] == "Thùng" and x["in_use"] for x in u["items"]), "Thùng in_use")
     expect_err(units(pid, [{"unit": "Lốc", "factor": 6}]), 409, "IN_USE", "drop a used unit")
     expect_err(units(pid, [{"unit": "Thùng", "factor": 12}, {"unit": "Lốc", "factor": 6}]), 409, "IN_USE", "change factor of a used unit")
-    r = units(pid, [{"unit": "thùng", "factor": 24}, {"unit": "Lốc", "factor": 6}, {"unit": "Két", "factor": 20}])
+    r = units(pid, [{"unit": "thùng", "factor": 24}, {"unit": "Lốc", "factor": 6}, {"unit": "Két", "factor": 20.5}])
     check(r.status in (200, 409), f"re-send used unit with other case + add a unit -> {r.status}")
-    eq(units(pid, [{"unit": "Thùng", "factor": 24}, {"unit": "Két", "factor": 20}]).status, 200, "drop unused Lốc / Gram")
+    eq(units(pid, [{"unit": "Thùng", "factor": 24}, {"unit": "Két", "factor": 20}]).status, 200, "drop unused Lốc, change unused Két")
     # change base unit with factor != 1 lines
     body = {k: g[k] for k in ("code", "name", "group_id", "sale_price", "purchase_price", "is_service", "active")}
     eq(a.put(f"/products/{pid}", {**body, "unit": "Chai"}).status, 400, "change base unit after factor lines")
@@ -68,18 +69,26 @@ def _():
     a = admin()
     k1 = wh("KHO1")
     c = mk_partner(cust=True)
-    p = prod_with_units(items=[{"unit": "Thùng", "factor": 24}, {"unit": "Vỉ", "factor": 0.333333}, {"unit": "Gram", "factor": 0.001}])
+    p = prod_with_units(items=[{"unit": "Thùng", "factor": 24}, {"unit": "Két", "factor": 2.5}])
     pid = p["id"]
     posted("opening", "2019-02-01", k1, [L(pid, 48, 600)])
     d = draft("sale", "2019-02-02", k1, [L(pid, 1, 100, unit="thùng")], c["id"])
     l = d["lines"][0]
     eq((l["unit"], l["factor"], l["base_qty"], l["base_unit"], l["amount"]), ("Thùng", 24, 24, "Lon", 100), "unit name case-insensitive, stored as declared")
-    expect_err(a.post("/documents", doc_body("sale", "2019-02-02", k1, [L(pid, 1, 100, unit="Két")], c["id"])), 400, "VALIDATION", "undeclared unit")
-    for q_, want in [(3, 1.0), (1, 0.333), (2, 0.667)]:
-        r = a.post("/documents", doc_body("sale", "2019-02-02", k1, [L(pid, q_, 1, unit="Vỉ")], c["id"]))
-        eq(r.json["lines"][0]["base_qty"] if r.status == 201 else r.status, want, f"{q_} Vỉ x 0.333333 -> base {want}")
-    r = a.post("/documents", doc_body("sale", "2019-02-02", k1, [L(pid, 0.4, 1, unit="Gram")], c["id"]))
-    eq(r.status, 400, "0.4 Gram x 0.001 = 0.0004 -> base 0 -> 400")
+    expect_err(a.post("/documents", doc_body("sale", "2019-02-02", k1, [L(pid, 1, 100, unit="Bao")], c["id"])), 400, "VALIDATION", "undeclared unit")
+    # Q18: base_qty = qty x factor must be exact to 3 decimals, otherwise 400 (no rounding)
+    for q_, unit_, want in [("0.5", "Thùng", 12), ("0.125", "Thùng", 3), ("0.333", "Két", None), ("0.002", "Két", 0.005),
+                            ("0.001", "Két", None)]:
+        r = a.post("/documents", doc_body("sale", "2019-02-02", k1, [L(pid, q_, 1, unit=unit_)], c["id"]))
+        if want is None:
+            eq(r.status, 400, f"{q_} {unit_} -> base has > 3 decimals -> 400")
+        else:
+            eq(r.json["lines"][0]["base_qty"] if r.status == 201 else r.status, want, f"{q_} {unit_} -> base {want}")
+    # 4-decimal quantities are first rounded to 3 decimals by the base rule (B12): 0.0417 -> 0.042 Thùng = 1.008 exact
+    r = a.post("/documents", doc_body("sale", "2019-02-02", k1, [L(pid, "0.0417", 1, unit="Thùng")], c["id"]))
+    if r.status == 201:
+        l = r.json["lines"][0]
+        eq((l["qty"], l["base_qty"]), (0.042, 1.008), "qty rounded to 3 decimals first (B12), base exact")
     # boundary: 48 Lon in stock; 2 Thùng exactly OK, 2.001 Thùng (48.024) short by 0.024
     chk = a.post("/documents/check", doc_body("sale", "2019-02-03", k1, [L(pid, 2, 1, unit="Thùng")], c["id"])).json
     eq(chk.get("stock_shortages"), [], "2 Thùng = 48 Lon exactly available")
@@ -99,22 +108,24 @@ def _():
 
 @test("C10", "test_C10_selling_a_case_unit_by_unit_drift")
 def _():
-    """Base unit Thùng, unit Lon = 0.041667 Thùng (1/24 at 6 decimals). Buy 1 Thùng, sell 24 Lon in 24 sales.
-    Each sale books round(0.041667, 3) = 0.042 Thùng -> after 23 sales 0.966 booked, 0.034 left < 0.042: the 24th can
-    cannot be sold although physically present. (Selling 24 Lon in ONE line books round(1.000008, 3) = 1.000.)"""
+    """(M-14 re-test, Q18) factor < 1 is refused; with base = smallest unit (Lon, Thùng = 24) buying 1 Thùng and selling
+    24 single cans empties the stock exactly; a 25th can is refused."""
     k1 = wh("KHO1")
     c = mk_partner(cust=True)
-    p = prod_with_units(base="Thùng", sale=24000, purchase=0, items=[{"unit": "Lon", "factor": 0.041667}])
-    posted("opening", "2019-03-01", k1, [L(p["id"], 1, 0)])
+    q = admin().ok("POST", "/products", {"code": uid("UC"), "name": "Thùng gốc", "unit": "Thùng", "sale_price": 1})
+    eq(units(q["id"], [{"unit": "Lon", "factor": 0.041667}]).status, 400, "factor 0.041667 (< 1) refused")
+    p = prod_with_units(base="Lon", sale=1000, purchase=0, items=[{"unit": "Thùng", "factor": 24}])
+    posted("opening", "2019-03-01", k1, [L(p["id"], 1, 0, unit="Thùng")])
     fails = []
     for i in range(24):
-        d = draft("sale", "2019-03-02", k1, [L(p["id"], 1, 1000, unit="Lon")], c["id"])
+        d = draft("sale", "2019-03-02", k1, [L(p["id"], 1, 1000)], c["id"])
         r = post_doc(d, True)
         if r.status != 200:
             fails.append((i + 1, r.status))
     check(not fails, f"selling 24 single cans out of one case: failed sales {fails}; stock left {base_stock(p['id'])} Thùng")
     st = base_stock(p["id"])
     eq(st, 0, "a case sold can by can leaves 0 (no drift)")
+    expect_err(post_doc(draft("sale", "2019-03-02", k1, [L(p["id"], 1, 1000)], c["id"]), True), 422, "INSUFFICIENT_STOCK", "25th can refused")
 
 
 @test("C10", "test_C10_prices_conversion_customer_last_sale_loss")
@@ -122,12 +133,12 @@ def _():
     a = admin()
     k1 = wh("KHO1")
     s, c = mk_partner(supp=True), mk_partner(cust=True)
-    p = prod_with_units(sale=1234.56, purchase=600, items=[{"unit": "Thùng", "factor": 24}, {"unit": "Lốc", "factor": 6}, {"unit": "Vỉ", "factor": 0.333333}])
+    p = prod_with_units(sale=1234.56, purchase=600, items=[{"unit": "Thùng", "factor": 24}, {"unit": "Lốc", "factor": 6}, {"unit": "Két", "factor": 2.5}])
     pid = p["id"]
     posted("opening", "2019-04-01", k1, [L(pid, 1000, 600)])
-    d = draft("sale", "2019-04-02", k1, [L(pid, 1, unit="Thùng"), L(pid, 1, unit="Vỉ"), L(pid, 1)], c["id"])
-    # 1234.56 x 24 = 29629.44 ; 1234.56 x 0.333333 = 411.519588 -> 411.52
-    eq([l["unit_price"] for l in d["lines"]], [29629.44, 411.52, 1234.56], "default price x factor, 2 decimals")
+    d = draft("sale", "2019-04-02", k1, [L(pid, 1, unit="Thùng"), L(pid, 1, unit="Két"), L(pid, 1)], c["id"])
+    # 1234.56 x 24 = 29629.44 ; 1234.56 x 2.5 = 3086.40
+    eq([l["unit_price"] for l in d["lines"]], [29629.44, 3086.4, 1234.56], "default price x factor, 2 decimals")
     # customer price is per base unit
     a.put(f"/partners/{c['id']}/prices", {"items": [{"product_id": pid, "price": 900}]})
     d = draft("sale", "2019-04-02", k1, [L(pid, 1, unit="Thùng"), L(pid, 1, unit="Lốc")], c["id"])
@@ -180,7 +191,7 @@ def _():
     body["version"] = r.json["version"]
     body["lines"] = [{"product_id": pid, "qty": 3, "unit_price": 25000}]
     r = a.put(f"/documents/{d['id']}", body)
-    eq((r.json["lines"][0]["unit"], r.json["lines"][0]["factor"]), ("Lon", 1), "no id + no unit -> base unit")
+    eq((r.json["lines"][0]["unit"], r.json["lines"][0]["factor"]), ("Thùng", 24), "no id + no unit, same product sequence -> stored unit kept (Q19)")
     post_doc(get_doc(d["id"]))
     old = posted("sale", "2019-05-03", k1, [L(pid, 1, 25000, unit="Thùng")], c["id"])
     before = base_stock(pid)
@@ -221,13 +232,13 @@ def _():
     a = admin()
     p = a.ok("POST", "/products", {"code": uid("UC"), "name": "Dây", "unit": "Mét", "sale_price": 10})
     hdr = ["Mã hàng", "Đơn vị", "Hệ số"]
-    r = upload(a, "product_units", xlsx_bytes(hdr, [[p["code"], "Cuộn", "100"], [p["code"], "Đoạn", "0,5"]]), dry=False)
+    r = upload(a, "product_units", xlsx_bytes(hdr, [[p["code"], "Cuộn", "100"], [p["code"], "Đoạn", "2,5"]]), dry=False)
     eq(r.status, 200, "import units: " + errs_text(import_result(r)))
-    eq(sorted((u["unit"], u["factor"]) for u in a.ok("GET", f"/products/{p['id']}/units")["items"]), [("Cuộn", 100), ("Đoạn", 0.5)], "imported")
+    eq(sorted((u["unit"], u["factor"]) for u in a.ok("GET", f"/products/{p['id']}/units")["items"]), [("Cuộn", 100), ("Đoạn", 2.5)], "imported")
     r = upload(a, "product_units", xlsx_bytes(hdr, [[p["code"], "Bó", "2.5"], ["KHONGCO", "X", 2], [p["code"], "mét", 3],
-                                                   [p["code"], "Bó", 0], [p["code"], "Cuộn", 100], [p["code"], "CUỘN", 50]]))
+                                                   [p["code"], "Bó", 0], [p["code"], "Cuộn", 100], [p["code"], "CUỘN", 50], [p["code"], "Mẩu", "0,5"]]))
     errs = {e["row"] for e in import_result(r).get("errors") or []}
-    for row, label in [(2, "'2.5' text (P6)"), (3, "unknown product"), (4, "same as base unit"), (5, "factor 0"), (7, "duplicate in file")]:
+    for row, label in [(2, "'2.5' text (P6)"), (3, "unknown product"), (4, "same as base unit"), (5, "factor 0"), (7, "duplicate in file"), (8, "factor 0,5 < 1 (Q18)")]:
         check(row in errs, f"product_units import rejects {label}: {errs_text(import_result(r))[:300]}")
     # transfer in a converted unit moves base qty between warehouses
     k1, k2 = wh("KHO1"), wh("KHO2")

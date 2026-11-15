@@ -1,6 +1,7 @@
 import { useAccess } from '../../auth/AuthContext';
 import { isLocked, LockBadge, lockDateWarning, lockTooltip, useLockDate } from '../../lib/periodLock';
 import { ReadOnlyWrap } from '../../components/ReadOnlyWrap';
+import { usePrintTemplate } from '../../lib/printTemplate';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { filterByLabel } from '../../lib/text';
 import { createPortal } from 'react-dom';
@@ -154,6 +155,8 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
   const lockDate = useLockDate();
   const lockedV = !!loaded && isLocked(loaded.voucher_date, lockDate);
   const readOnly = !canCash || lockedV;
+  // C12: khổ giấy phiếu thu chi theo mẫu in (mặc định A5)
+  const vPaper = usePrintTemplate()?.template.paper_size_voucher ?? 'A5';
   const debtVisible = (side: DebtSide) => access.isAdmin || (access.can('debt.view') && (side === 'receivable' || access.can('cost.view')));
   const sent = lines.filter((l) => !isBlank(l));
   const total = sent.reduce((s, l) => s + (l.amount ?? 0), 0);
@@ -953,7 +956,7 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
           <Modal
             open
             width={760}
-            title="Xem trước bản in (khổ A5)"
+            title={`Xem trước bản in (khổ ${vPaper})`}
             onCancel={() => setPrintOpen(false)}
             footer={
               <Space>
@@ -964,13 +967,13 @@ function VoucherEditor({ voucherId, newType, prePartnerId, preDocumentId, onCrea
               </Space>
             }
           >
-            <div className="print-preview size-A5">
+            <div className={`print-preview size-${vPaper}`}>
               <VoucherPrint v={loaded} />
             </div>
           </Modal>
           {createPortal(
-            <div id="print-root" className="size-A5">
-              <style>{'@page { size: A5 landscape; margin: 8mm; }'}</style>
+            <div id="print-root" className={`size-${vPaper}`}>
+              <style>{vPaper === 'A5' ? '@page { size: A5 landscape; margin: 8mm; }' : '@page { size: A4 portrait; margin: 12mm; }'}</style>
               <VoucherPrint v={loaded} />
             </div>,
             document.body,

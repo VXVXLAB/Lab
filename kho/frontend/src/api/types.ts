@@ -80,7 +80,7 @@ export interface PeriodLock {
   history?: { at: string; user_id?: number; user_name?: string; old_lock_date: string | null; new_lock_date: string | null; reason?: string }[];
 }
 
-export type ImportKind = 'products' | 'partners' | 'opening_stock' | 'opening_debt' | 'partner_prices';
+export type ImportKind = 'products' | 'partners' | 'opening_stock' | 'opening_debt' | 'partner_prices' | 'product_units';
 export interface ImportResult {
   kind: ImportKind;
   dry_run: boolean;

@@ -7,6 +7,7 @@ import { TradeReportView } from './TradeReportView';
 import type { ProductPick } from '../../components/ProductSelect';
 import type { AgingItem, DebtSide } from '../../api/types';
 import type { ProfitParams } from '../../api/extended';
+import type { DateRangeValue } from '../../components/DateRangeFilter';
 import { AgingItemsView, ProfitDocsView } from '../extended/ExtReports';
 import { VoucherView } from '../vouchers/VoucherView';
 import { DebtLedgerView, type PartnerRef } from '../vouchers/DebtLedgerView';
@@ -19,7 +20,8 @@ export type DrawerEntry =
   | { kind: 'debt'; partner: PartnerRef; side: DebtSide; from?: string; to?: string }
   // bản mở rộng M2
   | { kind: 'aging'; item: AgingItem; asOf: string }
-  | { kind: 'profit'; title: string; params: ProfitParams };
+  | { kind: 'profit'; title: string; params: ProfitParams }
+  | { kind: 'tradeRange'; report: 'sales' | 'purchases'; title: string; range: DateRangeValue };
 
 interface Ctx {
   push: (e: DrawerEntry) => void;
@@ -51,6 +53,7 @@ function titleOf(e: DrawerEntry): string {
     case 'aging':
       return `Khoản còn nợ — ${e.item.partner_code} ${e.item.partner_name}`;
     case 'profit':
+    case 'tradeRange':
       return e.title;
   }
 }
@@ -112,6 +115,7 @@ export function DrawerStackProvider({ children }: { children: ReactNode }) {
           {e.kind === 'debt' && <DebtLedgerView partner={e.partner} side={e.side} initialFrom={e.from} initialTo={e.to} />}
           {e.kind === 'aging' && <AgingItemsView item={e.item} asOf={e.asOf} />}
           {e.kind === 'profit' && <ProfitDocsView params={e.params} />}
+          {e.kind === 'tradeRange' && <TradeReportView kind={e.report} inDrawer initialRange={e.range} initialReturns />}
         </Drawer>
       ))}
     </DrawerCtx.Provider>

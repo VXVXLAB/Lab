@@ -29,9 +29,14 @@ export function TradeReportView({
   inDrawer = false,
   initialProduct = null,
   initialPreset,
+  initialRange,
+  initialReturns,
   pageTitle,
   pageSub,
 }: {
+  /** Khoảng ngày ban đầu (mở từ bảng kê thuế) */
+  initialRange?: DateRangeValue;
+  initialReturns?: boolean;
   pageTitle?: string;
   pageSub?: string;
   kind: 'sales' | 'purchases';
@@ -44,12 +49,12 @@ export function TradeReportView({
   const groups = useAllGroups();
   const whs = useWarehouses();
   const isSales = kind === 'sales';
-  const [range, setRange] = useState<DateRangeValue>({ preset: initialPreset ?? (fixedProduct ? 'all' : 'month'), range: [null, null] });
+  const [range, setRange] = useState<DateRangeValue>(initialRange ?? { preset: initialPreset ?? (fixedProduct ? 'all' : 'month'), range: [null, null] });
   const [partner, setPartner] = useState<PartnerLite | null>(null);
   const [product, setProduct] = useState<ProductPick | null>(fixedProduct ?? initialProduct);
   const [groupId, setGroupId] = useState<number | undefined>();
   const [warehouseId, setWarehouseId] = useState<number | undefined>();
-  const [withReturns, setWithReturns] = useState(false);
+  const [withReturns, setWithReturns] = useState(initialReturns ?? false);
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 300);
   const [from, to] = rangeOf(range);

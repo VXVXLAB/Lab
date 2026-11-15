@@ -34,6 +34,8 @@ import { PermissionsPage } from './pages/extended/PermissionsPage';
 import { PeriodLockPage } from './pages/extended/PeriodLockPage';
 import { ImportPage } from './pages/extended/ImportPage';
 import { DebtAgingPage, LowStockPage, ProfitPage } from './pages/extended/ExtReports';
+import { AuditPage, PrintTemplatePage, VatSummaryPage } from './pages/extended/M3Pages';
+import { importKinds } from './pages/extended/ImportPage';
 import type { Need } from './auth/guard';
 
 export { paths };
@@ -134,7 +136,7 @@ export const menu: MenuGroup[] = [
       { path: paths.suppliers, label: 'Nhà cung cấp', element: <PartnersPage type="supplier" /> },
       { path: paths.warehouses, label: 'Kho', element: <WarehousesPage /> },
       { path: paths.cashAccounts, label: 'Tài khoản tiền', element: <CashAccountsPage /> },
-      { path: paths.importExcel, label: 'Nhập từ Excel', element: <ImportPage />, need: { feature: 'import_excel', any: ['catalog.write', 'stock.write', 'sale.write'] } },
+      { path: paths.importExcel, label: 'Nhập từ Excel', element: <ImportPage />, need: { feature: 'import_excel', check: (a, isAdmin) => importKinds(a, isAdmin).length > 0 } },
       // quản trị bật/tắt tính năng mở rộng: có ở CẢ bản chuẩn (để bản chuẩn bật được tính năng)
       { path: paths.features, label: 'Tính năng mở rộng', element: <FeaturesPage />, adminOnly: true },
     ],
@@ -149,6 +151,9 @@ export const menu: MenuGroup[] = [
       { path: paths.company, label: 'Thông tin công ty', element: <CompanySettingsPage />, adminOnly: true },
       { path: paths.rolePermissions, label: 'Phân quyền', element: <PermissionsPage />, adminOnly: true, need: { feature: 'permissions' } },
       { path: paths.periodLock, label: 'Khóa sổ', element: <PeriodLockPage />, adminOnly: true, need: { feature: 'period_lock' } },
+      { path: paths.printTemplate, label: 'Mẫu in', element: <PrintTemplatePage />, adminOnly: true, need: { feature: 'print_template' } },
+      // chỉ ở bản mở rộng (có tính năng nào bật) để bản chuẩn giữ nguyên
+      { path: paths.audit, label: 'Nhật ký thay đổi', element: <AuditPage />, adminOnly: true, need: { check: (a) => Object.values(a.features).some(Boolean) } },
     ],
   },
   {
@@ -170,6 +175,7 @@ export const hiddenScreens: ScreenDef[] = [
   { path: paths.lowStock, label: 'Hàng dưới mức tối thiểu', element: <LowStockPage />, need: { feature: 'min_stock' } },
   { path: paths.debtAging, label: 'Tuổi nợ phải thu', element: <DebtAgingPage />, need: { feature: 'credit_limit', all: ['debt.view'] } },
   { path: paths.profit, label: 'Lãi gộp', element: <ProfitPage />, need: { feature: 'profit_report', all: ['report.view', 'cost.view'] } },
+  { path: paths.vatSummary, label: 'Bảng kê thuế GTGT', element: <VatSummaryPage />, need: { feature: 'vat', all: ['report.view'] } },
 ];
 
 export function allScreens(): (ScreenDef & { groupKey?: string; groupLabel?: string })[] {

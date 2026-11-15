@@ -456,3 +456,22 @@ td.col-code { font-weight: 500; font-variant-numeric: tabular-nums; white-space:
 .dlg-figs td { padding: 2px 16px 2px 0; }
 .profit-how { margin-bottom: 8px; }
 .price-add { margin-bottom: 10px; }
+
+/* ---------- Bản mở rộng (M3) ---------- */
+.cell-select { width: 100%; border: 0; background: transparent; padding: 2px 0; font: inherit; }
+.cell-select:focus { outline: 2px solid #1677ff; background: #fff; }
+.ps-logo { max-height: 56px; max-width: 200px; float: left; margin: 0 12px 4px 0; }
+.ps-footer-line { margin-top: 10px; text-align: center; font-style: italic; }
+.units-editor .unit-row { display: flex; margin-bottom: 4px; }
+.vat-side { margin-bottom: 14px; }
+.vat-side h3 { margin: 6px 0; font-size: 15px; }
+.vat-area { overflow: auto; }
+.tpl-layout { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.tpl-form { flex: 1 1 420px; min-width: 320px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 16px; }
+.tpl-form section { margin: 8px 0 14px; }
+.tpl-form h4 { margin: 0 0 6px; }
+.tpl-logo { max-height: 48px; max-width: 160px; border: 1px solid #eee; }
+.tpl-sign-row { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.tpl-sign-label { width: 150px; flex: none; font-size: 13px; }
+.tpl-preview { flex: 1 1 480px; min-width: 320px; overflow: auto; }
+.tpl-preview .print-preview { margin-top: 8px; }

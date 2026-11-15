@@ -1,5 +1,6 @@
 // Kiểm tra gộp ba chiều theo id dòng (F-10): npm run test:merge
 import { applyMerge, threeWay, type MergeChoice, type MergeField } from '../src/lib/merge3';
+import { DOC_FIELDS, type LineDraft } from '../src/pages/documents/draft';
 
 interface L {
   key: string;
@@ -147,6 +148,27 @@ const T = (l: L): L => ({ ...l, key: `t${l.id ?? l.key}` });
   const base = [s(1, 'A', 1, 10)];
   const r = run(base, [base[0]!, nw('m3', 'A', 1, 10)], [T(s(1, 'A', 1, 10))]);
   eq('dòng không id giống hệt ⇒ vẫn thêm', r.out, ['1|A:1@10', 'mới|A:1@10']);
+}
+// 14. trường mới M3 trên dòng phiếu thật (DOC_FIELDS): thuế suất, đơn vị + hệ số, SL thực tế kiểm kê
+{
+  const P = { id: 5, code: 'LON', name: 'Lon', unit: 'Lon', is_service: false };
+  const D = (key: string, id: number, o: Partial<LineDraft>): LineDraft => ({
+    key, id, product: P, codeText: 'LON', description: '', unit: 'Lon', qty: 1, unit_price: 100, note: '', ...o,
+  });
+  const runD = (base: LineDraft[], mine: LineDraft[], theirs: LineDraft[], ch: Record<string, MergeChoice> = {}) => {
+    const items = threeWay({ base, mine, theirs, fields: DOC_FIELDS });
+    return { items, out: applyMerge(theirs, items, ch, DOC_FIELDS, k) };
+  };
+  const base = [D('b1', 1, { vat_rate: 10 })];
+  let r = runD(base, [D('b1', 1, { vat_rate: 8 })], [D('t1', 1, { vat_rate: 10, qty: 3 })]);
+  eq('thuế suất của tôi + SL của máy kia', r.out.map((l) => [l.qty, l.vat_rate]), [[3, 8]]);
+  r = runD(base, [D('b1', 1, { vat_rate: 10, unit: 'Thùng', factor: 24, unit_price: 2400 })], [D('t1', 1, { vat_rate: 5 })]);
+  eq('đơn vị + hệ số của tôi, thuế của máy kia', r.out.map((l) => [l.unit, l.factor, l.unit_price, l.vat_rate]), [['Thùng', 24, 2400, 5]]);
+  r = runD(base, [D('b1', 1, { vat_rate: 10, unit: 'Thùng', factor: 24 })], [D('t1', 1, { vat_rate: 10, unit: 'Két', factor: 12 })]);
+  eq('hai máy cùng đổi đơn vị ⇒ hỏi "Cùng sửa: ĐVT"', r.items.map((i) => i.conflicts.map((c) => c.label)), [['ĐVT']]);
+  const sb = [D('b1', 1, { qty: null, unit_price: null })];
+  r = runD(sb, [D('b1', 1, { qty: 9, unit_price: null })], [D('t1', 1, { qty: 7, unit_price: null })]);
+  eq('kiểm kê: hai máy đếm khác nhau ⇒ hỏi "Cùng sửa: SL"', r.items.map((i) => i.conflicts.map((c) => [c.label, c.theirs, c.mine])), [[['SL', '7', '9']]]);
 }
 if (fail) {
   console.error(`${fail} trường hợp sai`);

@@ -443,3 +443,54 @@ kiểm kê 8 ⇒ tồn 8.
 Bản in trên giao diện (khổ A4/A5, logo trên trang in) — chỉ kiểm được file xuất; nâng cấp CSDL M2 → M3 có dữ liệu sẵn
 (test luôn dùng CSDL mới); TLS 1.0/1.1 phụ thuộc OpenSSL của máy kiểm (có thể chính máy khách từ chối); chứng thư hết hạn;
 hành vi "bật thuế + máy khách không gửi id" (xem M-16); hiệu năng M3 ở quy mô lớn.
+
+---
+
+# VÒNG 4 — kiểm lại M-13…M-16 theo quy tắc mới (commit `3ea062c`, binary 09:35)
+
+Quy tắc mới (API §11 đầu mục, QUYET_DINH Q17–Q19): `to_warehouse_id` chỉ trên chuyển kho; hệ số quy đổi ≥ 1 và
+`SL × hệ số` phải đúng tới 3 chữ số (không làm tròn); PUT mà **mọi** dòng không có `id` trên phiếu có dòng mang hệ số ≠ 1 /
+thuế suất / giá bị che ⇒ ghép theo vị trí khi cùng dãy mặt hàng, khác ⇒ `400 LINE_IDS_REQUIRED`. Tệp mới `mr_r4.py`;
+`mr_m3_c10.py` đổi dữ liệu (Lon/Thùng 24, Gram/Kg 1000, Két 2,5 / 20,5 thay cho các hệ số < 1), kỳ vọng "không id ⇒ đơn
+vị gốc" đổi thành "giữ đơn vị đang lưu".
+
+## A. Số liệu (`./run_mr.sh` 2 lần, giống nhau)
+
+| Pha | Test | PASS | FAIL | Check | Check lỗi | HTTP 5xx | panic |
+|---|---|---|---|---|---|---|---|
+| Bản mở rộng | 143 | 141 | 2 | ≈4.951 | 4 | **0** | 0 |
+| Bản chuẩn | 6 | 6 | 0 | 145 | 0 | **0** | 0 |
+
+Bộ QA bản chuẩn 45 test: bản chuẩn **45/45** (16.785 check, 0 × 5xx); `KHO_EDITION=extended` **44/45** — vẫn chỉ khác biệt
+hợp lệ của C6 (giá bán gần nhất cho khách 1.000.000 thay giá mặc định 1.090.000), như vòng 3.
+
+## B. Kết luận
+
+| Lỗi | Kết luận | Đã kiểm |
+|---|---|---|
+| M-13 | **Đã sửa** | `to_warehouse_id` khác null trên bán, khách trả, mua, trả NCC, tồn đầu, kiểm kê ⇒ 400 (cả POST và PUT thêm vào); `null` ⇒ 201; chuyển kho bình thường. |
+| M-14 | **Đã sửa** | Hệ số 0,5 / 0,999999 ⇒ 400, 1,000001 / 999.999.999 nhận, nhập Excel "0,01" ⇒ lỗi dòng; dòng: 0,5 Kg = 500 g, 0,001 Kg = 1 g, 0,125 Kg = 125 g, 0,002 Gói (20,5) = 0,041, 3 Gói = 61,5 ⇒ nhận và `base_qty = qty × hệ số` chính xác; 0,001 / 0,333 Gói, 0,333 Két (2,5) ⇒ 400 có thông báo tiếng Việt; 12 phiếu × 0,125 Kg làm hết đúng 1.500 g; 24 phiếu × 1 Lon hết đúng 1 Thùng, Lon thứ 25 ⇒ 422; trả hàng / chuyển kho / kiểm kê theo đơn vị (0,25 Kg; 0,1 Kg = 100 g; 0,2 Kg = 200 g) đạt, 0,001 Gói trên kiểm kê ⇒ 400. Ghi chú: SL nhập 4 chữ số (`1.0005` Kg, `0.0417` Thùng) vẫn bị làm tròn 3 chữ số **trước** (quy tắc B12 bản chuẩn) rồi mới quy đổi đúng — không phải lỗi mới. Không kiểm được "dòng cũ không kiểm lại" vì không còn cách tạo dòng hệ số < 1 qua API. |
+| M-15 | **Đã sửa** (trường hợp mọi dòng không id) | Phiếu đã ghi sổ [P 2 Thùng 10%, Q 3 Cái, P 5 Lon]: lưu lại chỉ đổi ghi chú, không id, không `vat_rate`, ở **4 tổ hợp** bật/tắt `vat` × `unit_conversion` ⇒ 200, đơn vị / hệ số / thuế giữ theo vị trí; tồn, sổ công nợ (từng dòng), báo cáo mua/bán, lãi gộp, NXT, bảng kê thuế **không đổi**. Đảo thứ tự / bỏ dòng / thêm dòng / đổi mặt hàng một vị trí ⇒ `400 LINE_IDS_REQUIRED`, thông báo tiếng Việt, **version và dòng không đổi**. Có id thì đảo / bỏ dòng thoải mái và giữ trường. Kiểm kê có dòng Thùng lưu lại không id ⇒ giữ 96. Phiếu thường (không hệ số / thuế / giá che) giữ hành vi cũ (dòng không id = dòng mới, đổi thứ tự được). |
+| M-16 | **Đã sửa** (trường hợp mọi dòng không id) | Thuế 10% gửi tay trên mặt hàng không có thuế mặc định, máy khách cũ lưu lại khi **bật** thuế ⇒ giữ 10%, tổng 220, công nợ 220; đổi thuế mặc định mặt hàng sang 5% rồi lưu lại ⇒ vẫn 10%. Người bị che giá (`thukho` có `purchase.write`) lưu phiếu tạm mua không id cùng dãy ⇒ giữ 5.555 / 6.666; đảo / bỏ dòng ⇒ 400, giá giữ nguyên. |
+
+## C. Lỗi mới
+
+### M-17 — Trung bình — BUG (M-15/M-16 chưa kín): body **trộn** — dòng có id và dòng không id — làm mất thuế (và giá che / hệ số) của dòng không id
+Phiếu đã ghi sổ [P 2 Thùng × 24.000 thuế 10%, Q 3 × 500, P 5 Lon × 1.000] = 59.300. PUT chỉ đổi ghi chú, dòng Q gửi kèm
+`id`, hai dòng P **không** `id` (có `unit`, không `vat_rate`) ⇒ `200`; dòng Thùng mất thuế suất ⇒ tổng **54.500**, phải thu
+của khách giảm 4.800 — chỉ vì sửa ghi chú. Quy tắc Q19 chỉ áp dụng khi **mọi** dòng không id; một giao diện ghép xung đột
+(hoặc máy khách gửi id cho dòng nó biết, bỏ id dòng nó vừa chép) rơi đúng vào kẽ hở này. Nếu không gửi `unit` thì hệ số
+cũng mất; với người bị che giá thì giá cũng mất theo đúng cách đó. Đề nghị: dòng không id trong body có id lẫn lộn mà
+phiếu có dữ liệu "có thể mất" ⇒ cũng `400 LINE_IDS_REQUIRED`, hoặc ghép các dòng không id vào các dòng cũ chưa được
+nhận theo vị trí / mặt hàng.
+
+### M-18 — Thấp/Trung bình — BUG: ghép theo vị trí bỏ qua đơn vị gửi lên ⇒ thuế "nhảy" sang dòng khác
+Phiếu tạm [P 2 Thùng × 24.000 thuế 10%, Q, P 5 Lon × 1.000]. Máy khách cũ gửi lại không id theo thứ tự **đảo ngược**
+[P 5 Lon, Q, P 2 Thùng] (cùng dãy mặt hàng P, Q, P) ⇒ `200`; ghép theo vị trí giữ thuế 10% ở **vị trí 1** — nay là dòng
+5 Lon × 1.000 — còn dòng 2 Thùng mất thuế: tiền thuế 4.800 → 500, tổng phiếu đổi, không báo gì. Đơn vị gửi lên ở mọi vị trí
+đều khác đơn vị đang lưu nên máy chủ có đủ thông tin để nhận ra đây không phải "cùng dòng". Đề nghị: khi ghép theo vị
+trí, đơn vị (nếu gửi) phải trùng đơn vị đang lưu, khác ⇒ `400 LINE_IDS_REQUIRED`.
+
+## D. Còn chưa kiểm được
+Dòng hệ số < 1 tạo trước bản sửa (không còn tạo được qua API) — "không kiểm lại dòng cũ không đổi" chỉ kiểm được với dòng
+hợp lệ.

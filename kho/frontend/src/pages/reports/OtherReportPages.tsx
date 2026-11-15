@@ -218,6 +218,13 @@ export function ReportsHub() {
         { title: 'Lịch sử bán theo mặt hàng', desc: 'Một mã đã bán cho ai, lúc nào, giá bao nhiêu.', to: paths.salesHistory, icon: <HistoryOutlined />, need: { all: ['report.view'] } },
         { title: 'Chi tiết mua hàng', desc: 'Từng dòng hàng đã nhập mua: nhà cung cấp, giá mua.', to: paths.purchasesReport, icon: <ShopOutlined />, need: { all: ['report.view', 'cost.view'] } },
         {
+          title: 'Bảng kê thuế GTGT',
+          desc: 'Bán ra, mua vào theo từng thuế suất: tiền hàng, tiền thuế, tổng thanh toán.',
+          to: paths.vatSummary,
+          icon: <BarChartOutlined />,
+          need: { feature: 'vat', all: ['report.view'] },
+        },
+        {
           title: 'Lãi gộp',
           desc: 'Doanh thu − giá vốn theo phiếu, theo mặt hàng, theo khách; giá vốn bình quân sau mỗi lần nhập.',
           to: paths.profit,

@@ -2,7 +2,7 @@ import { useDocAccess } from '../../auth/guard';
 import type { DocumentFull } from '../../api/types';
 import { formatDate, formatDateTime, formatMoney, formatQty } from '../../lib/format';
 import { useSettings } from '../../api/hooks';
-import { signersOf, usePrintTemplate } from '../../lib/printTemplate';
+import { signersOf, usePrintTemplate, type ActiveTemplate } from '../../lib/printTemplate';
 import { PrintLogo, PrintFooter } from '../../components/PrintExtras';
 
 const SIGNERS: Record<DocumentFull['doc_type'], string[]> = {
@@ -19,7 +19,7 @@ const SIGNERS: Record<DocumentFull['doc_type'], string[]> = {
  * Bản in phiếu (A4/A5 qua hộp thoại in của trình duyệt). Luôn in từ dữ liệu ĐÃ LƯU trên máy chủ.
  * Phiếu tạm in tiêu đề "PHIẾU TẠM (chưa ghi sổ)"; phiếu chính thức chỉ có khi đã ghi sổ.
  */
-export function PrintSheet({ doc }: { doc: DocumentFull }) {
+export function PrintSheet({ doc, tplOverride }: { doc: DocumentFull; /** Xem trước mẫu in chưa lưu (màn Mẫu in) */ tplOverride?: ActiveTemplate | null }) {
   // bản mở rộng: giá vốn / công nợ bị che ⇒ bỏ cột giá, Nợ cũ/Tổng nợ (khớp file xuất của máy chủ)
   const cfg = useDocAccess(doc.doc_type).cfg;
   const co = useSettings().data;
@@ -28,7 +28,8 @@ export function PrintSheet({ doc }: { doc: DocumentFull }) {
   const hasNotes = doc.lines.some((l) => l.note);
   const goodsQty = doc.lines.filter((l) => !l.is_service).reduce((s, l) => s + l.qty, 0);
   // ---- bản mở rộng M3 ----
-  const tpl = usePrintTemplate();
+  const tplSaved = usePrintTemplate();
+  const tpl = tplOverride !== undefined ? tplOverride : tplSaved;
   const showCode = !tpl?.template.hide_code_column;
   const showUnit = !tpl?.template.hide_unit_column;
   const stocktake = doc.doc_type === 'stocktake';

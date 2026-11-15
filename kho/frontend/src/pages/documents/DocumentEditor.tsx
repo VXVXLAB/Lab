@@ -28,6 +28,7 @@ import { qk } from '../../api/queryKeys';
 import type { CreditWarning, SalePriceItem, DocType, DocumentFull, LossWarning, PriceInfoWh, Shortage, VersionConflictDetails, Warehouse } from '../../api/types';
 import { useAccess, useCurrentUser } from '../../auth/AuthContext';
 import { priceListApi, stocktakeApi, unitsApi, vatApi } from '../../api/extended';
+import { usePrintTemplate } from '../../lib/printTemplate';
 import { VAT_OPTIONS, type GridExt } from './LineGrid';
 import { partnersApi } from '../../api/catalog';
 import { docAccess } from '../../auth/guard';
@@ -155,6 +156,7 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [printSize, setPrintSize] = useState<'A4' | 'A5'>('A4');
+  const docTpl = usePrintTemplate();
   const [focusReq, setFocusReq] = useState<{ key: string; col: Col; n: number } | null>(null);
   const [showNoteSetting, setShowNote] = useState(() => storage.get(NOTE_KEY) === '1');
   const showNote = showNoteSetting || lines.some((l) => l.note.trim());
@@ -1061,7 +1063,9 @@ export function DocumentEditor({ docId, newType, onCreated }: EditorProps) {
     return false;
   };
   const openPrint = () => {
-    if (!needSavedFirst('in')) setPrintOpen(true);
+    if (needSavedFirst('in')) return;
+    if (docTpl) setPrintSize(docTpl.template.paper_size_document); // C12: khổ giấy theo mẫu in
+    setPrintOpen(true);
   };
   const exportFile = (f: 'xlsx' | 'docx') => {
     if (loaded && !needSavedFirst('xuất file')) download(documentsApi.exportUrl(loaded.id, f));
